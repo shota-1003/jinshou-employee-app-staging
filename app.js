@@ -5001,7 +5001,12 @@ function createEntCompanyList(containerId, addBtnId, summaryId, getOurCount) {
     recalcSummary();
   }
 
-  document.getElementById(addBtnId).addEventListener('click', addBlock);
+  // resetEntertainmentForm()は画面へ入るたびに呼ばれ、そのたびにcreateEntCompanyList()が
+  // 再実行される(=このボタン要素自体は使い回される)。addEventListenerだと呼ぶたびに
+  // リスナーが積み重なり、2回目以降の画面訪問で「＋追加」1クリックで複数ブロックが
+  // 追加される不具合になる(実機検証で発見)。onclick代入は常に直前の1件だけを置き換えるため、
+  // 同じ要素へ何度re-initしても安全。
+  document.getElementById(addBtnId).onclick = addBlock;
 
   return {
     reset() { container.innerHTML = ''; seq = 0; addBlock(); },
