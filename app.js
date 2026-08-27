@@ -73,6 +73,18 @@ function todayJST() {
   return `${y}-${m}-${d}`;
 }
 
+// 2026-08-28: 管理者お知らせ管理画面で、DB側の列欠落(list_announcements_admin、
+// database/supabase/202608280732_list-announcements-admin-column-fix.sql参照)により
+// 「自動通知(undefined)・確認済みundefined/3」のような生のundefinedがそのまま画面へ出た
+// 実例が見つかった。DB側は修正したが、同種の欠損値(null/undefined/NaN)が将来別の箇所で
+// 再発してもユーザーへ生の値を見せないよう、テンプレート内で値を直接補間する箇所は
+// このヘルパーを通す(値があればそのまま、無ければfallbackを返すだけの薄い関数)。
+function safeText(val, fallback = '') {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val === 'number' && Number.isNaN(val)) return fallback;
+  return val;
+}
+
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -3323,7 +3335,7 @@ async function loadAnnounceAdminList() {
     listEl.innerHTML = rows.map((a) => `
       <div class="announce-admin-item" data-id="${a.id}" data-title="${a.title.replace(/"/g, '&quot;')}">
         <div class="row1"><span>${a.importance === 'important' ? `<span class="icon-slot" data-icon="alert-triangle"></span> ` : ''}${a.title}</span><span>${a.read_count}/${a.recipient_count} 既読</span></div>
-        <div class="row2">${new Date(a.created_at).toLocaleString('ja-JP')}${a.source_system !== 'admin_manual' ? `・自動通知(${a.source_system})` : ''}${a.importance === 'important' ? `・確認済み${a.acknowledged_count}/${a.recipient_count}` : ''}</div>
+        <div class="row2">${new Date(a.created_at).toLocaleString('ja-JP')}${a.source_system && a.source_system !== 'admin_manual' ? `・自動通知(${safeText(a.source_system, '不明')})` : ''}${a.importance === 'important' ? `・確認済み${safeText(a.acknowledged_count, 0)}/${safeText(a.recipient_count, 0)}` : ''}</div>
       </div>
     `).join('');
     hydrateIcons(listEl);
