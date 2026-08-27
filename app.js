@@ -525,6 +525,7 @@ function enterMenu() {
   renderHomeDailyReportStatusBanner(session);
   renderHomeMonthStats(session);
   renderHomeLeaveCard(session);
+  renderHomeStatusSummaryCard(session);
   renderHomeUpcomingEvents(session);
   renderHomeEventsArea(session);
 }
@@ -569,6 +570,22 @@ async function renderHomeLeaveCard(session) {
     const rows = await rpc('get_leave_summary', { p_employee_code: session.employeeCode });
     const b = rows && rows[0];
     descEl.textContent = b && b.has_active_period ? `今年度 使用${b.used_this_period}日・残り${b.remaining_this_period}日` : '残日数を確認・申請する';
+  } catch (e) { /* 取れなくても遷移自体はできる */ }
+}
+
+// ホーム「在席状況」カードに、タップせずとも一目で分かる現在人数のサマリーを表示する
+// (2026-08-28、ユーザー指示: 「勤務中○名/外出中○名/遅刻○名/早退○名」の形式で、ホームを
+// 情報過多にしないよう既存の在席状況カードの説明文だけを動的に差し替える。新しい行や
+// セクションは追加しない)。get_employee_status_board_generalは既にセンシティブな理由等を
+// 返さない設計のため、そのまま再利用して件数だけ集計する(新規RPCは追加しない)。
+async function renderHomeStatusSummaryCard(session) {
+  const descEl = document.getElementById('home-status-summary-desc');
+  if (!descEl) return;
+  try {
+    const rows = await rpc('get_employee_status_board_general', { p_employee_code: session.employeeCode });
+    const counts = { working: 0, out: 0, late: 0, early_left: 0 };
+    (rows || []).forEach((r) => { if (counts[r.current_state] !== undefined) counts[r.current_state] += 1; });
+    descEl.textContent = `勤務中${counts.working}・外出中${counts.out}・遅刻${counts.late}・早退${counts.early_left}`;
   } catch (e) { /* 取れなくても遷移自体はできる */ }
 }
 
