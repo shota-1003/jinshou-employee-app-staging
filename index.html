@@ -17,12 +17,12 @@
 <body>
 <!-- 2026-08-28: Staging/Production取り違え防止。IS_STAGING=trueのビルドでのみJSが
      表示を有効化する(index.html自体はStaging/Production共通のため、初期状態は非表示)。 -->
-<div id="staging-banner" class="staging-banner" style="display:none;">STAGING｜アップデート・テスト用環境｜本番ではありません</div>
+<div id="staging-banner" class="staging-banner">STAGING｜アップデート・テスト用環境｜本番ではありません</div>
 <header class="app-header">
   <img src="brand/logo-gold.png" alt="迅翔興業" class="app-header-logo">
   <span class="app-header-title" id="app-header-title">社員ポータル</span>
 </header>
-<div id="staging-build-info" class="staging-build-info" style="display:none;">
+<div id="staging-build-info" class="staging-build-info">
   Environment: STAGING｜Build: <span id="staging-build-version">-</span>｜更新: <span id="staging-build-time">-</span>
 </div>
 <main>
