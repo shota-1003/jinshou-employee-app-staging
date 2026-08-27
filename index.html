@@ -2,10 +2,2717 @@
 <html lang="ja">
 <head>
 <meta charset="utf-8">
-<title>迅翔興業 社員ポータル(Staging)</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>迅翔興業 社員ポータル</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32-v2.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16-v2.png">
+<link rel="apple-touch-icon" href="icons/app-icon-180-v2.png">
+<meta name="theme-color" content="#12213f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
-<p>Staging環境の準備中です。Staging Supabaseのプロビジョニング完了後、
-node scripts/deploy-employee-portal-staging.js が実アプリを自動デプロイします。</p>
+<header class="app-header">
+  <img src="brand/logo-gold.png" alt="迅翔興業" class="app-header-logo">
+  <span class="app-header-title">社員ポータル</span>
+</header>
+<main>
+
+  <!-- ログイン画面(社員番号入力、初回またはログイン先切り替え時のみ) -->
+  <section id="screen-login" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company">株式会社 迅翔興業</div>
+      <div class="card">
+        <label for="login-code">社員番号</label>
+        <input type="text" id="login-code" inputmode="numeric" placeholder="例: 0001" autocomplete="off">
+        <div class="hint">最初の1回だけ入力すれば、次回から社員番号の入力は不要になります(暗証番号でログインします)。</div>
+        <div class="error" id="login-error">社員番号が確認できませんでした。</div>
+        <button id="login-btn">次へ</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 暗証番号入力画面(2回目以降、端末が社員番号を記憶している場合) -->
+  <section id="screen-pin-entry" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company" id="pin-entry-name">読み込み中...</div>
+      <div class="card">
+        <label for="pin-entry-code">暗証番号を入力してください</label>
+        <input type="password" id="pin-entry-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        <div class="error" id="pin-entry-error"></div>
+        <button id="pin-entry-submit">ログイン</button>
+        <button class="link" id="pin-entry-switch">別の社員番号でログイン</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 暗証番号登録画面(初回、または管理者リセット後) -->
+  <section id="screen-pin-register" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company" id="pin-register-name">初めての方へ</div>
+      <div class="card">
+        <div class="hint" style="margin-bottom:14px;">今後ログインに使う暗証番号(4〜6桁の数字)を設定してください。次回からはこの暗証番号だけでログインできます。</div>
+        <label for="pin-register-code">暗証番号(4〜6桁)</label>
+        <input type="password" id="pin-register-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        <label for="pin-register-confirm">確認のためもう一度入力</label>
+        <input type="password" id="pin-register-confirm" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        <div class="error" id="pin-register-error"></div>
+        <button id="pin-register-submit">登録してログイン</button>
+        <button class="link" id="pin-register-switch">別の社員番号でログイン</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- メニュー画面(ホーム)。ここには個別の申請フォームを直接置かず、「今日やること」+
+       大きなカテゴリーカード(申請/自分の情報/会社/管理者)だけを表示する。各カテゴリーを
+       タップした先の専用画面で、初めてそのカテゴリーの中身(フォーム一覧等)を表示する構造。 -->
+  <section id="screen-menu" class="screen">
+    <div class="greeting-block">
+      <div class="greeting-hi" id="menu-greeting-hi"></div>
+      <div class="greeting-name" id="menu-greeting-name"></div>
+      <div class="greeting-sub" id="menu-greeting-sub"></div>
+    </div>
+
+    <div id="announce-banner-area"></div>
+
+    <div class="home-announce-header">
+      <div class="section-title">会社からのお知らせ</div>
+      <button type="button" class="see-all" data-nav="announcements">すべて見る<span class="icon-slot" data-icon="chevron-right"></span></button>
+    </div>
+    <div class="home-announce-block" id="home-announce-block"></div>
+
+    <div id="home-daily-report-status-banner" class="today-item" style="cursor:pointer;display:none;">
+      <span class="today-item-icon"><span class="icon-slot" data-icon="clipboard-list"></span></span>
+      <div class="today-item-body">
+        <div class="today-item-label" id="home-daily-report-status-label">本日の日報</div>
+        <div class="today-item-count" id="home-daily-report-status-detail"></div>
+      </div>
+      <span class="today-item-arrow"><span class="icon-slot" data-icon="chevron-right"></span></span>
+    </div>
+    <button type="button" class="link" id="home-daily-report-mark-rest-btn" style="display:none;margin:2px 0 0 44px;">今日は休みとして登録する</button>
+
+    <div class="section-title">今月の状況</div>
+    <div class="stat-mini-row" id="home-month-stats" style="cursor:pointer;"></div>
+    <div class="home-card-grid" style="margin-bottom:12px;">
+      <button type="button" class="home-card" data-nav="my-daily-reports">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">日報履歴・カレンダー</span>
+        <span class="home-card-desc">提出履歴と月間カレンダー</span>
+      </button>
+      <button type="button" class="home-card" data-nav="leave">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label" id="home-leave-label">休暇申請</span>
+        <span class="home-card-desc" id="home-leave-desc">残日数を確認・申請する</span>
+      </button>
+    </div>
+
+    <div id="home-upcoming-events-area"></div>
+
+    <div class="section-title">今日やること</div>
+    <div class="today-list" id="today-list"></div>
+
+    <div class="section-title">よく使う機能</div>
+    <div class="home-card-grid">
+      <button type="button" class="home-card" id="home-daily-report-card" data-nav="daily-report">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label" id="home-daily-report-label">日報</span>
+        <span class="home-card-desc" id="home-daily-report-desc">今日の現場・勤務区分</span>
+      </button>
+      <button type="button" class="home-card" data-nav="expense">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <span class="home-card-label">経費</span>
+        <span class="home-card-desc">立替・会社経費</span>
+      </button>
+      <button type="button" class="home-card" data-nav="leave">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">有給休暇</span>
+        <span class="home-card-desc">休みを申請する</span>
+      </button>
+      <button type="button" class="home-card" data-nav="joyo-denpyo-list">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">常用伝票</span>
+        <span class="home-card-desc">現場伝票を作成・確認</span>
+      </button>
+      <button type="button" class="home-card" data-nav="supply-request">
+        <span class="icon-slot" data-icon="package"></span>
+        <span class="home-card-label">支給品</span>
+        <span class="home-card-desc">制服・安全用品</span>
+      </button>
+      <button type="button" class="home-card" data-nav="meeting">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">会議</span>
+        <span class="home-card-desc">会議費を申請</span>
+      </button>
+    </div>
+
+    <div id="home-events-area"></div>
+
+    <div id="admin-banner-area"></div>
+
+    <button class="link" id="logout-btn">別の社員番号でログインし直す</button>
+  </section>
+
+  <!-- 「申請」一覧(下部ナビの「申請」タブ) -->
+  <section id="screen-menu-apply" class="screen">
+    <div class="form-title">申請</div>
+    <div class="home-card-grid">
+      <button type="button" class="home-card" data-nav="daily-report">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">日報</span>
+        <span class="home-card-desc">今日の現場・勤務区分</span>
+      </button>
+      <button type="button" class="home-card" data-nav="leave">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">有給休暇</span>
+        <span class="home-card-desc">休みを申請する</span>
+      </button>
+      <button type="button" class="home-card" data-nav="expense">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <span class="home-card-label">経費</span>
+        <span class="home-card-desc">立替・会社経費</span>
+      </button>
+      <button type="button" class="home-card" data-nav="joyo-denpyo-list">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">常用伝票</span>
+        <span class="home-card-desc">現場伝票を作成・確認</span>
+      </button>
+      <button type="button" class="home-card" data-nav="meeting">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">会議</span>
+        <span class="home-card-desc">会議費を申請</span>
+      </button>
+      <button type="button" class="home-card" data-nav="supply-request">
+        <span class="icon-slot" data-icon="package"></span>
+        <span class="home-card-label">支給品</span>
+        <span class="home-card-desc">制服・安全用品</span>
+      </button>
+      <button type="button" class="home-card" data-nav="entertainment-submit">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">接待・会食</span>
+        <span class="home-card-desc">事前申請(接待前に)</span>
+      </button>
+      <button type="button" class="home-card" data-nav="qual-submit">
+        <span class="icon-slot" data-icon="graduation-cap"></span>
+        <span class="home-card-label">資格・免許</span>
+        <span class="home-card-desc">資格・免許を登録する</span>
+      </button>
+      <button type="button" class="home-card" data-nav="health-submit">
+        <span class="icon-slot" data-icon="check-circle"></span>
+        <span class="home-card-label">健康診断</span>
+        <span class="home-card-desc">受診結果を登録する</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 日報入力 -->
+  <section id="screen-daily-report" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="card">
+      <div class="form-title">日報を入力する</div>
+      <div class="hint" style="margin-bottom:10px;">現場と勤務区分(終日・午前・午後)を選ぶと、人工は自動で計算されます。人工を直接入力することはありません。</div>
+
+      <div id="daily-report-proxy-wrap" style="display:none;">
+        <label for="daily-report-target-type">誰の日報を入力しますか</label>
+        <select id="daily-report-target-type">
+          <option value="self">自分</option>
+          <option value="employee">他の社員(代理入力)</option>
+          <option value="subcontractor">外注作業員</option>
+        </select>
+        <div id="daily-report-target-employee-wrap" style="display:none;">
+          <input type="text" class="participant-search-input" id="daily-report-target-employee-search" placeholder="社員名で検索...">
+          <div id="daily-report-target-employee-results" class="candidate-results"></div>
+          <div class="hint-inline" id="daily-report-target-employee-label" style="display:none;"></div>
+        </div>
+        <div id="daily-report-target-worker-wrap" style="display:none;">
+          <input type="text" class="participant-search-input" id="daily-report-target-worker-search" placeholder="外注作業員名・会社名で検索...">
+          <div id="daily-report-target-worker-results" class="candidate-results"></div>
+          <div class="hint-inline" id="daily-report-target-worker-label" style="display:none;"></div>
+        </div>
+      </div>
+
+      <label for="daily-report-date">日付<span class="required-mark">(必須)</span></label>
+      <input type="date" id="daily-report-date">
+      <div class="hint-inline" id="daily-report-existing-hint" style="display:none;"></div>
+
+      <div id="daily-report-recent-sites" style="display:none;">
+        <div class="hint-inline">よく使う現場・昨日の現場</div>
+        <div class="filter-row" id="daily-report-recent-sites-row"></div>
+      </div>
+
+      <div id="daily-report-entry-list"></div>
+
+      <button type="button" class="secondary" id="daily-report-add-entry">＋ もう1現場を追加(午前/午後で分ける場合)</button>
+      <button type="button" class="link" id="daily-report-add-special-entry">現場が3件以上ある場合はこちら(特殊日報)</button>
+      <div class="preapproval-warning" id="daily-report-special-warning" style="display:none;">
+        <span class="icon-slot" data-icon="alert-triangle"></span>
+        3現場以上の日報は「特殊日報」として登録され、通常のスプレッドシートには自動反映されません。管理者が内容を確認したうえで手動対応します。
+      </div>
+
+      <div class="stat-mini-row">
+        <div class="stat-mini"><span class="stat-mini-label">合計人工(自動計算)</span><span class="stat-mini-value" id="daily-report-total-headcount">0</span></div>
+      </div>
+
+      <div id="daily-report-qual-wrap" style="display:none;">
+        <div class="checkbox-row">
+          <input type="checkbox" id="daily-report-has-qualification">
+          <label>資格取得</label>
+        </div>
+        <div id="daily-report-qual-fields" style="display:none;">
+          <label for="daily-report-qual-name">資格名<span class="required-mark">(必須)</span></label>
+          <input type="text" id="daily-report-qual-name" placeholder="例: 玉掛け技能講習">
+          <label for="daily-report-qual-date">資格取得日<span class="required-mark">(必須)</span></label>
+          <input type="date" id="daily-report-qual-date">
+          <label>資格証の写真・PDF(任意)</label>
+          <label class="photo-capture-btn">
+            <span class="icon-slot" data-icon="camera"></span>
+            <span id="daily-report-qual-file-label">撮影・選択する</span>
+            <input type="file" accept="image/*,application/pdf" id="daily-report-qual-file-input">
+          </label>
+          <div class="hint-inline" id="daily-report-qual-file-status"></div>
+        </div>
+      </div>
+
+      <div class="error" id="daily-report-error"></div>
+      <button id="daily-report-submit">日報を提出する</button>
+      <button type="button" class="secondary" id="daily-report-save-draft">下書きとして保存する</button>
+    </div>
+  </section>
+
+  <template id="daily-report-entry-template">
+    <div class="item-new-site-wrap daily-report-entry" style="display:block;">
+      <label>現場<span class="required-mark">(必須)</span></label>
+      <input type="text" class="dr-site-search" placeholder="現場名で検索...">
+      <select class="dr-site-select"></select>
+      <button type="button" class="item-new-site-toggle-btn dr-new-site-toggle-btn"><span class="icon-slot" data-icon="plus"></span>リストに無い現場を入力する</button>
+      <div class="dr-new-site-wrap" style="display:none;">
+        <label>現場名を入力<span class="required-mark">(必須)</span></label>
+        <input type="text" class="dr-new-site-name" placeholder="例: 〇〇マンション新築工事">
+      </div>
+      <label>勤務区分<span class="required-mark">(必須)</span></label>
+      <select class="dr-work-type">
+        <option value="終日">終日(1.0人工)</option>
+        <option value="午前">午前(0.5人工)</option>
+        <option value="午後">午後(0.5人工)</option>
+      </select>
+      <div class="checkbox-row">
+        <input type="checkbox" class="dr-is-leader">
+        <label>リーダーとして参加</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" class="dr-is-night-shift">
+        <label>夜勤</label>
+      </div>
+      <div class="dr-overtime-wrap" style="display:none;">
+        <label>残業時間(任意)</label>
+        <input type="number" class="dr-overtime-hours" min="0" step="0.5" placeholder="例: 1.5">
+      </div>
+      <div class="dr-driver-fields dr-commute-group" style="display:none;">
+        <div class="section-title" style="margin-top:0;">通勤運転(運転手1名のみ)</div>
+        <div class="dr-commute-item">
+          <div class="checkbox-row">
+            <input type="checkbox" class="dr-is-early-commute">
+            <label>通勤早出<span class="mini-tag info">運転手1名のみ</span></label>
+          </div>
+          <div class="hint-inline">通勤移動で早出が発生した場合</div>
+          <input type="number" class="dr-early-commute-hours" min="0" step="0.5" placeholder="時間(例: 1)">
+        </div>
+        <div class="dr-commute-item">
+          <div class="checkbox-row">
+            <input type="checkbox" class="dr-is-commute-overtime">
+            <label>通勤残業<span class="mini-tag info">運転手1名のみ</span></label>
+          </div>
+          <div class="hint-inline">通勤移動で2時間以上運転し、残業が発生した場合</div>
+          <input type="number" class="dr-commute-overtime-hours" min="0" step="0.5" placeholder="時間(例: 1.5)">
+        </div>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" class="dr-is-over-100km">
+        <label>通勤100km超(現場までの移動が100kmを超える)</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" class="dr-is-business-trip">
+        <label>出張(通常の通勤圏外での勤務)</label>
+      </div>
+      <div class="dr-overnight-wrap" style="display:none;">
+        <div class="checkbox-row">
+          <input type="checkbox" class="dr-is-overnight">
+          <label>宿泊あり(日帰りの場合はチェックしない)</label>
+        </div>
+        <div class="dr-overnight-nights-wrap" style="display:none;">
+          <input type="number" class="dr-overnight-nights" min="1" step="1" placeholder="宿泊日数(例: 2)">
+        </div>
+      </div>
+      <div class="dr-other-duty-group" style="display:none;">
+        <div class="section-title" style="margin-top:0;">現場作業・営業・運搬(職人以外の方)</div>
+        <div class="dr-site-duty-wrap" style="display:none;">
+          <div class="checkbox-row">
+            <input type="checkbox" class="dr-is-field-duty">
+            <label>現場作業</label>
+          </div>
+        </div>
+        <div class="dr-sales-wrap" style="display:none;">
+          <div class="checkbox-row">
+            <input type="checkbox" class="dr-is-sales">
+            <label>営業</label>
+          </div>
+        </div>
+        <div class="dr-transport-wrap" style="display:none;">
+          <div class="checkbox-row">
+            <input type="checkbox" class="dr-is-transport">
+            <label>運搬あり</label>
+          </div>
+        </div>
+      </div>
+      <label>備考(任意)</label>
+      <input type="text" class="dr-notes" placeholder="例: 早退・遅刻・特記事項など">
+      <button type="button" class="dr-remove-entry-btn link">この現場を削除</button>
+    </div>
+  </template>
+
+  <!-- 日報 提出履歴 -->
+  <section id="screen-my-daily-reports" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">日報 提出履歴</div>
+    <div class="dr-summary-period-toggle" style="margin-bottom:8px;">
+      <button type="button" class="secondary dr-summary-tab" data-period="pay_period">給与期間</button>
+      <button type="button" class="secondary dr-summary-tab" data-period="calendar">今月(カレンダー)</button>
+    </div>
+    <div class="dr-cal-nav">
+      <button type="button" class="secondary" id="dr-period-prev">＜</button>
+      <div class="dr-cal-month-label" id="dr-period-label"></div>
+      <button type="button" class="secondary" id="dr-period-next">＞</button>
+    </div>
+    <button type="button" class="link" id="dr-period-reset" style="display:none;margin:2px 0 8px;">今の期間に戻る</button>
+    <div id="my-daily-report-summary" class="summary-card"></div>
+
+    <div class="dr-view-toggle" style="margin:10px 0;">
+      <button type="button" class="secondary dr-view-tab" data-view="list">リスト表示</button>
+      <button type="button" class="secondary dr-view-tab" data-view="calendar">カレンダー表示</button>
+    </div>
+
+    <div id="my-daily-report-list-view">
+      <div id="my-daily-report-list"></div>
+    </div>
+
+    <div id="my-daily-report-calendar-view" style="display:none;">
+      <div class="dr-cal-nav">
+        <button type="button" class="secondary" id="dr-cal-prev">＜</button>
+        <div class="dr-cal-month-label" id="dr-cal-month-label"></div>
+        <button type="button" class="secondary" id="dr-cal-next">＞</button>
+      </div>
+      <div class="dr-cal-weekdays">
+        <span class="dr-cal-sun">日</span><span>月</span><span>火</span><span>水</span><span>木</span><span>金</span><span class="dr-cal-sat">土</span>
+      </div>
+      <div class="dr-cal-grid" id="dr-cal-grid"></div>
+      <div class="dr-cal-legend">
+        <span><span class="dr-cal-dot done"></span>提出済み</span>
+        <span><span class="dr-cal-dot warn"></span>要確認・修正依頼</span>
+        <span><span class="dr-cal-dot missing"></span>未提出</span>
+        <span><span class="dr-cal-dot leave"></span>有給</span>
+        <span><span class="dr-cal-dot rest"></span>休み(有給以外)</span>
+      </div>
+      <div id="dr-cal-day-detail"></div>
+    </div>
+  </section>
+
+  <!-- 日報 詳細(本人、履歴カードのタップ先。管理者用のscreen-daily-report-detailとは別) -->
+  <section id="screen-my-daily-report-detail" class="screen">
+    <button type="button" class="back-link" data-nav="my-daily-reports">日報提出履歴に戻る</button>
+    <div class="form-title">日報の内容</div>
+    <div id="my-daily-report-detail-body"></div>
+    <button type="button" id="my-daily-report-detail-edit-btn" class="secondary" style="margin-top:12px;">この日の内容を修正する</button>
+  </section>
+
+  <!-- 日報 要確認一覧(管理者) -->
+  <section id="screen-daily-report-needs-review-admin" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title">日報の要確認一覧</div>
+    <div class="hint" style="margin-bottom:10px;">同日・同現場の他社員の日報と食い違いが検知された日報です。内容を確認し、問題なければ「確認済みにする」、修正が必要なら理由を添えて「修正依頼」してください。</div>
+    <div id="daily-report-needs-review-list"></div>
+  </section>
+
+  <!-- 日報 修正申請一覧(管理者) -->
+  <section id="screen-daily-report-edit-requests-admin" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title">日報の修正申請</div>
+    <div class="hint" style="margin-bottom:10px;">既に確認・反映済みの日報を本人が修正しようとした申請です。内容を確認し、承認または却下してください。</div>
+    <div id="daily-report-edit-requests-list"></div>
+  </section>
+
+  <!-- 日報 特殊ケース確認(管理者) -->
+  <section id="screen-daily-report-admin" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title">日報の特殊ケース確認</div>
+    <div class="hint" style="margin-bottom:10px;">3現場以上の日報は自動でスプレッドシートへ反映されません。内容を確認し、手動で反映してから「対応済み」にしてください。</div>
+    <div class="filter-row">
+      <button type="button" class="filter-chip active" data-status="open">未対応</button>
+      <button type="button" class="filter-chip" data-status="resolved">対応済み</button>
+      <button type="button" class="filter-chip" data-status="">すべて</button>
+    </div>
+    <div id="daily-report-admin-list"></div>
+  </section>
+
+  <!-- 管理者管理: 追加・解除・変更履歴 -->
+  <section id="screen-admin-role-management" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">管理者管理</div>
+    <div class="hint" style="margin-bottom:12px;">管理者権限の変更は監査ログに記録されます。管理者が0人になる操作はできません。</div>
+
+    <div class="section-title">現在の管理者</div>
+    <div id="arm-current-list"></div>
+
+    <div class="section-title">現在の日報担当</div>
+    <div id="arm-nippo-list"></div>
+
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">管理者・日報担当を追加</div>
+      <label for="arm-role-type-select">付与する権限</label>
+      <select id="arm-role-type-select">
+        <option value="general_admin">全体管理者(general_admin)</option>
+        <option value="nippo_admin">日報担当(nippo_admin)</option>
+      </select>
+      <label for="arm-add-search">社員名・社員番号で検索</label>
+      <input type="text" id="arm-add-search" placeholder="検索...">
+      <div id="arm-add-candidates" class="candidate-results"></div>
+      <div class="error" id="arm-error"></div>
+    </div>
+
+    <div class="section-title">権限の変更履歴</div>
+    <div id="arm-history-list"></div>
+  </section>
+
+  <!-- 日報管理(管理者/日報担当): 日付・社員・外注・現場・状態で検索、本日の未提出を確認、
+       複数件まとめて確認、外注マスターへの導線。サクミルの日報機能を置き換える中核画面。 -->
+  <section id="screen-daily-report-management" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">日報管理</div>
+
+    <div class="dash-card-grid" id="drm-summary-grid" style="margin-bottom:14px;"></div>
+
+    <div class="today-item urgent" id="drm-missing-banner" style="cursor:default;">
+      <span class="today-item-icon"><span class="icon-slot" data-icon="alert-triangle"></span></span>
+      <div class="today-item-body">
+        <div class="today-item-label" id="drm-missing-count">本日の未提出 -</div>
+        <div class="today-item-count">タップすると一覧を開きます</div>
+      </div>
+    </div>
+    <div id="drm-missing-today-list" style="display:none;"></div>
+    <button type="button" class="secondary" id="drm-missing-toggle">未提出者を表示する</button>
+    <button type="button" id="drm-notify-btn">未提出者へ「本日の日報が未提出です」を通知する</button>
+    <button type="button" class="secondary" id="drm-autoconfirm-btn">本日分を自動確認ルールで一括確認する</button>
+    <div class="hint-inline" id="drm-autoconfirm-result"></div>
+
+    <div class="home-card-grid" style="margin:16px 0;">
+      <button type="button" class="home-card" data-nav="daily-report-admin">
+        <span class="icon-slot" data-icon="alert-triangle"></span>
+        <span class="home-card-label">特殊ケース確認</span>
+        <span class="home-card-desc">3現場以上の日報</span>
+      </button>
+      <button type="button" class="home-card" data-nav="daily-report-needs-review-admin">
+        <span class="icon-slot" data-icon="alert-triangle"></span>
+        <span class="home-card-label">要確認一覧</span>
+        <span class="home-card-desc">同日同現場の食い違い</span>
+      </button>
+      <button type="button" class="home-card" data-nav="daily-report-edit-requests-admin">
+        <span class="icon-slot" data-icon="alert-triangle"></span>
+        <span class="home-card-label">修正申請</span>
+        <span class="home-card-desc">確認済み日報の修正依頼</span>
+      </button>
+      <button type="button" class="home-card" data-nav="subcontractor-company-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">外注会社管理</span>
+        <span class="home-card-desc">外注会社の追加・停止</span>
+      </button>
+      <button type="button" class="home-card" data-nav="subcontractor-worker-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">外注作業員管理</span>
+        <span class="home-card-desc">外注作業員の追加・停止</span>
+      </button>
+    </div>
+
+    <div class="section-title">日報を検索</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="drm-search-name" placeholder="社員名・外注作業員名で検索...">
+    </div>
+    <div class="filter-row" id="drm-worker-type-filter">
+      <button type="button" class="filter-chip active" data-worker-type="">すべて</button>
+      <button type="button" class="filter-chip" data-worker-type="employee">社員</button>
+      <button type="button" class="filter-chip" data-worker-type="subcontractor">外注</button>
+    </div>
+    <div class="filter-row" id="drm-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべての状態</button>
+      <button type="button" class="filter-chip" data-status="submitted">提出済み</button>
+      <button type="button" class="filter-chip" data-status="confirmed">確認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">差し戻し</button>
+      <button type="button" class="filter-chip" data-status="draft">下書き</button>
+    </div>
+    <button type="button" class="link" id="drm-toggle-advanced">詳細検索(期間・現場・外注会社)</button>
+    <div id="drm-advanced" style="display:none;">
+      <label for="drm-date-from">日付(開始)</label>
+      <input type="date" id="drm-date-from">
+      <label for="drm-date-to">日付(終了)</label>
+      <input type="date" id="drm-date-to">
+      <label for="drm-search-site">現場</label>
+      <input type="text" id="drm-search-site" placeholder="現場名で検索...">
+      <div id="drm-site-candidates" class="candidate-results"></div>
+      <input type="hidden" id="drm-selected-site-id">
+      <div class="hint-inline" id="drm-selected-site-label" style="display:none;"></div>
+      <label for="drm-company-select">外注会社</label>
+      <select id="drm-company-select"><option value="">すべての外注会社</option></select>
+    </div>
+
+    <div class="hint" id="drm-count" style="margin:10px 0;"></div>
+    <div id="drm-bulk-bar" style="display:none; margin-bottom:10px;">
+      <span class="hint-inline" id="drm-selected-count"></span>
+      <button type="button" id="drm-bulk-confirm">選択した日報を確認済みにする</button>
+      <button type="button" class="secondary" id="drm-bulk-reject">選択した日報を差し戻す</button>
+      <div id="drm-bulk-reason-box" style="display:none;">
+        <label>差し戻し理由<span class="required-mark">(必須)</span></label>
+        <textarea id="drm-bulk-reason"></textarea>
+        <button type="button" id="drm-bulk-reason-confirm">確定する</button>
+      </div>
+    </div>
+    <div id="drm-list" class="areq-cards"></div>
+    <div id="drm-table-wrap" class="areq-table-wrap">
+      <table class="areq-table">
+        <thead>
+          <tr>
+            <th><input type="checkbox" id="drm-select-all"></th>
+            <th data-sort="report_date">日付</th>
+            <th data-sort="worker_type">社員/外注</th>
+            <th data-sort="person_name">氏名</th>
+            <th data-sort="company_name">外注会社</th>
+            <th>現場</th>
+            <th>勤務区分</th>
+            <th>現場2</th>
+            <th data-sort="submitted_at">提出時刻</th>
+            <th data-sort="report_status">提出状況</th>
+            <th>確認状況</th>
+            <th>反映状況</th>
+          </tr>
+        </thead>
+        <tbody id="drm-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 日報詳細(原本と管理者反映値) -->
+  <section id="screen-daily-report-detail" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title" id="drd-title">日報詳細</div>
+    <div class="hint" id="drd-meta"></div>
+    <div id="drd-slots"></div>
+    <div class="section-title">変更履歴</div>
+    <div id="drd-history"></div>
+  </section>
+
+  <!-- 外注会社マスター管理 -->
+  <section id="screen-subcontractor-company-admin" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title">外注会社管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">外注会社を追加</div>
+      <input type="hidden" id="sc-company-edit-id">
+      <label for="sc-company-name">会社名</label>
+      <input type="text" id="sc-company-name" placeholder="例: 〇〇建設">
+      <label for="sc-company-notes">備考</label>
+      <input type="text" id="sc-company-notes">
+      <div class="error" id="sc-company-error"></div>
+      <button id="sc-company-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの外注会社</div>
+    <div id="sc-company-list"></div>
+  </section>
+
+  <!-- 外注作業員マスター管理 -->
+  <section id="screen-subcontractor-worker-admin" class="screen">
+    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <div class="form-title">外注作業員管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">外注作業員を追加</div>
+      <input type="hidden" id="sc-worker-edit-id">
+      <label for="sc-worker-company-select">外注会社<span class="required-mark">(必須)</span></label>
+      <select id="sc-worker-company-select"></select>
+      <label for="sc-worker-name">作業員名</label>
+      <input type="text" id="sc-worker-name" placeholder="例: 山田 太郎">
+      <label for="sc-worker-notes">備考</label>
+      <input type="text" id="sc-worker-notes">
+      <div class="error" id="sc-worker-error"></div>
+      <button id="sc-worker-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの外注作業員</div>
+    <div id="sc-worker-list"></div>
+  </section>
+
+  <!-- 資格・免許申請フォーム -->
+  <section id="screen-qual-submit" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="card">
+      <div class="form-title">資格・免許を登録する</div>
+      <div class="hint" style="margin-bottom:10px;">証明書の写真またはPDFを添付できます(任意)。登録後、管理者が内容を確認して有効化します。</div>
+
+      <div class="qual-category-toggle">
+        <button type="button" class="secondary" id="qual-category-qualification">資格</button>
+        <button type="button" class="secondary secondary-off" id="qual-category-license">免許</button>
+      </div>
+      <input type="hidden" id="qual-category" value="qualification">
+
+      <div id="qual-name-wrap">
+        <label for="qual-name">資格名<span class="required-mark">(必須)</span></label>
+        <input type="text" id="qual-name" placeholder="例: フォークリフト運転技能講習">
+      </div>
+      <div id="qual-license-type-wrap" style="display:none;">
+        <label for="qual-license-type">免許種別<span class="required-mark">(必須)</span></label>
+        <select id="qual-license-type"></select>
+      </div>
+
+      <label for="qual-number">資格番号</label>
+      <div class="hint-inline">任意</div>
+      <input type="text" id="qual-number">
+      <label for="qual-obtained">取得日</label>
+      <input type="date" id="qual-obtained">
+      <label for="qual-expiry">有効期限</label>
+      <input type="date" id="qual-expiry">
+      <label for="qual-renewal">更新期限</label>
+      <div class="hint-inline">更新手続きが必要な期限(分かる場合のみ)</div>
+      <input type="date" id="qual-renewal">
+
+      <label>証明書の写真</label>
+      <label class="photo-capture-btn">
+        <span class="icon-slot" data-icon="camera"></span>
+        <span id="qual-photo-label">写真を選ぶ</span>
+        <input type="file" accept="image/*" id="qual-photo-input">
+      </label>
+      <div class="ocr-status" id="qual-photo-status"></div>
+
+      <label>証明書のPDF</label>
+      <label class="photo-capture-btn">
+        <span class="icon-slot" data-icon="file"></span>
+        <span id="qual-pdf-label">PDFを選ぶ</span>
+        <input type="file" accept="application/pdf" id="qual-pdf-input">
+      </label>
+      <div class="ocr-status" id="qual-pdf-status"></div>
+
+      <label for="qual-note">備考</label>
+      <div class="hint-inline">任意</div>
+      <textarea id="qual-note"></textarea>
+      <div class="error" id="qual-error"></div>
+      <button id="qual-submit">登録する</button>
+    </div>
+  </section>
+
+  <!-- 健康診断 登録フォーム -->
+  <section id="screen-health-submit" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="card">
+      <div class="form-title">健康診断を登録する</div>
+      <div class="hint" style="margin-bottom:10px;">受診票の写真・PDFを添付できます(任意)。内容は本人と管理者のみ確認できます。</div>
+      <label for="health-date">受診日<span class="required-mark">(必須)</span></label>
+      <input type="date" id="health-date">
+      <label for="health-type">健診種別</label>
+      <input type="text" id="health-type" placeholder="例: 定期健康診断">
+      <label for="health-institution">受診機関</label>
+      <input type="text" id="health-institution" placeholder="例: 〇〇クリニック">
+      <label for="health-next">次回予定日</label>
+      <input type="date" id="health-next">
+      <div class="checkbox-row">
+        <input type="checkbox" id="health-retest">
+        <label for="health-retest">再検査の指示がある</label>
+      </div>
+      <label>受診票・結果の写真/PDF</label>
+      <label class="photo-capture-btn">
+        <span class="icon-slot" data-icon="camera"></span>
+        <span id="health-file-label">写真/PDFを選ぶ</span>
+        <input type="file" accept="image/*,application/pdf" id="health-file-input">
+      </label>
+      <div class="ocr-status" id="health-file-status"></div>
+      <label for="health-note">備考</label>
+      <div class="hint-inline">任意</div>
+      <textarea id="health-note"></textarea>
+      <div class="error" id="health-error"></div>
+      <button id="health-submit">登録する</button>
+    </div>
+  </section>
+
+  <!-- 自分の資格・免許・健診情報 -->
+  <section id="screen-my-qual" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">資格・免許・健診</div>
+
+    <div class="section-title">健康診断</div>
+    <div id="my-health-summary"></div>
+    <button type="button" class="secondary" data-nav="health-submit">健康診断を登録する</button>
+    <button type="button" class="secondary" data-nav="my-health">受診履歴を見る</button>
+
+    <div class="section-title">資格・免許</div>
+    <button type="button" data-nav="qual-submit">＋ 資格・免許を登録する</button>
+    <div id="my-qual-list"></div>
+  </section>
+
+  <!-- 自分の健康診断 受診履歴 -->
+  <section id="screen-my-health" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">健康診断 受診履歴</div>
+    <div id="my-health-list"></div>
+  </section>
+
+  <!-- 資格管理(管理者) -->
+  <section id="screen-qual-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">資格・免許管理</div>
+    <div class="filter-row">
+      <button type="button" class="filter-chip active" data-cat="">すべて</button>
+      <button type="button" class="filter-chip" data-cat="qualification">資格</button>
+      <button type="button" class="filter-chip" data-cat="license">免許</button>
+    </div>
+    <select id="qual-admin-filter">
+      <option value="">すべて</option>
+      <option value="pending">確認待ち</option>
+      <option value="expiring">期限が近い(60日以内)</option>
+    </select>
+    <div id="qual-admin-list"></div>
+  </section>
+
+  <!-- 勘定科目確認(管理者) -->
+  <section id="screen-category-review" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">勘定科目確認</div>
+    <div class="hint" style="margin-bottom:12px;">AIによる勘定科目の提案のうち、確信度が高くないものだけを表示しています。内容を確認し、正しい科目を確定してください。</div>
+    <div id="category-review-list"></div>
+    <datalist id="category-suggest-list">
+      <option value="旅費交通費"></option>
+      <option value="消耗品費"></option>
+      <option value="会議費"></option>
+      <option value="燃料費"></option>
+      <option value="修繕費"></option>
+      <option value="通信費"></option>
+      <option value="接待交際費"></option>
+      <option value="地代家賃"></option>
+      <option value="水道光熱費"></option>
+      <option value="車両費"></option>
+      <option value="工具器具費"></option>
+      <option value="雑費"></option>
+    </datalist>
+  </section>
+
+  <!-- 有給申請フォーム -->
+  <section id="screen-leave" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+
+    <div class="card summary-card">
+      <div class="hint-inline" id="leave-summary-period" style="margin-bottom:8px;"></div>
+      <div class="summary-row"><span>今年度 使用</span><span class="summary-value" id="leave-summary-used">-</span></div>
+      <div class="summary-row"><span>今年度 付与</span><span class="summary-value" id="leave-summary-granted">-</span></div>
+      <div class="summary-row"><span>今年度 残り</span><span class="summary-value" id="leave-summary-balance">-</span></div>
+      <div class="summary-row"><span>今年度 取得回数</span><span class="summary-value" id="leave-summary-count">-</span></div>
+      <div class="hint-inline" id="leave-summary-note"></div>
+    </div>
+    <button type="button" class="secondary" data-nav="leave-history">取得履歴を見る</button>
+
+    <div class="card">
+      <div class="form-title">休暇申請</div>
+      <label for="leave-category">区分</label>
+      <select id="leave-category">
+        <option value="paid_leave">有給休暇</option>
+        <option value="regular_leave">普通休暇</option>
+        <option value="absence">欠勤</option>
+        <option value="company_leave">会社都合休み</option>
+        <option value="other_leave">その他休暇</option>
+      </select>
+      <label for="leave-start">開始日</label>
+      <input type="date" id="leave-start">
+      <label for="leave-end">終了日</label>
+      <input type="date" id="leave-end">
+      <div class="checkbox-row">
+        <input type="checkbox" id="leave-half">
+        <label for="leave-half">半休(開始日と終了日が同じ日のみ)</label>
+      </div>
+      <div class="calc-box" id="leave-days-box">日数: -</div>
+      <div class="balance-box" id="leave-balance-box"></div>
+      <label for="leave-reason">事由</label>
+      <input type="text" id="leave-reason" placeholder="例: 私用のため">
+      <label for="leave-note">備考</label>
+      <div class="hint-inline">任意</div>
+      <textarea id="leave-note"></textarea>
+      <div class="error" id="leave-error"></div>
+      <button id="leave-submit">申請する</button>
+    </div>
+  </section>
+
+  <!-- 経費立替申請フォーム(複数明細) -->
+  <!-- 経費(申請種類の選択) -->
+  <section id="screen-expense-select" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">経費</div>
+    <div class="hint" style="margin-bottom:6px;">領収書1枚だけをその場で申請する場合</div>
+    <div class="home-card-grid" style="margin-bottom:18px;">
+      <button type="button" class="home-card" data-nav="expense-advance">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <span class="home-card-label">かんたん申請</span>
+        <span class="home-card-desc">経費立替(領収書1枚〜)</span>
+      </button>
+      <button type="button" class="home-card" data-nav="expense-company">
+        <span class="icon-slot" data-icon="building"></span>
+        <span class="home-card-label">会社経費</span>
+        <span class="home-card-desc">会社が支払った経費</span>
+      </button>
+    </div>
+    <div class="hint" style="margin-bottom:6px;">駐車場代など、複数の領収書を月まとめて1回で申請する場合</div>
+    <div class="home-card-grid">
+      <button type="button" class="home-card" data-nav="expense-bulk-advance">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">まとめて精算</span>
+        <span class="home-card-desc">経費立替・複数枚の領収書をまとめて1件で申請</span>
+      </button>
+      <button type="button" class="home-card" data-nav="expense-bulk-company">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">まとめて精算(会社経費)</span>
+        <span class="home-card-desc">会社経費を複数枚まとめて1件で申請</span>
+      </button>
+    </div>
+  </section>
+
+  <section id="screen-expense" class="screen">
+    <button type="button" class="back-link" data-nav="expense-select">経費に戻る</button>
+    <div class="form-title" id="expense-screen-title">経費立替申請</div>
+    <div class="hint" style="margin: 0 0 14px;" id="expense-screen-hint">領収書の写真が必要です。複数の領収書をまとめて1回の申請にできます。</div>
+
+    <label class="photo-capture-btn" style="margin-bottom:10px;">
+      <span class="icon-slot" data-icon="camera"></span>
+      <span>複数の領収書をまとめて選ぶ</span>
+      <input type="file" accept="image/*" multiple id="expense-batch-input">
+    </label>
+    <div class="hint" style="margin: 0 0 14px; text-align:center;">選んだ写真1枚ごとに、自動で明細を1件作成します</div>
+
+    <div id="expense-item-list"></div>
+
+    <button type="button" class="secondary" id="expense-add-item">＋ 明細を1件だけ追加(カメラで撮影)</button>
+
+    <div class="card total-card">
+      <div class="total-row"><span>明細件数</span><span id="expense-total-count">0件</span></div>
+      <div class="total-row total-amount"><span>合計金額</span><span id="expense-total-amount">0円</span></div>
+    </div>
+
+    <div class="error" id="expense-error"></div>
+    <button id="expense-submit">この内容で申請する</button>
+
+    <!-- 明細1件分のテンプレート(JSで複製して使う)。写真を追加するまでは撮影ボタンだけを
+         表示し、追加後に詳細項目を開く(領収書撮影を中心にしたUXにするための段階表示)。 -->
+    <template id="expense-item-template">
+      <div class="card expense-item-card">
+        <div class="item-header">
+          <span class="item-label"></span>
+          <button type="button" class="remove-item-btn">削除</button>
+        </div>
+
+        <div class="item-photo-step">
+          <label class="photo-capture-btn">
+            <span class="icon-slot" data-icon="camera"></span>
+            <span>領収書を撮影する</span>
+            <input type="file" accept="image/*" capture="environment" class="item-photo-input">
+          </label>
+          <label class="photo-pick-link">写真から選ぶ<input type="file" accept="image/*" class="item-photo-input-lib"></label>
+        </div>
+
+        <div class="item-photo-attached" style="display:none;">
+          <img class="item-photo-preview">
+          <div class="photo-status"></div>
+          <div class="ocr-status"></div>
+          <button type="button" class="retake-btn">撮り直す</button>
+        </div>
+
+        <div class="item-details" style="display:none;">
+          <label>利用日</label>
+          <input type="date" class="item-date">
+
+          <label>支払先(店舗名)</label>
+          <div class="hint-inline">例: ○○ガソリンスタンド</div>
+          <input type="text" class="item-store">
+
+          <label>金額(円)</label>
+          <input type="number" class="item-amount" min="1">
+
+          <label>消費税(円)</label>
+          <div class="hint-inline">分かる場合のみ(任意)</div>
+          <input type="number" class="item-tax" min="0">
+
+          <div class="item-suggest-area" style="display:none;"></div>
+
+          <label>現場<span class="required-mark">(必須)</span></label>
+          <div class="hint-inline">どの現場に関係する経費か選択してください。該当が無ければ「会社共通」「現場外」を選べます</div>
+          <input type="text" class="item-site-search" placeholder="現場名で検索...">
+          <select class="item-site-select"></select>
+          <button type="button" class="item-new-site-toggle-btn"><span class="icon-slot" data-icon="plus"></span>リストに無い現場を入力する</button>
+          <div class="item-new-site-wrap" style="display:none;">
+            <label>現場名を入力<span class="required-mark">(必須)</span></label>
+            <div class="hint-inline">新しい現場として保存されます。管理者が確認後、次回から候補に表示されます</div>
+            <input type="text" class="item-new-site-name" placeholder="例: 〇〇マンション新築工事">
+          </div>
+
+          <label>使用目的<span class="required-mark">(必須)</span></label>
+          <div class="hint-inline">検索して候補から選択してください</div>
+          <input type="text" class="item-purpose-search" placeholder="使用目的を検索...">
+          <select class="item-purpose-category"></select>
+          <label class="item-purpose-detail-label">詳細・具体的な使用目的</label>
+          <div class="hint-inline">例: 現場用消耗品購入・駐車料金・出張宿泊・資材購入。「その他」「取引先との打ち合わせ」「接待交際費」を選んだ場合は必須です</div>
+          <input type="text" class="item-purpose">
+
+          <label>取引先</label>
+          <div class="hint-inline">現場の元請け・関係先など(「取引先との打ち合わせ」「接待交際費」の場合は必須、検索して選ぶか新しい取引先名を入力)</div>
+          <input type="text" class="item-vendor" list="vendor-list">
+          <input type="hidden" class="item-business-partner-id">
+
+          <!-- 打ち合わせ・接待交際費の追加項目 -->
+          <div class="item-meeting-block" style="display:none;">
+            <label>取引先参加者</label>
+            <div class="hint-inline">氏名が分かれば1名ずつ追加してください(任意、複数名登録可)</div>
+            <div class="item-partner-participant-add-row">
+              <input type="text" class="item-partner-participant-input" placeholder="例: 山田様">
+              <button type="button" class="item-partner-participant-add-btn">追加</button>
+            </div>
+            <div class="item-partner-participant-chips"></div>
+            <label>取引先の参加人数<span class="required-mark">(必須)</span></label>
+            <input type="number" class="item-partner-count" min="1">
+            <label>自社参加者<span class="required-mark">(必須)</span></label>
+            <div class="participant-select" data-target="our"></div>
+            <div class="hint-inline">自社人数: <span class="item-our-count">0</span>名(自動計算)</div>
+          </div>
+
+          <!-- 接待交際費: 承認済み事前申請の検索・紐付け -->
+          <div class="item-entertainment-block" style="display:none;">
+            <div class="preapproval-search-area"></div>
+          </div>
+
+          <label>支払方法</label>
+          <select class="item-payment"></select>
+
+          <label>備考</label>
+          <div class="hint-inline">任意</div>
+          <input type="text" class="item-note">
+        </div>
+      </div>
+    </template>
+    <datalist id="vendor-list"></datalist>
+  </section>
+
+  <!-- まとめて精算(複数画像・複数明細を1回で申請) -->
+  <section id="screen-expense-bulk" class="screen">
+    <button type="button" class="back-link" data-nav="expense-select">経費に戻る</button>
+    <div class="form-title" id="expense-bulk-title">まとめて精算</div>
+    <div class="hint" style="margin: 0 0 14px;">複数の領収書をまとめて撮影・選択すると、AIが1枚ずつ明細に分けて読み取ります。紙の経費精算書があれば一緒に添付すると、AIが合計金額を照合します。</div>
+
+    <label for="expense-bulk-month">精算対象月<span class="required-mark">(必須)</span></label>
+    <input type="month" id="expense-bulk-month">
+    <label for="expense-bulk-batch-title">タイトル</label>
+    <div class="hint-inline">例: 駐車場代・出張経費</div>
+    <input type="text" id="expense-bulk-batch-title" placeholder="例: 8月分 駐車場代">
+
+    <div class="bulk-receipt-add-row" style="display:flex; gap:10px; margin:14px 0 6px;">
+      <label class="photo-capture-btn" style="flex:1;">
+        <span class="icon-slot" data-icon="camera"></span>
+        <span>カメラで撮る</span>
+        <input type="file" accept="image/*" capture="environment" id="expense-bulk-camera-input">
+      </label>
+      <label class="photo-capture-btn" style="flex:1;">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <span>写真から選ぶ(複数可)</span>
+        <input type="file" accept="image/*" multiple id="expense-bulk-receipts-input">
+      </label>
+    </div>
+    <div id="expense-bulk-receipts-progress"></div>
+    <div class="hint-inline" id="expense-bulk-receipts-status" style="margin-bottom:14px;"></div>
+
+    <div class="card" style="margin-bottom:14px;">
+      <div class="section-title" style="margin-top:0;">現場・使用目的を全明細へ一括設定</div>
+      <div class="hint-inline">1件ずつ設定する手間を減らせます(後から明細ごとに変更も可能)</div>
+      <label>現場</label>
+      <select id="expense-bulk-bulk-site"></select>
+      <label>使用目的</label>
+      <select id="expense-bulk-bulk-purpose"></select>
+      <button type="button" class="secondary" id="expense-bulk-apply-all">この内容を全明細に適用する</button>
+    </div>
+
+    <div class="section-title">AI読取明細 (<span id="expense-bulk-item-count">0</span>件)</div>
+    <div id="expense-bulk-item-list"></div>
+
+    <div class="card total-card">
+      <div class="total-row"><span>明細件数</span><span id="expense-bulk-total-count">0件</span></div>
+      <div class="total-row total-amount"><span>合計金額</span><span id="expense-bulk-total-amount">0円</span></div>
+    </div>
+
+    <div class="section-title">経費精算書(任意)</div>
+    <div class="hint-inline">紙の集計表があれば撮影して添付すると、AIが読み取った合計と明細合計を照合します</div>
+    <label class="photo-capture-btn">
+      <span class="icon-slot" data-icon="camera"></span>
+      <span id="expense-bulk-cover-label">経費精算書を撮影・選択する</span>
+      <input type="file" accept="image/*" id="expense-bulk-cover-input">
+    </label>
+    <div class="hint-inline" id="expense-bulk-cover-status"></div>
+    <div id="expense-bulk-reconciliation-box" style="display:none;" class="card"></div>
+
+    <label>備考</label>
+    <div class="hint-inline">任意</div>
+    <input type="text" id="expense-bulk-note">
+
+    <div class="error" id="expense-bulk-error"></div>
+    <button id="expense-bulk-submit">まとめて経費精算を申請</button>
+
+    <template id="expense-bulk-item-template">
+      <div class="card expense-bulk-item-row">
+        <div class="item-header">
+          <span class="item-label"></span>
+          <button type="button" class="remove-item-btn">削除</button>
+        </div>
+        <div class="row2 bulk-item-summary"></div>
+        <button type="button" class="secondary bulk-item-edit-toggle">明細を編集</button>
+        <div class="bulk-item-edit" style="display:none;">
+          <label>利用日</label>
+          <input type="date" class="bi-date">
+          <label>支払先</label>
+          <input type="text" class="bi-store">
+          <label>金額(円)</label>
+          <input type="number" class="bi-amount" min="1">
+          <label>読み取り信頼度</label>
+          <div class="hint-inline bi-confidence"></div>
+          <label>現場<span class="required-mark">(必須)</span></label>
+          <select class="bi-site"></select>
+          <label>使用目的<span class="required-mark">(必須)</span></label>
+          <select class="bi-purpose"></select>
+          <label>内容・備考</label>
+          <input type="text" class="bi-note">
+        </div>
+      </div>
+    </template>
+  </section>
+
+  <!-- 会議申請フォーム -->
+  <section id="screen-meeting" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="card">
+      <div class="form-title">会議申請</div>
+      <label for="meeting-date">会議日</label>
+      <input type="date" id="meeting-date">
+      <label for="meeting-place">場所</label>
+      <input type="text" id="meeting-place" placeholder="例: 本社会議室">
+      <label for="meeting-headcount">人数</label>
+      <input type="number" id="meeting-headcount" min="1" placeholder="例: 3">
+      <div class="checkbox-row">
+        <input type="checkbox" id="meeting-meal">
+        <label for="meeting-meal">食事あり</label>
+      </div>
+      <label for="meeting-content">会議内容</label>
+      <input type="text" id="meeting-content" placeholder="例: 現場定例会議">
+      <label for="meeting-amount">申請金額(円)</label>
+      <input type="number" id="meeting-amount" min="0">
+      <label for="meeting-receive">受取方法</label>
+      <select id="meeting-receive">
+        <option value="cash">現金</option>
+        <option value="bank_transfer">振込み(振込手数料は申請者負担)</option>
+      </select>
+      <div class="error" id="meeting-error"></div>
+      <button id="meeting-submit">申請する</button>
+    </div>
+  </section>
+
+  <!-- 自分の情報(下部ナビ「自分」タブ)。本格的なプロフィールとして、基本情報・住所連絡先・
+       緊急連絡先を表示する。社員番号・入社日等の会社管理項目は表示のみ(鍵アイコンで編集不可を明示)、
+       住所・電話番号等は「変更申請」ボタンから本人が変更申請できる(即時反映はせず管理者承認を挟む)。 -->
+  <section id="screen-myinfo" class="screen">
+    <div class="profile-header">
+      <label class="profile-avatar-edit">
+        <div class="profile-avatar" id="myinfo-avatar"></div>
+        <span class="profile-avatar-edit-badge"><span class="icon-slot" data-icon="camera"></span></span>
+        <input type="file" accept="image/*" id="myinfo-photo-input" style="display:none;">
+      </label>
+      <div>
+        <div class="profile-header-name" id="myinfo-name"></div>
+        <div class="profile-header-code" id="myinfo-code"></div>
+        <button type="button" class="link" id="myinfo-photo-remove-btn" style="display:none;">写真を削除する</button>
+      </div>
+    </div>
+    <div class="hint" id="myinfo-photo-status" style="margin-bottom:12px;"></div>
+
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">今年度使用</span><span class="stat-mini-value" id="myinfo-leave-used">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">今年度付与</span><span class="stat-mini-value" id="myinfo-leave-granted">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">残り</span><span class="stat-mini-value" id="myinfo-leave-balance">-</span></div>
+    </div>
+
+    <div class="section-title">基本情報</div>
+    <div class="card"><div class="field-group" id="myinfo-basic-fields"></div></div>
+
+    <div class="section-title">住所・連絡先</div>
+    <div class="card"><div class="field-group" id="myinfo-contact-fields"></div></div>
+
+    <div class="section-title">緊急連絡先</div>
+    <div class="card"><div class="field-group" id="myinfo-emergency-fields"></div></div>
+
+    <div class="section-title">通知設定</div>
+    <div class="card">
+      <div class="checkbox-row">
+        <input type="checkbox" id="myinfo-push-toggle">
+        <label>重要な通知をこの端末にPush通知で受け取る</label>
+      </div>
+      <div class="hint-inline" id="myinfo-push-status">会社からの重要なお知らせ・申請の承認/却下/差戻し・日報の要確認・休暇申請結果・登録した予定の事前通知など、対応が必要な重要事項のみ送ります。</div>
+    </div>
+
+    <div class="section-title">メニュー</div>
+    <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="history">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">申請履歴<span class="desc">これまでの申請と状態を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="leave-history">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <div class="menu-item-body">有給取得履歴<span class="desc">これまで取得した有給を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-supply">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品履歴<span class="desc">これまで支給された物を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-qual">
+        <span class="icon-slot" data-icon="graduation-cap"></span>
+        <div class="menu-item-body">保有資格<span class="desc">資格の登録・期限を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-health">
+        <span class="icon-slot" data-icon="check-circle"></span>
+        <div class="menu-item-body">健康診断<span class="desc">受診履歴・次回予定を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-change-requests">
+        <span class="icon-slot" data-icon="edit"></span>
+        <div class="menu-item-body">変更申請の状況<span class="desc">住所・電話番号等の変更申請を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-entertainment">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">接待・会食 事前申請<span class="desc">接待前に申請、承認済みなら領収書と紐付け</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="my-daily-reports">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">日報 提出履歴<span class="desc">これまでの日報・人工を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="anon-consult" style="position:relative;">
+        <span class="icon-slot" data-icon="message-circle"></span>
+        <div class="menu-item-body">匿名相談<span class="desc">悩み・意見を匿名で送る</span></div>
+        <span class="unread-badge" id="home-anon-badge" style="display:none;"></span>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+    <button class="link" id="logout-btn-2">別の社員番号でログインし直す</button>
+  </section>
+
+  <!-- 個人情報の変更申請フォーム(汎用: 1項目ずつ) -->
+  <section id="screen-profile-edit" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="card">
+      <div class="form-title" id="profile-edit-title">変更申請</div>
+      <div class="hint" style="margin-bottom:12px;">変更内容は管理者が確認したうえで正式に反映されます。それまでは元の情報のまま表示されます。</div>
+      <label id="profile-edit-label" for="profile-edit-value">新しい内容</label>
+      <input type="text" id="profile-edit-value">
+      <input type="hidden" id="profile-edit-field">
+      <div class="error" id="profile-edit-error"></div>
+      <button id="profile-edit-submit">変更を申請する</button>
+    </div>
+  </section>
+
+  <!-- 自分の変更申請の状況 -->
+  <section id="screen-my-change-requests" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">変更申請の状況</div>
+    <div id="my-change-requests-list"></div>
+  </section>
+
+  <!-- お知らせ一覧(下部ナビ「お知らせ」タブ) -->
+  <section id="screen-announcements" class="screen">
+    <div class="form-title">お知らせ</div>
+    <div id="announcements-list"></div>
+    <button type="button" id="announce-show-archived-btn" class="secondary" style="margin-top:10px;">過去の通知を見る(30日以上前の既読分)</button>
+  </section>
+
+  <!-- 申請履歴(下部ナビ「履歴」タブ) -->
+  <section id="screen-history" class="screen">
+    <div class="form-title">申請履歴</div>
+    <div id="history-list"></div>
+  </section>
+
+  <!-- 有給取得履歴 -->
+  <section id="screen-leave-history" class="screen">
+    <button type="button" class="back-link" data-nav="leave">戻る</button>
+    <div class="form-title">有給取得履歴</div>
+    <div id="leave-history-list"></div>
+  </section>
+
+  <!-- 支給品申請フォーム(選択式。品目一覧からタップで選ぶ、一覧に無い物だけ「その他」から自由入力) -->
+  <section id="screen-supply-request" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">支給品申請</div>
+    <div class="hint" style="margin-bottom:12px;">支給品を選んでください。一覧に無い物は「上記以外」を選んで品名を入力できます。</div>
+    <div class="supply-select-grid" id="supply-select-grid"></div>
+
+    <div class="card" id="supply-req-detail" style="display:none;">
+      <div class="form-title" id="supply-req-selected-title" style="font-size:16px;"></div>
+      <input type="hidden" id="supply-req-master-id">
+      <div id="supply-req-other-wrap" style="display:none;">
+        <label for="supply-req-other-name">上記以外の支給品名<span class="required-mark">(必須)</span></label>
+        <input type="text" id="supply-req-other-name" placeholder="例: 雨具">
+      </div>
+      <label for="supply-req-qty">数量</label>
+      <input type="number" id="supply-req-qty" min="1" value="1">
+      <div id="supply-req-size-wrap" style="display:none;">
+        <label for="supply-req-size">サイズ</label>
+        <input type="text" id="supply-req-size" placeholder="例: L">
+      </div>
+      <label>交換／新規</label>
+      <select id="supply-req-kind">
+        <option value="新規">新規</option>
+        <option value="交換">交換</option>
+      </select>
+      <label for="supply-req-reason">申請理由</label>
+      <input type="text" id="supply-req-reason" placeholder="例: 破損のため交換希望">
+      <div class="error" id="supply-req-error"></div>
+      <button id="supply-req-submit">申請する</button>
+    </div>
+  </section>
+
+  <!-- 自分の支給品履歴・現在保有数 -->
+  <section id="screen-my-supply" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">支給品</div>
+    <div class="section-title">現在の支給品</div>
+    <div id="my-supply-holdings"></div>
+    <div class="section-title">支給履歴</div>
+    <div id="my-supply-list"></div>
+    <div class="section-title">差異報告</div>
+    <div class="hint" style="margin-bottom:8px;">実際に持っている数が上と違う場合は、品目を選んで報告してください。自動で数量が書き換わることはなく、管理者確認のうえで確定します。</div>
+    <div id="my-supply-discrepancies"></div>
+  </section>
+
+  <!-- 支給品 差異報告フォーム -->
+  <section id="screen-supply-discrepancy-report" class="screen">
+    <button type="button" class="back-link" data-nav="my-supply">支給品に戻る</button>
+    <div class="form-title">差異を報告する</div>
+    <label for="sdr-item">品目</label>
+    <select id="sdr-item"></select>
+    <div class="hint-inline" id="sdr-system-quantity"></div>
+    <label for="sdr-quantity">実際に持っている数</label>
+    <input type="number" id="sdr-quantity" min="0" step="1">
+    <label for="sdr-note">メモ(任意)</label>
+    <input type="text" id="sdr-note">
+    <div class="error" id="sdr-error"></div>
+    <button id="sdr-submit">報告する</button>
+  </section>
+
+  <!-- 管理者画面 -->
+  <section id="screen-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">支給品の記録・検索</div>
+    <div class="hint" style="margin-bottom:12px;">社員ごとの詳しい情報は「社員管理」から確認できます。ここでは暗証番号リセットと支給品の記録・検索のみ行えます。</div>
+
+    <div class="card">
+      <label for="admin-employee-select">社員を選択</label>
+      <select id="admin-employee-select"></select>
+      <div id="admin-employee-detail"></div>
+      <button type="button" class="secondary" id="admin-reset-pin-btn">この社員の暗証番号をリセットする</button>
+      <div class="hint-inline" id="admin-reset-pin-status"></div>
+    </div>
+
+    <div class="section-title">支給品を記録する(実際に渡した時)</div>
+    <div class="card">
+      <label for="admin-issue-employee">対象社員</label>
+      <select id="admin-issue-employee"></select>
+      <label for="admin-issue-date">支給日</label>
+      <input type="date" id="admin-issue-date">
+      <label for="admin-issue-master">支給品</label>
+      <select id="admin-issue-master"></select>
+      <div id="admin-issue-other-wrap" style="display:none;">
+        <label for="admin-issue-item">上記以外の支給品名</label>
+        <input type="text" id="admin-issue-item">
+      </div>
+      <label for="admin-issue-qty">数量</label>
+      <input type="number" id="admin-issue-qty" min="1" value="1">
+      <label for="admin-issue-size">サイズ</label>
+      <input type="text" id="admin-issue-size">
+      <label for="admin-issue-condition">新品／中古</label>
+      <select id="admin-issue-condition">
+        <option value="new">新品</option>
+        <option value="used">中古</option>
+      </select>
+      <label for="admin-issue-reason">支給理由</label>
+      <input type="text" id="admin-issue-reason">
+      <div class="checkbox-row">
+        <input type="checkbox" id="admin-issue-return">
+        <label for="admin-issue-return">返却必要</label>
+      </div>
+      <label for="admin-issue-note">備考</label>
+      <input type="text" id="admin-issue-note">
+      <div class="error" id="admin-issue-error"></div>
+      <button id="admin-issue-submit">記録する</button>
+    </div>
+
+    <div class="section-title">支給品を検索</div>
+    <div class="card">
+      <label for="admin-search-item">品目名で絞り込み</label>
+      <input type="text" id="admin-search-item" placeholder="例: 制服">
+      <div class="checkbox-row">
+        <input type="checkbox" id="admin-search-unreturned">
+        <label for="admin-search-unreturned">未返却のみ</label>
+      </div>
+      <button type="button" class="secondary" id="admin-search-btn">検索</button>
+    </div>
+    <div id="admin-search-results"></div>
+  </section>
+
+  <!-- 管理者ダッシュボード -->
+  <section id="screen-admin-dashboard" class="screen">
+    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">管理者ダッシュボード</div>
+    <div class="hint" style="margin-bottom:12px;">今すぐ対応が必要なことをまとめて表示しています。件数をタップすると一覧に移動します。</div>
+
+    <div class="section-title">集計・レポート</div>
+    <div class="hint" style="margin-bottom:10px;">申請を1件ずつ確認する「申請管理」とは別に、社員・現場・外注会社を横断して数字を一目で比較できる画面です。</div>
+    <div class="home-card-grid" style="margin-bottom:20px;">
+      <button type="button" class="home-card" data-nav="employee-summary">
+        <span class="icon-slot" data-icon="users"></span>
+        <span class="home-card-label">社員別集計</span>
+        <span class="home-card-desc">経費・支払・有給を全社員比較</span>
+      </button>
+      <button type="button" class="home-card" data-nav="attendance-matrix">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">出面集計</span>
+        <span class="home-card-desc">社員/外注会社/現場別の日別人工</span>
+      </button>
+      <button type="button" class="home-card" data-nav="leave-admin">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">有給管理</span>
+        <span class="home-card-desc">付与・残日数・履歴</span>
+      </button>
+      <button type="button" class="home-card" data-nav="daily-report-management">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">日報管理</span>
+        <span class="home-card-desc">検索・未提出確認・確認処理</span>
+      </button>
+    </div>
+
+    <div class="section-title">よく使う管理機能</div>
+    <div class="home-card-grid" style="margin-bottom:20px;">
+      <button type="button" class="home-card" data-nav="admin-announce">
+        <span class="icon-slot" data-icon="bell"></span>
+        <span class="home-card-label">会社からのお知らせ</span>
+        <span class="home-card-desc">作成・配信先選択・既読/確認状況</span>
+      </button>
+    </div>
+
+    <div class="dash-card-grid" id="admin-dashboard-grid"></div>
+
+    <div class="section-title">社員管理</div>
+    <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="employee-directory">
+        <span class="icon-slot" data-icon="users"></span>
+        <div class="menu-item-body">社員名簿<span class="desc">在籍状況・資格・支給品・申請履歴をまとめて確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+
+    <div class="section-title">管理メニュー</div>
+    <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="admin-all-requests">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">申請管理<span class="desc">全申請を種類横断で検索・確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="bulk-expense-admin">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <div class="menu-item-body">まとめ精算管理<span class="desc">複数領収書の一括申請を明細単位で承認/却下</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="info-change-admin">
+        <span class="icon-slot" data-icon="edit"></span>
+        <div class="menu-item-body">個人情報の変更申請<span class="desc">住所・電話番号等の変更を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品の記録・検索<span class="desc">実際に渡した支給品を記録</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="supply-master-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="qual-admin">
+        <span class="icon-slot" data-icon="graduation-cap"></span>
+        <div class="menu-item-body">資格・免許管理<span class="desc">確認待ち・期限が近い資格/免許を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="joyo-denpyo-admin">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">常用伝票管理<span class="desc">現場伝票の一覧・詳細確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="event-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">社内イベント管理<span class="desc">イベント作成・参加回答の確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="health-admin">
+        <span class="icon-slot" data-icon="check-circle"></span>
+        <div class="menu-item-body">健康診断管理<span class="desc">未受診・期限間近・再検査を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="license-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">免許種別マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="purpose-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">使用目的マスター管理<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="site-admin">
+        <span class="icon-slot" data-icon="map-pin"></span>
+        <div class="menu-item-body">新規現場の確認<span class="desc">社員が入力した新しい現場を承認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="entertainment-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">接待交際費 事前申請<span class="desc">承認待ちの接待予定を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="daily-report-management">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">日報管理<span class="desc">日付・社員・現場で検索、本日の未提出を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="subcontractor-company-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">外注会社管理<span class="desc">外注会社・所属作業員の追加・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="category-review">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <div class="menu-item-body">勘定科目確認<span class="desc">AI提案の確信度が低いものを確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="anon-admin">
+        <span class="icon-slot" data-icon="message-circle"></span>
+        <div class="menu-item-body">匿名相談管理<span class="desc">投稿者は表示されません</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="admin-role-management">
+        <span class="icon-slot" data-icon="shield"></span>
+        <div class="menu-item-body">管理者管理<span class="desc">管理者の追加・解除、変更履歴を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 管理者ダッシュボードのドリルダウン一覧(承認待ち等) -->
+  <section id="screen-admin-request-list" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title" id="admin-request-list-title">一覧</div>
+    <div id="admin-request-list"></div>
+  </section>
+
+  <!-- 申請管理: 全申請を種類横断で検索・確認 -->
+  <section id="screen-admin-all-requests" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">申請管理</div>
+
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="areq-search-name" placeholder="社員名で検索...">
+    </div>
+    <div class="filter-row" id="areq-type-filter">
+      <button type="button" class="filter-chip active" data-type="">すべての種類</button>
+      <button type="button" class="filter-chip" data-type="expense_reimbursement">経費立替</button>
+      <button type="button" class="filter-chip" data-type="paid_leave">有給</button>
+      <button type="button" class="filter-chip" data-type="meeting">会議</button>
+      <button type="button" class="filter-chip" data-type="supply_item">支給品</button>
+      <button type="button" class="filter-chip" data-type="entertainment_preapproval">接待事前申請</button>
+      <button type="button" class="filter-chip" data-type="qualification">資格・免許</button>
+    </div>
+    <div class="filter-row" id="areq-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべての状態</button>
+      <button type="button" class="filter-chip" data-status="pending">承認待ち</button>
+      <button type="button" class="filter-chip" data-status="needs_review">差し戻し</button>
+      <button type="button" class="filter-chip" data-status="special_review">特別承認待ち</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+    </div>
+    <button type="button" class="link" id="areq-toggle-advanced">詳細検索(日付・現場・取引先)</button>
+    <div id="areq-advanced" style="display:none;">
+      <label for="areq-date-from">申請日(開始)</label>
+      <input type="date" id="areq-date-from">
+      <label for="areq-date-to">申請日(終了)</label>
+      <input type="date" id="areq-date-to">
+      <label for="areq-site">現場</label>
+      <input type="text" id="areq-site" placeholder="現場名で検索...">
+      <label for="areq-partner">取引先</label>
+      <input type="text" id="areq-partner" placeholder="取引先名で検索...">
+    </div>
+    <div class="hint" id="areq-count" style="margin:10px 0;"></div>
+    <div id="areq-list" class="areq-cards"></div>
+    <div id="areq-table-wrap" class="areq-table-wrap">
+      <table class="areq-table">
+        <thead>
+          <tr>
+            <th data-sort="employee_name">社員名</th>
+            <th data-sort="source_type">申請種類</th>
+            <th data-sort="requested_at">申請日</th>
+            <th data-sort="site_name">現場</th>
+            <th data-sort="amount">金額</th>
+            <th data-sort="status">ステータス</th>
+            <th data-sort="status_group">承認状況</th>
+            <th data-sort="updated_at">更新日時</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="areq-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 申請詳細(管理者) -->
+  <section id="screen-request-detail" class="screen">
+    <button type="button" class="back-link" data-nav="admin-all-requests">申請管理に戻る</button>
+    <div class="card">
+      <div class="form-title" id="rdetail-title">申請詳細</div>
+      <div class="field-group" id="rdetail-fields"></div>
+    </div>
+    <div class="section-title">変更履歴</div>
+    <div id="rdetail-history"></div>
+    <div class="card" id="rdetail-action-box">
+      <div class="form-title" style="font-size:15px;">操作</div>
+      <div id="rdetail-actions"></div>
+      <div class="error" id="rdetail-error"></div>
+    </div>
+  </section>
+
+  <!-- 個人情報の変更申請確認(管理者) -->
+  <section id="screen-info-change-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">個人情報の変更申請</div>
+    <select id="info-change-filter">
+      <option value="pending">確認待ち</option>
+      <option value="approved">承認済み</option>
+      <option value="rejected">却下</option>
+      <option value="">すべて</option>
+    </select>
+    <div id="info-change-list"></div>
+  </section>
+
+  <!-- 支給品マスター管理(管理者) -->
+  <section id="screen-supply-master-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">支給品マスター管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">品目を追加</div>
+      <input type="hidden" id="supply-master-edit-id">
+      <label for="supply-master-name">品目名</label>
+      <input type="text" id="supply-master-name" placeholder="例: 雨具">
+      <div class="checkbox-row">
+        <input type="checkbox" id="supply-master-requires-size">
+        <label for="supply-master-requires-size">サイズ入力欄を表示する</label>
+      </div>
+      <label for="supply-master-sort">表示順(小さいほど上に表示)</label>
+      <input type="number" id="supply-master-sort" value="100">
+      <div class="error" id="supply-master-error"></div>
+      <button id="supply-master-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの品目</div>
+    <div id="supply-master-list"></div>
+  </section>
+
+  <!-- 免許種別マスター管理(管理者) -->
+  <section id="screen-license-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">免許種別マスター管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">種別を追加</div>
+      <input type="hidden" id="license-type-edit-id">
+      <label for="license-type-name">種別名</label>
+      <input type="text" id="license-type-name" placeholder="例: 中型8t限定">
+      <label for="license-type-sort">表示順</label>
+      <input type="number" id="license-type-sort" value="100">
+      <div class="error" id="license-type-error"></div>
+      <button id="license-type-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの種別</div>
+    <div id="license-type-list"></div>
+  </section>
+
+  <!-- 使用目的マスター管理(管理者) -->
+  <section id="screen-purpose-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">使用目的マスター管理</div>
+    <div class="hint" style="margin-bottom:12px;">経費立替申請の「使用目的」の候補を管理します。社員はここで無効化した候補を選べなくなります(過去の申請データは変わりません)。</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">使用目的を追加</div>
+      <input type="hidden" id="purpose-edit-id">
+      <label for="purpose-name">使用目的名</label>
+      <input type="text" id="purpose-name" placeholder="例: 車両維持費">
+      <div class="error" id="purpose-error"></div>
+      <button id="purpose-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの使用目的</div>
+    <div id="purpose-admin-list"></div>
+  </section>
+
+  <!-- 新規現場の確認(管理者) -->
+  <section id="screen-site-admin" class="screen">
+    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">現場管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">新規現場を登録</div>
+      <div class="hint" style="margin-bottom:8px;">承認待ちを経由せず、すぐに使える現場として登録します。</div>
+      <label>現場名<span class="required-mark">(必須)</span></label>
+      <input type="text" id="site-create-name" placeholder="例: 〇〇マンション新築工事">
+      <label>都道府県</label>
+      <select id="site-create-prefecture">
+        <option value="">選択してください</option>
+      </select>
+      <label>住所</label>
+      <input type="text" id="site-create-address" placeholder="例: 徳島市南昭和町1-23">
+      <label>元請</label>
+      <input type="text" id="site-create-prime-contractor" placeholder="例: 〇〇建設株式会社">
+      <label>開始予定日</label>
+      <input type="date" id="site-create-start-date">
+      <label>終了予定日</label>
+      <input type="date" id="site-create-end-date">
+      <button type="button" id="site-create-submit">登録する</button>
+      <div class="error" id="site-create-error"></div>
+      <div id="site-create-candidates" style="display:none;"></div>
+    </div>
+    <div class="section-title">承認待ちの新規現場</div>
+    <div class="hint" style="margin-bottom:12px;">社員が日報・経費申請等で新しく入力した現場名です。承認すると次回から候補に表示されます。名前を修正してから承認することもできます。</div>
+    <div id="site-admin-list"></div>
+    <div class="section-title">現場一覧</div>
+    <input type="text" id="site-list-search" placeholder="現場名で検索...">
+    <div id="site-all-list"></div>
+  </section>
+
+  <!-- 接待交際費 事前申請(管理者) -->
+  <section id="screen-entertainment-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">接待交際費 事前申請</div>
+    <select id="entertainment-admin-filter">
+      <option value="pending">確認待ち</option>
+      <option value="approved">承認済み</option>
+      <option value="rejected">却下</option>
+      <option value="">すべて</option>
+    </select>
+    <div id="entertainment-admin-list"></div>
+  </section>
+
+  <!-- 接待・会食 事前申請フォーム(社員) -->
+  <section id="screen-entertainment-submit" class="screen">
+    <button type="button" class="back-link" data-nav="my-entertainment">戻る</button>
+    <div class="card">
+      <div class="form-title">接待・会食 事前申請</div>
+      <div class="hint" style="margin-bottom:10px;">接待・会食を行う前に申請してください。終了後の申請は原則できません。</div>
+      <label for="ent-datetime">予定日時<span class="required-mark">(必須)</span></label>
+      <input type="datetime-local" id="ent-datetime">
+      <label for="ent-store">予定店舗</label>
+      <input type="text" id="ent-store" placeholder="例: 〇〇割烹">
+      <label for="ent-amount">予定金額(円)</label>
+      <input type="number" id="ent-amount" min="0">
+      <label for="ent-purpose">目的<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ent-purpose" placeholder="例: 新規案件の受注御礼">
+
+      <label>取引先<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ent-partner" list="vendor-list">
+      <input type="hidden" id="ent-partner-id">
+
+      <label for="ent-partner-participants">取引先参加者</label>
+      <div class="hint-inline">氏名が分かれば入力(任意)</div>
+      <input type="text" id="ent-partner-participants" placeholder="例: 山田様、鈴木様">
+      <label for="ent-partner-count">取引先参加人数<span class="required-mark">(必須)</span></label>
+      <input type="number" id="ent-partner-count" min="1">
+
+      <label>自社参加者<span class="required-mark">(必須)</span></label>
+      <div class="participant-select" id="ent-our-participants"></div>
+      <div class="hint-inline">自社人数: <span id="ent-our-count">0</span>名(自動計算)</div>
+
+      <label for="ent-note">備考</label>
+      <div class="hint-inline">任意</div>
+      <textarea id="ent-note"></textarea>
+      <div class="error" id="ent-error"></div>
+      <button type="button" id="ent-goto-late-btn" class="secondary danger" style="display:none;" data-nav="entertainment-late-submit">特別後日申請へ進む</button>
+      <button id="ent-submit">事前申請を送信する</button>
+    </div>
+  </section>
+
+  <!-- 自分の接待事前申請一覧 -->
+  <section id="screen-my-entertainment" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">接待交際費 事前申請</div>
+    <div class="hint" style="margin-bottom:10px;">1回の接待(ゴルフ→食事→2軒目 等)は1つの事前申請にまとめてください。人数や参加者が変わった場合は新規申請ではなく「実績を更新する」から更新してください。</div>
+    <button type="button" data-nav="entertainment-submit">＋ 新しく事前申請する</button>
+    <button type="button" class="secondary danger" data-nav="entertainment-late-submit">過去の接待について今から申請する(特別後日申請)</button>
+    <div id="my-entertainment-list"></div>
+  </section>
+
+  <!-- 接待・会食 特別後日申請フォーム(社員、事前申請できなかった過去日分) -->
+  <section id="screen-entertainment-late-submit" class="screen">
+    <button type="button" class="back-link" data-nav="my-entertainment">戻る</button>
+    <div class="card warning-card">
+      <div class="form-title" style="color:var(--danger);">特別後日申請</div>
+      <div class="preapproval-warning" style="margin-top:0;">
+        ⚠️ この申請は「事前申請できなかった」ことを前提とする特別な申請です。<br>
+        通常はこの方法を使わず、必ず接待の前に「接待・会食 事前申請」から申請してください。<br>
+        この申請には、事前に申請できなかった具体的な理由の入力が必須です。内容は管理者が個別に確認します。
+      </div>
+      <label for="ent-late-datetime">接待の実施日時<span class="required-mark">(必須)</span></label>
+      <input type="datetime-local" id="ent-late-datetime">
+      <label for="ent-late-store">実施店舗</label>
+      <input type="text" id="ent-late-store" placeholder="例: 〇〇割烹">
+      <label for="ent-late-amount">金額(円)</label>
+      <input type="number" id="ent-late-amount" min="0">
+      <label for="ent-late-purpose">目的<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ent-late-purpose" placeholder="例: 新規案件の受注御礼">
+
+      <label>取引先<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ent-late-partner" list="vendor-list">
+      <input type="hidden" id="ent-late-partner-id">
+
+      <label for="ent-late-partner-participants">取引先参加者</label>
+      <div class="hint-inline">氏名が分かれば入力(任意)</div>
+      <input type="text" id="ent-late-partner-participants" placeholder="例: 山田様、鈴木様">
+      <label for="ent-late-partner-count">取引先参加人数<span class="required-mark">(必須)</span></label>
+      <input type="number" id="ent-late-partner-count" min="1">
+
+      <label>自社参加者<span class="required-mark">(必須)</span></label>
+      <div class="participant-select" id="ent-late-our-participants"></div>
+      <div class="hint-inline">自社人数: <span id="ent-late-our-count">0</span>名(自動計算)</div>
+
+      <label for="ent-late-reason">事前に申請できなかった具体的な理由<span class="required-mark">(必須・15文字以上)</span></label>
+      <div class="hint-inline">「忘れていた」等の簡単な理由ではなく、具体的な事情を記入してください。管理者が承認可否を判断する材料になります。</div>
+      <textarea id="ent-late-reason" placeholder="例: 取引先の急な都合で開催日が当日朝に変更になり、事前申請の時間的余裕がなかったため"></textarea>
+
+      <div class="checkbox-row" style="margin-top:14px;">
+        <input type="checkbox" id="ent-late-ack">
+        <label>通常の事前申請ができなかったことを理解したうえで、特別後日申請として提出します</label>
+      </div>
+
+      <label for="ent-late-note">備考</label>
+      <div class="hint-inline">任意</div>
+      <textarea id="ent-late-note"></textarea>
+      <div class="error" id="ent-late-error"></div>
+      <button id="ent-late-submit" class="danger-submit" disabled>特別後日申請として送信する</button>
+    </div>
+  </section>
+
+  <!-- 接待事前申請: 実績の更新(参加者・人数の変更) -->
+  <section id="screen-entertainment-update" class="screen">
+    <button type="button" class="back-link" data-nav="my-entertainment">戻る</button>
+    <div class="card">
+      <div class="form-title">実績を更新する</div>
+      <div class="hint" style="margin-bottom:10px;">当初の予定は変更されません。現時点の実績(実際の参加者・人数)として保存されます。</div>
+      <input type="hidden" id="ent-update-id">
+      <div id="ent-update-planned-summary" class="hint" style="margin-bottom:10px;"></div>
+
+      <label for="ent-update-partner-participants">取引先参加者(実績)</label>
+      <input type="text" id="ent-update-partner-participants" placeholder="例: 山田様、鈴木様">
+      <label for="ent-update-partner-count">取引先の参加人数(実績)<span class="required-mark">(必須)</span></label>
+      <input type="number" id="ent-update-partner-count" min="1">
+      <label>自社参加者(実績)<span class="required-mark">(必須)</span></label>
+      <div class="participant-select" id="ent-update-our-participants"></div>
+      <div class="hint-inline">自社人数: <span id="ent-update-our-count">0</span>名(自動計算)</div>
+
+      <label for="ent-update-note">変更理由・メモ</label>
+      <div class="hint-inline">任意(例: 先方の都合で2名追加)</div>
+      <textarea id="ent-update-note"></textarea>
+      <div class="error" id="ent-update-error"></div>
+      <button id="ent-update-submit">実績を保存する</button>
+    </div>
+    <div class="section-title">変更履歴</div>
+    <div id="ent-update-history"></div>
+  </section>
+
+  <!-- 社員名簿(管理者) -->
+  <!-- 有給管理: 全社員の残日数・付与/使用累計を一覧比較 -->
+  <section id="screen-leave-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">有給管理</div>
+    <div class="hint" style="margin-bottom:10px;">残日数は元帳(いつ何日付与・使用したか)から自動計算されます。付与はここから記録し、取消は各社員の詳細画面「有給」タブから行えます。</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="la-search" placeholder="氏名・社員番号で検索...">
+    </div>
+    <div class="hint" id="la-count" style="margin:10px 0;"></div>
+    <div id="la-list" class="areq-cards"></div>
+    <div class="areq-table-wrap">
+      <table class="areq-table">
+        <thead><tr><th>社員番号</th><th>氏名</th><th>方式</th><th>残日数</th><th>付与累計</th><th>使用累計</th><th>次回付与目安</th><th></th></tr></thead>
+        <tbody id="la-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 有給付与フォーム -->
+  <section id="screen-leave-grant" class="screen">
+    <button type="button" class="back-link" data-nav="leave-admin">有給管理に戻る</button>
+    <div class="form-title">有給を付与する</div>
+    <div class="hint" id="leave-grant-target" style="margin-bottom:10px;"></div>
+
+    <label for="leave-grant-method">付与方式<span class="required-mark">(必須)</span></label>
+    <select id="leave-grant-method">
+      <option value="">選択してください</option>
+      <option value="legal_statutory">法定基準(労基法39条)</option>
+      <option value="company_custom">会社独自運用</option>
+    </select>
+    <div id="leave-grant-statutory-wrap" style="display:none;">
+      <label for="leave-grant-schedule">週所定労働日数区分</label>
+      <select id="leave-grant-schedule">
+        <option value="full_time">通常(週5日以上/週30時間以上)</option>
+        <option value="weekly_4days">週4日(比例付与)</option>
+        <option value="weekly_3days">週3日(比例付与)</option>
+        <option value="weekly_2days">週2日(比例付与)</option>
+        <option value="weekly_1day">週1日(比例付与)</option>
+      </select>
+      <div class="hint-inline" id="leave-grant-statutory-hint"></div>
+    </div>
+
+    <label for="leave-grant-amount">付与日数<span class="required-mark">(必須)</span></label>
+    <input type="number" id="leave-grant-amount" step="0.5" min="0.5" placeholder="例: 10">
+
+    <label for="leave-grant-date">付与日<span class="required-mark">(必須)</span></label>
+    <input type="date" id="leave-grant-date">
+
+    <label for="leave-grant-period-start">対象期間 開始<span class="required-mark">(必須)</span></label>
+    <input type="date" id="leave-grant-period-start">
+    <label for="leave-grant-period-end">対象期間 終了<span class="required-mark">(必須)</span></label>
+    <input type="date" id="leave-grant-period-end">
+
+    <label for="leave-grant-note">付与理由・メモ</label>
+    <div class="hint-inline">任意</div>
+    <input type="text" id="leave-grant-note" placeholder="例: 2026年度定期付与">
+
+    <label class="checkbox-row" style="display:flex;align-items:center;gap:8px;margin-top:10px;">
+      <input type="checkbox" id="leave-grant-manual-adjustment"> 手動調整として記録する(前システムからの繰越等)
+    </label>
+    <div id="leave-grant-adjustment-reason-wrap" style="display:none;">
+      <label for="leave-grant-adjustment-reason">調整理由<span class="required-mark">(必須)</span></label>
+      <input type="text" id="leave-grant-adjustment-reason" placeholder="例: 前システムからの繰越分">
+    </div>
+
+    <div class="error" id="leave-grant-error"></div>
+    <button id="leave-grant-submit">付与する</button>
+  </section>
+
+  <!-- 社員別集計: 経費・支払・有給・その他申請を1枚の表で全社員比較 -->
+  <section id="screen-employee-summary" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">社員別集計</div>
+    <label for="es-month">対象月</label>
+    <input type="month" id="es-month">
+    <div class="hint" id="es-count" style="margin:10px 0;"></div>
+    <div id="es-list" class="areq-cards"></div>
+    <div class="areq-table-wrap">
+      <table class="areq-table">
+        <thead>
+          <tr>
+            <th>社員番号</th><th>氏名</th><th>申請総額</th><th>承認済み</th><th>却下</th><th>会社経費</th><th>支払済</th><th>支払待ち</th><th>受取確認待ち</th>
+            <th>有給付与</th><th>有給使用</th><th>有給残</th><th>その他申請</th>
+          </tr>
+        </thead>
+        <tbody id="es-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 社員別集計: 社員個人詳細(明細まで追える) -->
+  <section id="screen-employee-monthly-detail" class="screen">
+    <button type="button" class="back-link" data-nav="employee-summary">社員別集計に戻る</button>
+    <div class="form-title" id="emd-title">社員個人詳細</div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">承認済み</span><span class="stat-mini-value" id="emd-approved">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">却下</span><span class="stat-mini-value" id="emd-rejected">-</span></div>
+    </div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">支払待ち(未払)</span><span class="stat-mini-value" id="emd-unpaid">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">支払済</span><span class="stat-mini-value" id="emd-paid">-</span></div>
+    </div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">有給残</span><span class="stat-mini-value" id="emd-leave-balance">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">日報合計人工</span><span class="stat-mini-value" id="emd-headcount">-</span></div>
+    </div>
+
+    <div class="section-title">経費立替の明細</div>
+    <div id="emd-advance-list"></div>
+    <div class="section-title">会社経費の明細</div>
+    <div id="emd-company-list"></div>
+    <div class="section-title">有給付与・使用履歴(この月)</div>
+    <div id="emd-leave-list"></div>
+    <div class="section-title">その他申請履歴(この月)</div>
+    <div id="emd-other-list"></div>
+    <div class="section-title">現場別人工(この月)</div>
+    <div id="emd-site-list"></div>
+  </section>
+
+  <!-- 経費支払登録フォーム -->
+  <section id="screen-expense-payment" class="screen">
+    <button type="button" class="back-link" data-nav="employee-monthly-detail">社員個人詳細に戻る</button>
+    <div class="form-title">支払を登録する</div>
+    <div class="hint" id="ep-target" style="margin-bottom:10px;"></div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">承認総額</span><span class="stat-mini-value" id="ep-total">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">残額</span><span class="stat-mini-value" id="ep-remaining">-</span></div>
+    </div>
+    <label for="ep-amount">支払金額<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">一部支払も可(残額以下の金額を入力)</div>
+    <input type="number" id="ep-amount" min="1" step="1">
+    <label for="ep-date">支払日<span class="required-mark">(必須)</span></label>
+    <input type="date" id="ep-date">
+    <label for="ep-method">支払方法</label>
+    <select id="ep-method">
+      <option value="">選択してください</option>
+      <option value="現金">現金</option>
+      <option value="銀行振込">銀行振込</option>
+      <option value="その他">その他</option>
+    </select>
+    <label for="ep-note">備考</label>
+    <div class="hint-inline">任意</div>
+    <input type="text" id="ep-note" placeholder="例: 8月分まとめて振込">
+    <div class="error" id="ep-error"></div>
+    <button id="ep-submit">支払を登録する</button>
+  </section>
+
+  <!-- まとめ精算管理(管理者、一覧) -->
+  <section id="screen-bulk-expense-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">まとめ精算管理</div>
+    <div class="filter-row" id="bea-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべて</button>
+      <button type="button" class="filter-chip" data-status="pending">承認待ち</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+    </div>
+    <div id="bea-list"></div>
+  </section>
+
+  <!-- まとめ精算 明細単位の部分承認(管理者、詳細) -->
+  <section id="screen-bulk-expense-detail" class="screen">
+    <button type="button" class="back-link" data-nav="bulk-expense-admin">まとめ精算管理に戻る</button>
+    <div class="form-title" id="bed-title">まとめ精算 詳細</div>
+    <div class="hint" id="bed-reconciliation" style="margin-bottom:10px;"></div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">承認額</span><span class="stat-mini-value" id="bed-approved">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">却下額</span><span class="stat-mini-value" id="bed-rejected">-</span></div>
+    </div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">未処理額</span><span class="stat-mini-value" id="bed-pending">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">申請総額</span><span class="stat-mini-value" id="bed-total">-</span></div>
+    </div>
+
+    <div class="filter-row" style="margin:10px 0;">
+      <button type="button" class="secondary" id="bed-select-all">全件選択</button>
+      <button type="button" class="secondary" id="bed-select-none">選択解除</button>
+    </div>
+    <div id="bed-item-list"></div>
+
+    <div class="card total-card" style="position:sticky; bottom:8px;">
+      <div class="hint-inline" id="bed-selected-count">0件選択中</div>
+      <button type="button" id="bed-approve-selected">選択した明細を承認</button>
+      <button type="button" class="secondary" id="bed-reject-selected">選択した明細を却下</button>
+      <button type="button" class="secondary" id="bed-hold-selected">選択した明細を保留(差戻し)</button>
+      <div class="bulk-reject-reason" id="bed-reason-box" style="display:none;">
+        <label>却下/保留理由<span class="required-mark">(必須)</span></label>
+        <textarea id="bed-reason"></textarea>
+        <button type="button" id="bed-confirm-reason">確定する</button>
+      </div>
+    </div>
+    <div class="error" id="bed-error"></div>
+  </section>
+
+  <!-- 申請の詳細(社員本人視点、通知タップ/お知らせ/申請履歴から遷移。全ステータス共通) -->
+  <section id="screen-my-request-detail" class="screen">
+    <button type="button" class="back-link" id="mrd-back-link" data-nav="history">申請履歴に戻る</button>
+    <div class="form-title" id="mrd-title">申請詳細</div>
+    <div class="card" id="mrd-reject-box" style="display:none;">
+      <div class="section-title" style="margin-top:0;">却下理由</div>
+      <div id="mrd-rejection-reason"></div>
+      <div class="hint-inline" id="mrd-decided-at"></div>
+    </div>
+    <div id="mrd-payment-card"></div>
+    <div class="section-title">申請内容</div>
+    <div id="mrd-items"></div>
+  </section>
+
+  <!-- 領収書・経費精算書画像のタップ拡大表示(全画面共通の単一オーバーレイ) -->
+  <div class="image-zoom-overlay" id="image-zoom-overlay">
+    <button type="button" class="image-zoom-close" id="image-zoom-close">✕</button>
+    <img id="image-zoom-img" src="" alt="拡大画像">
+  </div>
+
+  <!-- 出面集計: 社員別/外注会社別/現場別のマトリクス(サクミル代替) -->
+  <section id="screen-attendance-matrix" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">出面集計</div>
+    <div class="filter-row" id="am-period-filter">
+      <button type="button" class="filter-chip active" data-period="month">月次</button>
+      <button type="button" class="filter-chip" data-period="year">年間</button>
+    </div>
+    <div id="am-month-group">
+      <div class="month-nav">
+        <button type="button" class="month-nav-arrow" id="am-month-prev" aria-label="前月"><span class="icon-slot" data-icon="chevron-left"></span></button>
+        <div class="month-nav-display" id="am-month-display">2026年8月</div>
+        <button type="button" class="month-nav-arrow" id="am-month-next" aria-label="翌月"><span class="icon-slot" data-icon="chevron-right"></span></button>
+      </div>
+      <button type="button" class="month-nav-today" id="am-month-today">今月</button>
+      <input type="month" id="am-month" style="display:none;">
+    </div>
+    <label for="am-year" style="display:none;">対象年</label>
+    <input type="number" id="am-year" style="display:none;" min="2020" max="2100">
+    <div class="filter-row" id="am-view-filter">
+      <button type="button" class="filter-chip active" data-view="employee">社員別</button>
+      <button type="button" class="filter-chip" data-view="subcontractor_company">外注会社別</button>
+      <button type="button" class="filter-chip" data-view="site">現場別</button>
+    </div>
+    <label for="am-employee-filter">社員で絞り込み</label>
+    <div class="hint-inline">任意</div>
+    <select id="am-employee-filter"><option value="">すべての社員</option></select>
+    <label for="am-company-filter">外注会社で絞り込み</label>
+    <div class="hint-inline">任意</div>
+    <select id="am-company-filter"><option value="">すべての外注会社</option></select>
+    <label for="am-site-filter">現場で絞り込み</label>
+    <div class="hint-inline">任意</div>
+    <select id="am-site-filter"><option value="">すべての現場</option></select>
+    <div class="hint" id="am-hint" style="margin:10px 0;"></div>
+    <div class="attendance-matrix-wrap" id="am-matrix-wrap"></div>
+  </section>
+
+  <!-- 出面集計: セル単位の内訳(その日・その対象の実際の内訳) -->
+  <section id="screen-attendance-cell-detail" class="screen">
+    <button type="button" class="back-link" data-nav="attendance-matrix">出面集計に戻る</button>
+    <div class="form-title" id="acd-title">内訳</div>
+    <div id="acd-list"></div>
+  </section>
+
+  <!-- 出面集計: 個人→現場 / 現場→個人・外注会社 の内訳 -->
+  <section id="screen-attendance-detail" class="screen">
+    <button type="button" class="back-link" data-nav="attendance-matrix">出面集計に戻る</button>
+    <div class="form-title" id="ad-title">内訳</div>
+    <div id="ad-list"></div>
+  </section>
+
+  <section id="screen-employee-directory" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">社員名簿</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="employee-search-input" placeholder="氏名・社員番号で検索">
+    </div>
+    <div class="filter-row" id="employee-status-filter">
+      <button type="button" class="filter-chip active" data-status="active">在籍中</button>
+      <button type="button" class="filter-chip" data-status="">すべて</button>
+      <button type="button" class="filter-chip" data-status="inactive">退職等</button>
+    </div>
+    <div id="employee-directory-list"></div>
+  </section>
+
+  <!-- 社員詳細(管理者) -->
+  <section id="screen-employee-detail" class="screen">
+    <button type="button" class="back-link" data-nav="employee-directory">社員名簿に戻る</button>
+    <div class="profile-header">
+      <div class="profile-avatar" id="employee-detail-avatar"></div>
+      <div>
+        <div class="profile-header-name" id="employee-detail-name"></div>
+        <div class="profile-header-code" id="employee-detail-code"></div>
+      </div>
+    </div>
+    <div class="tab-bar" id="employee-detail-tabs">
+      <button type="button" class="tab-btn active" data-tab="basic">基本情報</button>
+      <button type="button" class="tab-btn" data-tab="leave">有給</button>
+      <button type="button" class="tab-btn" data-tab="qual">資格・免許・健診</button>
+      <button type="button" class="tab-btn" data-tab="supply">支給品</button>
+      <button type="button" class="tab-btn" data-tab="requests">申請履歴</button>
+      <button type="button" class="tab-btn" data-tab="devices">ログイン端末</button>
+    </div>
+    <div class="tab-panel active" id="employee-detail-panel-basic">
+      <div class="card">
+        <div class="field-group" id="employee-detail-basic-fields"></div>
+      </div>
+      <button type="button" class="secondary" id="employee-detail-edit-basic-btn">基本情報を編集する</button>
+    </div>
+    <div class="tab-panel" id="employee-detail-panel-leave">
+      <div class="stat-mini-row">
+        <div class="stat-mini"><span class="stat-mini-label">今年度使用</span><span class="stat-mini-value" id="employee-detail-leave-used">-</span></div>
+        <div class="stat-mini"><span class="stat-mini-label">今年度付与</span><span class="stat-mini-value" id="employee-detail-leave-granted">-</span></div>
+        <div class="stat-mini"><span class="stat-mini-label">残り</span><span class="stat-mini-value" id="employee-detail-leave-balance">-</span></div>
+      </div>
+      <div class="hint-inline" id="employee-detail-leave-period">-</div>
+      <button type="button" class="secondary" id="employee-detail-grant-leave-btn">有給を付与する</button>
+
+      <div class="section-title">付与方式</div>
+      <div class="hint" style="margin-bottom:10px;">給与形態(月給・日当月給等)から自動判定はしません。社員ごとに実態に合わせて選んでください。</div>
+      <label for="employee-detail-leave-method">有給管理方式</label>
+      <select id="employee-detail-leave-method">
+        <option value="">未設定</option>
+        <option value="legal_statutory">法定基準(労基法39条)で計算</option>
+        <option value="company_custom">会社独自運用</option>
+      </select>
+      <div id="employee-detail-leave-statutory-wrap" style="display:none;">
+        <label for="employee-detail-leave-schedule">週所定労働日数区分</label>
+        <select id="employee-detail-leave-schedule">
+          <option value="full_time">通常(週5日以上/週30時間以上)</option>
+          <option value="weekly_4days">週4日(比例付与)</option>
+          <option value="weekly_3days">週3日(比例付与)</option>
+          <option value="weekly_2days">週2日(比例付与)</option>
+          <option value="weekly_1day">週1日(比例付与)</option>
+        </select>
+        <div class="hint-inline" id="employee-detail-leave-statutory-hint"></div>
+      </div>
+      <div id="employee-detail-leave-custom-wrap" style="display:none;">
+        <label for="employee-detail-leave-custom-note">会社独自運用の説明</label>
+        <input type="text" id="employee-detail-leave-custom-note" placeholder="例: 日当月給社員の年7日目安">
+      </div>
+
+      <div class="section-title">次回付与予定</div>
+      <div class="hint" id="employee-detail-leave-policy-hint" style="margin-bottom:10px;"></div>
+      <label for="employee-detail-leave-base-date">基準日</label>
+      <input type="date" id="employee-detail-leave-base-date">
+      <label for="employee-detail-leave-next-grant">次回付与予定日</label>
+      <input type="date" id="employee-detail-leave-next-grant">
+      <button type="button" class="secondary" id="employee-detail-leave-policy-save">ポリシーを保存する</button>
+
+      <div class="section-title">付与・使用履歴(元帳)</div>
+      <div id="employee-detail-leave-history"></div>
+
+      <div class="section-title">付与記録(方式・理由の内訳)</div>
+      <div id="employee-detail-leave-grants"></div>
+    </div>
+    <div class="tab-panel" id="employee-detail-panel-qual">
+      <div class="section-title">健康診断</div>
+      <div id="employee-detail-health-summary"></div>
+      <button type="button" class="secondary" id="employee-detail-record-health-btn">健診結果を記録する</button>
+      <div class="section-title">資格・免許</div>
+      <div id="employee-detail-qual-list"></div>
+    </div>
+    <div class="tab-panel" id="employee-detail-panel-supply">
+      <div class="section-title">現在の保有数</div>
+      <div id="employee-detail-supply-holdings"></div>
+      <div class="section-title">保有数を調整する</div>
+      <div class="hint" style="margin-bottom:8px;">導入前から持っている分の初期登録や、確認の結果判明した訂正はここから行う。理由は履歴に残る。</div>
+      <label for="ed-supply-adjust-item">品目</label>
+      <select id="ed-supply-adjust-item"></select>
+      <label for="ed-supply-adjust-delta">増減数(マイナス可、例: 初期登録+3、訂正-1)</label>
+      <input type="number" id="ed-supply-adjust-delta" step="1">
+      <label for="ed-supply-adjust-reason">理由<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ed-supply-adjust-reason" placeholder="例: 導入前からの保有分の初期登録">
+      <div class="error" id="ed-supply-adjust-error"></div>
+      <button type="button" class="secondary" id="ed-supply-adjust-submit">調整する</button>
+      <div class="section-title">調整履歴</div>
+      <div id="employee-detail-supply-adjust-history"></div>
+      <div class="section-title">差異報告</div>
+      <div id="employee-detail-supply-discrepancies"></div>
+      <div class="section-title">支給履歴</div>
+      <div id="employee-detail-supply-list"></div>
+    </div>
+    <div class="tab-panel" id="employee-detail-panel-requests">
+      <div id="employee-detail-requests-list"></div>
+    </div>
+    <div class="tab-panel" id="employee-detail-panel-devices">
+      <div class="hint">ログイン中の端末を一覧表示します。不審な端末や紛失した端末は無効化できます。無効化された端末は、次回利用時に暗証番号の再入力が必要になります。</div>
+      <button type="button" class="secondary danger" id="employee-detail-revoke-all-devices-btn">この社員の全端末を無効化する</button>
+      <div id="employee-detail-devices-list"></div>
+    </div>
+  </section>
+
+  <!-- 社員詳細: 基本情報の編集(管理者) -->
+  <section id="screen-employee-edit-basic" class="screen">
+    <button type="button" class="back-link" data-nav="employee-detail">社員詳細に戻る</button>
+    <div class="card">
+      <div class="form-title">基本情報を編集</div>
+      <label for="employee-edit-furigana">フリガナ</label>
+      <input type="text" id="employee-edit-furigana">
+      <label for="employee-edit-birth">生年月日</label>
+      <input type="date" id="employee-edit-birth">
+      <div class="checkbox-row">
+        <input type="checkbox" id="employee-edit-show-birthday">
+        <label>誕生日を社内カレンダーに表示する(生年・年齢は表示されません)</label>
+      </div>
+      <label for="employee-edit-department">所属/役割</label>
+      <input type="text" id="employee-edit-department">
+
+      <div class="section-title">日報の入力項目(対象者だけに表示されます)</div>
+      <div class="hint-inline">氏名ではなくこの設定で対象者を判定します。ここで許可した社員だけ、日報にその項目が表示されます。</div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-is-driver"><label>運転手として登録(通勤早出・通勤残業の入力対象)</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-overtime"><label>残業時間の入力可</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-site-duty"><label>現場(日報)の入力可</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-sales"><label>営業の入力可</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-transport"><label>運搬の入力可</label></div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-qualification"><label>日報からの資格取得登録を許可</label></div>
+
+      <div class="section-title">接待事前申請の特例</div>
+      <div class="hint-inline">通常、接待事前申請は過去日を選ぶと送信できません(「特別後日申請」への案内になります)。この特例を許可すると、この社員だけは過去日でも通常の申請フォームから直接送信できます。</div>
+      <div class="checkbox-row"><input type="checkbox" id="employee-edit-can-backdate-ent"><label>接待事前申請の過去日提出を許可(特例)</label></div>
+
+      <div class="error" id="employee-edit-error"></div>
+      <button id="employee-edit-submit">保存する</button>
+    </div>
+  </section>
+
+  <!-- 社員詳細: 健診結果の記録(管理者) -->
+  <section id="screen-health-admin-record" class="screen">
+    <button type="button" class="back-link" data-nav="employee-detail">社員詳細に戻る</button>
+    <div class="card">
+      <div class="form-title">健診結果を記録する</div>
+      <label for="health-admin-date">受診日<span class="required-mark">(必須)</span></label>
+      <input type="date" id="health-admin-date">
+      <label for="health-admin-type">健診種別</label>
+      <input type="text" id="health-admin-type">
+      <label for="health-admin-institution">受診機関</label>
+      <input type="text" id="health-admin-institution">
+      <label for="health-admin-next">次回予定日</label>
+      <input type="date" id="health-admin-next">
+      <div class="checkbox-row">
+        <input type="checkbox" id="health-admin-confirmed">
+        <label for="health-admin-confirmed">結果確認済み</label>
+      </div>
+      <div class="checkbox-row">
+        <input type="checkbox" id="health-admin-retest">
+        <label for="health-admin-retest">再検査の指示あり</label>
+      </div>
+      <label for="health-admin-note">備考</label>
+      <textarea id="health-admin-note"></textarea>
+      <div class="error" id="health-admin-error"></div>
+      <button id="health-admin-submit">記録する</button>
+    </div>
+  </section>
+
+  <!-- 健康診断 管理(ダッシュボードからのドリルダウン) -->
+  <section id="screen-health-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">健康診断管理</div>
+    <div class="filter-row">
+      <button type="button" class="filter-chip active" data-health-filter="">すべて</button>
+      <button type="button" class="filter-chip" data-health-filter="unrecorded">未受診</button>
+      <button type="button" class="filter-chip" data-health-filter="overdue">期限超過</button>
+      <button type="button" class="filter-chip" data-health-filter="due_soon">期限間近</button>
+      <button type="button" class="filter-chip" data-health-filter="retest">再検査確認待ち</button>
+    </div>
+    <div id="health-admin-warning-list"></div>
+  </section>
+
+  <!-- お知らせ管理(作成・一覧・既読状況) -->
+  <section id="screen-admin-announce" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">お知らせ管理</div>
+
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">新しいお知らせを作成</div>
+      <label for="announce-title">タイトル</label>
+      <input type="text" id="announce-title">
+      <label for="announce-body">本文</label>
+      <textarea id="announce-body" style="min-height:100px;"></textarea>
+      <label>重要度</label>
+      <div class="hint-inline">給与・災害・会社全体の重要連絡・緊急連絡・締切のある重要通知など、会社として本当に重要な場合だけ「重要」「最重要」を選ぶ</div>
+      <div class="checkbox-row"><input type="radio" name="announce-importance" value="normal" id="announce-importance-normal" checked><label for="announce-importance-normal">通常</label></div>
+      <div class="checkbox-row"><input type="radio" name="announce-importance" value="important" id="announce-importance-important"><label for="announce-importance-important">重要(ホーム画面上部に表示)</label></div>
+      <div class="checkbox-row"><input type="radio" name="announce-importance" value="critical" id="announce-importance-critical"><label for="announce-importance-critical">最重要(ホーム画面上部に強調表示)</label></div>
+      <label>掲載開始日時</label>
+      <div class="hint-inline">空欄なら送信後すぐにホーム・お知らせに表示される。未来の日時を指定すると、その日時になるまで対象社員には表示されない</div>
+      <input type="datetime-local" id="announce-display-from">
+      <label>既読後の表示</label>
+      <div class="checkbox-row"><input type="radio" name="announce-display-mode" value="hide_after_read" id="announce-display-hide" checked><label for="announce-display-hide">既読になったらホームから消える</label></div>
+      <div class="checkbox-row"><input type="radio" name="announce-display-mode" value="persist_after_read" id="announce-display-persist"><label for="announce-display-persist">既読後もホームに残す(終了日なし・固定表示)</label></div>
+      <div class="checkbox-row"><input type="radio" name="announce-display-mode" value="until_date" id="announce-display-until"><label for="announce-display-until">指定した日時までホームに残す</label></div>
+      <div id="announce-display-until-box" style="display:none;">
+        <input type="datetime-local" id="announce-display-until-date">
+      </div>
+      <label>添付ファイル</label>
+      <div class="hint-inline">任意(画像・PDF)</div>
+      <label class="photo-capture-btn">
+        <span class="icon-slot" data-icon="file"></span>
+        <span id="announce-attachment-label">ファイルを選ぶ</span>
+        <input type="file" accept="image/*,application/pdf" id="announce-attachment-input">
+      </label>
+      <div class="ocr-status" id="announce-attachment-status"></div>
+      <label>配信先</label>
+      <div class="checkbox-row"><input type="radio" name="announce-target" value="all" id="announce-target-all" checked><label for="announce-target-all">全社員</label></div>
+      <div class="checkbox-row"><input type="radio" name="announce-target" value="select" id="announce-target-select"><label for="announce-target-select">個人・複数社員を選択</label></div>
+      <div id="announce-employee-picker" style="display:none;">
+        <input type="text" id="announce-employee-search" placeholder="社員名・社員番号で検索...">
+        <div id="announce-employee-checklist" class="candidate-results"></div>
+        <div class="hint-inline">選択中: <span id="announce-employee-selected-count">0</span>名</div>
+      </div>
+      <div class="error" id="announce-error"></div>
+      <button id="announce-submit">送信する</button>
+    </div>
+
+    <div class="section-title">これまでのお知らせ</div>
+    <div id="announce-admin-list"></div>
+  </section>
+
+  <!-- お知らせ既読状況(管理者) -->
+  <section id="screen-announce-status" class="screen">
+    <button type="button" class="back-link" data-nav="admin-announce">戻る</button>
+    <div class="form-title" id="announce-status-title">既読状況</div>
+    <div id="announce-status-list"></div>
+  </section>
+
+  <!-- 匿名相談トップ(送る/自分の相談一覧) -->
+  <section id="screen-anon-consult" class="screen">
+    <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">匿名相談</div>
+    <div class="anon-notice">この相談からあなたの氏名・社員番号は会社側には表示されません。相談番号は返信の確認に使うので、忘れないようスクリーンショット等で保存してください。</div>
+    <button type="button" data-nav="anon-submit">＋ 新しく相談を送る</button>
+    <div class="section-title">これまでの相談</div>
+    <div id="anon-my-list"></div>
+  </section>
+
+  <!-- 匿名相談フォーム -->
+  <section id="screen-anon-submit" class="screen">
+    <button type="button" class="back-link" data-nav="anon-consult">戻る</button>
+    <div class="card">
+      <div class="form-title">匿名相談を送る</div>
+      <div class="anon-notice">この相談からあなたの氏名・社員番号は会社側には表示されません。</div>
+      <label for="anon-category">相談カテゴリー</label>
+      <select id="anon-category">
+        <option value="人間関係">人間関係</option>
+        <option value="ハラスメント">ハラスメント</option>
+        <option value="職場環境">職場環境</option>
+        <option value="安全について">安全について</option>
+        <option value="給与・待遇">給与・待遇</option>
+        <option value="上司について">上司について</option>
+        <option value="会社への改善提案">会社への改善提案</option>
+        <option value="その他">その他</option>
+      </select>
+      <label for="anon-content">相談内容</label>
+      <textarea id="anon-content" style="min-height:120px;"></textarea>
+      <label>緊急度</label>
+      <div class="checkbox-row"><input type="radio" name="anon-urgency" value="normal" id="anon-urgency-normal" checked><label for="anon-urgency-normal">通常</label></div>
+      <div class="checkbox-row"><input type="radio" name="anon-urgency" value="soon" id="anon-urgency-soon"><label for="anon-urgency-soon">できれば早めに対応してほしい</label></div>
+      <div class="checkbox-row"><input type="radio" name="anon-urgency" value="urgent" id="anon-urgency-urgent"><label for="anon-urgency-urgent">緊急</label></div>
+      <div class="error" id="anon-submit-error"></div>
+      <button id="anon-submit-btn">匿名で送信</button>
+    </div>
+  </section>
+
+  <!-- 匿名相談 送信完了(相談番号表示) -->
+  <section id="screen-anon-done" class="screen">
+    <button type="button" class="back-link" data-nav="anon-consult">戻る</button>
+    <div class="consult-code-box">
+      <div class="success-icon"><span class="icon-slot" data-icon="check-circle"></span></div>
+      <div>相談を送信しました</div>
+      <div class="code" id="anon-done-code"></div>
+      <div class="hint">この番号は会社からの返信の確認に必要です</div>
+    </div>
+  </section>
+
+  <!-- 匿名相談 スレッド(社員側) -->
+  <section id="screen-anon-thread" class="screen">
+    <button type="button" class="back-link" data-nav="anon-consult">戻る</button>
+    <div class="form-title">相談番号: <span id="anon-thread-code"></span></div>
+    <div class="chat-thread" id="anon-thread-messages"></div>
+    <label for="anon-thread-reply">追加メッセージ</label>
+    <textarea id="anon-thread-reply"></textarea>
+    <div class="error" id="anon-thread-error"></div>
+    <button id="anon-thread-send">送信</button>
+  </section>
+
+  <!-- 匿名相談管理(管理者) -->
+  <section id="screen-anon-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">匿名相談管理</div>
+    <div class="hint" style="margin-bottom:12px;">社員名は表示されません(構造上、逆引きできません)。</div>
+    <select id="anon-admin-status-filter">
+      <option value="">すべて</option>
+      <option value="unconfirmed">未確認</option>
+      <option value="confirmed">確認済み</option>
+      <option value="in_progress">対応中</option>
+      <option value="resolved">対応完了</option>
+    </select>
+    <div id="anon-admin-list"></div>
+  </section>
+
+  <!-- 匿名相談スレッド(管理者側) -->
+  <section id="screen-anon-admin-thread" class="screen">
+    <button type="button" class="back-link" data-nav="anon-admin">戻る</button>
+    <div class="form-title">相談番号: <span id="anon-admin-thread-code"></span></div>
+    <label for="anon-admin-status-select">対応状況</label>
+    <select id="anon-admin-status-select">
+      <option value="unconfirmed">未確認</option>
+      <option value="confirmed">確認済み</option>
+      <option value="in_progress">対応中</option>
+      <option value="resolved">対応完了</option>
+    </select>
+    <div class="chat-thread" id="anon-admin-thread-messages"></div>
+    <label for="anon-admin-reply">返信</label>
+    <textarea id="anon-admin-reply"></textarea>
+    <div class="error" id="anon-admin-thread-error"></div>
+    <button id="anon-admin-reply-btn">返信する</button>
+  </section>
+
+  <!-- 常用伝票 一覧 -->
+  <section id="screen-joyo-denpyo-list" class="screen">
+    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">常用伝票</div>
+    <button type="button" id="jd-new-btn">＋ 新規作成</button>
+    <div class="search-bar" style="margin-top:14px;">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="jd-search-partner" placeholder="取引先名で検索...">
+    </div>
+    <div class="filter-row">
+      <input type="date" id="jd-search-date-from">
+      <input type="date" id="jd-search-date-to">
+    </div>
+    <div class="hint" id="jd-count" style="margin:10px 0;"></div>
+    <div id="jd-list"></div>
+  </section>
+
+  <!-- 常用伝票 入力 -->
+  <section id="screen-joyo-denpyo-form" class="screen">
+    <button type="button" class="back-link" data-nav="joyo-denpyo-list">常用伝票一覧に戻る</button>
+    <div class="form-title" id="jd-form-title">常用伝票を作成する</div>
+    <input type="hidden" id="jd-edit-id">
+    <label>日付<span class="required-mark">(必須)</span></label>
+    <input type="date" id="jd-date">
+    <label>現場<span class="required-mark">(必須)</span></label>
+    <input type="text" class="dr-site-search" id="jd-site-search" placeholder="現場名で検索...">
+    <select id="jd-site-select"></select>
+    <label>取引先</label>
+    <input type="text" id="jd-partner-name" placeholder="例: 〇〇株式会社">
+    <label>作業内容</label>
+    <textarea id="jd-work-description" placeholder="実施した作業内容を記入してください"></textarea>
+    <label>使用車両(任意)</label>
+    <input type="text" id="jd-vehicle-info">
+    <label>使用資材等(任意)</label>
+    <input type="text" id="jd-materials-info">
+    <label>備考</label>
+    <input type="text" id="jd-notes">
+
+    <label>伝票原本の写真</label>
+    <div class="hint-inline">紙の伝票原本がある場合は撮影・添付してください(任意)</div>
+    <label class="photo-capture-btn">
+      <span class="icon-slot" data-icon="camera"></span>
+      <span id="jd-photo-label">写真を選ぶ</span>
+      <input type="file" accept="image/*" id="jd-photo-input">
+    </label>
+    <div class="ocr-status" id="jd-photo-status"></div>
+
+    <div class="section-title">作業員</div>
+    <button type="button" class="secondary" id="jd-prefill-btn">同じ日・同じ現場の日報から取り込む</button>
+    <div id="jd-workers-list"></div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">合計人数</span><span class="stat-mini-value" id="jd-workers-summary-count">0名</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">合計人工</span><span class="stat-mini-value" id="jd-workers-summary-headcount">0</span></div>
+    </div>
+    <button type="button" class="secondary" id="jd-add-worker-btn">＋ 作業員を手動で追加</button>
+
+    <div class="error" id="jd-form-error"></div>
+    <button id="jd-submit">この内容で作成する</button>
+    <button type="button" class="secondary" id="jd-save-draft">下書きとして保存する</button>
+  </section>
+
+  <!-- 常用伝票 詳細 -->
+  <section id="screen-joyo-denpyo-detail" class="screen">
+    <button type="button" class="back-link" data-nav="joyo-denpyo-list">常用伝票一覧に戻る</button>
+    <div class="form-title">常用伝票詳細</div>
+    <div class="card">
+      <div class="field-group" id="jd-detail-fields"></div>
+    </div>
+    <div class="section-title">作業員</div>
+    <div id="jd-detail-workers"></div>
+    <div class="card" id="jd-detail-actions"></div>
+  </section>
+
+  <!-- 常用伝票 管理者検索 -->
+  <section id="screen-joyo-denpyo-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">常用伝票管理</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="jda-search-partner" placeholder="取引先名で検索...">
+    </div>
+    <div class="filter-row" id="jda-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべての状態</button>
+      <button type="button" class="filter-chip" data-status="draft">下書き</button>
+      <button type="button" class="filter-chip" data-status="pending_confirm">確認待ち</button>
+      <button type="button" class="filter-chip" data-status="confirmed">確認済み</button>
+      <button type="button" class="filter-chip" data-status="completed">完了</button>
+    </div>
+    <div class="hint" id="jda-count" style="margin:10px 0;"></div>
+    <div class="checkbox-row"><input type="checkbox" id="jda-select-all"><label>すべて選択</label></div>
+    <div id="jda-list"></div>
+    <div id="jda-bulk-bar" style="display:none;">
+      <button type="button" id="jda-bulk-print-btn">選択した伝票をまとめてPDF表示・印刷する</button>
+    </div>
+  </section>
+
+  <!-- 社内イベント 一覧(社員) -->
+  <section id="screen-events" class="screen">
+    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">社内イベント</div>
+    <div id="events-list"></div>
+  </section>
+
+  <!-- 社内イベント 詳細・回答 -->
+  <section id="screen-event-detail" class="screen">
+    <button type="button" class="back-link" data-nav="events">イベント一覧に戻る</button>
+    <div class="card">
+      <div class="form-title" id="event-detail-title"></div>
+      <div class="field-group" id="event-detail-fields"></div>
+    </div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">出欠を回答する</div>
+      <div class="filter-row" id="event-response-chips">
+        <button type="button" class="filter-chip" data-response="attending">参加する</button>
+        <button type="button" class="filter-chip" data-response="not_attending">不参加</button>
+        <button type="button" class="filter-chip" data-response="undecided">未定</button>
+      </div>
+      <label>同伴者人数(任意)</label>
+      <input type="number" id="event-companion-count" min="0" value="0">
+      <label>コメント(任意)</label>
+      <input type="text" id="event-comment">
+      <div class="error" id="event-response-error"></div>
+      <button id="event-response-submit">回答する</button>
+      <div class="hint" id="event-response-hint"></div>
+    </div>
+  </section>
+
+  <!-- 社内イベント 管理者一覧 -->
+  <section id="screen-event-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">社内イベント管理</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">新規イベントを作成</div>
+      <label>タイトル<span class="required-mark">(必須)</span></label>
+      <input type="text" id="event-create-title" placeholder="例: 迅翔興業 BBQ">
+      <label>日時<span class="required-mark">(必須)</span></label>
+      <input type="datetime-local" id="event-create-start">
+      <label>終了日時(任意)</label>
+      <input type="datetime-local" id="event-create-end">
+      <label>場所</label>
+      <input type="text" id="event-create-location">
+      <label>内容</label>
+      <textarea id="event-create-description"></textarea>
+      <label>回答期限(任意)</label>
+      <input type="datetime-local" id="event-create-deadline">
+      <div class="error" id="event-create-error"></div>
+      <button id="event-create-submit">作成して告知する</button>
+    </div>
+    <div class="section-title">開催済み・開催予定のイベント</div>
+    <div id="event-admin-list"></div>
+  </section>
+
+  <!-- 社内イベント 回答状況(管理者) -->
+  <section id="screen-event-responses-admin" class="screen">
+    <button type="button" class="back-link" data-nav="event-admin">社内イベント管理に戻る</button>
+    <div class="form-title" id="event-responses-title">回答状況</div>
+    <div class="hint" id="event-responses-summary" style="margin-bottom:12px;"></div>
+    <button type="button" class="secondary" id="event-notify-unanswered-btn">未回答者へ通知する</button>
+    <div id="event-responses-list"></div>
+  </section>
+
+  <!-- 常用伝票 印刷・PDF表示 -->
+  <section id="screen-joyo-denpyo-print" class="screen">
+    <div class="no-print">
+      <button type="button" class="back-link" data-nav="joyo-denpyo-list">常用伝票一覧に戻る</button>
+      <button type="button" id="jd-print-btn">印刷する / PDFとして保存する</button>
+      <div class="hint" style="margin:8px 0 16px;">スマホでは印刷ボタンから「PDFに保存」を選べます。PCでは印刷、またはPDFとして保存できます。</div>
+    </div>
+    <div id="jd-print-content"></div>
+  </section>
+
+  <!-- 完了画面 -->
+  <section id="screen-done" class="screen">
+    <div class="card center">
+      <div class="success-icon"><span class="icon-slot" data-icon="check-circle"></span></div>
+      <div id="done-message" style="font-size:15px; line-height:1.6;"></div>
+      <button class="secondary" data-nav="menu">メニューに戻る</button>
+    </div>
+  </section>
+
+</main>
+
+<nav class="bottom-nav" id="bottom-nav">
+  <button type="button" class="bottom-nav-item" data-nav="menu"><span class="icon-slot" data-icon="home"></span><span>ホーム</span></button>
+  <button type="button" class="bottom-nav-item" data-nav="menu-apply"><span class="icon-slot" data-icon="clipboard-list"></span><span>申請</span></button>
+  <button type="button" class="bottom-nav-item" data-nav="announcements"><span class="icon-slot" data-icon="bell"></span><span>お知らせ</span></button>
+  <button type="button" class="bottom-nav-item" data-nav="history"><span class="icon-slot" data-icon="clock"></span><span>履歴</span></button>
+  <button type="button" class="bottom-nav-item" data-nav="myinfo"><span class="icon-slot" data-icon="user"></span><span>自分</span></button>
+</nav>
+
+<!-- 管理者モード専用の下部ナビ。個人側の5タブとは別物で、管理者画面にいる間はこちらだけを
+     表示する(個人ページへ誤って戻らないようにするため)。個人画面へは専用ボタンからのみ戻る。 -->
+<nav class="bottom-nav admin-bottom-nav" id="admin-bottom-nav" style="display:none;">
+  <button type="button" class="admin-bottom-nav-item" data-nav="admin-dashboard"><span class="icon-slot" data-icon="shield"></span><span>管理ホーム</span></button>
+  <button type="button" class="admin-bottom-nav-item" data-nav="admin-all-requests"><span class="icon-slot" data-icon="clipboard-list"></span><span>申請管理</span></button>
+  <button type="button" class="admin-bottom-nav-item" data-nav="employee-summary"><span class="icon-slot" data-icon="receipt"></span><span>経費精算</span></button>
+  <button type="button" class="admin-bottom-nav-item" data-nav="daily-report-management"><span class="icon-slot" data-icon="clipboard-list"></span><span>日報管理</span></button>
+  <button type="button" class="admin-bottom-nav-item" id="admin-exit-btn"><span class="icon-slot" data-icon="user"></span><span>社員画面に戻る</span></button>
+</nav>
+
+<!-- 案内AI「ポッくん」: 画面右下に常駐する小さなボタン。タップでチャットパネルを開く。
+     鳶職・足場会社らしいマスコット(ヘルメット・青い作業着・簡略化した安全帯)。
+     名称・見た目は今後変更可能。全画面共通で表示される(下部ナビと同じ持ち方)。 -->
+<div class="ai-guide-fab-wrap" id="ai-guide-fab-wrap">
+  <button type="button" class="ai-guide-fab" id="ai-guide-fab" aria-label="ポッくんに質問する">
+    <svg class="ai-guide-mascot" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M7 39c0-7.5 5.5-12 13-12s13 4.5 13 12" fill="#2f5fd6"/>
+      <path d="M13 28 L27.5 37.5" stroke="#ffb300" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+      <rect x="18.3" y="31.5" width="3.6" height="3.6" rx="0.9" fill="#ffb300"/>
+      <circle cx="20" cy="21" r="8.4" fill="#ffd9ae"/>
+      <circle cx="14.2" cy="24.2" r="1.15" fill="#ff9d80" opacity=".55"/>
+      <circle cx="25.8" cy="24.2" r="1.15" fill="#ff9d80" opacity=".55"/>
+      <circle cx="16.6" cy="21.3" r="1.35" fill="#3a2a1a"/>
+      <circle cx="23.4" cy="21.3" r="1.35" fill="#3a2a1a"/>
+      <path d="M16.3 24.8c1.1 1.5 6.3 1.5 7.4 0" stroke="#a85c2a" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+      <path d="M10.6 18.2a9.4 9.4 0 0 1 18.8 0z" fill="#ffcc33"/>
+      <rect x="9" y="17" width="22" height="2.8" rx="1.4" fill="#ffcc33"/>
+      <path d="M18.3 10.2c0-1 .8-1.7 1.7-1.7s1.7.7 1.7 1.7" stroke="#e0a300" stroke-width="1" fill="none" stroke-linecap="round"/>
+    </svg>
+  </button>
+</div>
+<div class="ai-guide-panel" id="ai-guide-panel">
+  <div class="ai-guide-panel-header">
+    <svg class="ai-guide-mascot-small" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <path d="M7 39c0-7.5 5.5-12 13-12s13 4.5 13 12" fill="#2f5fd6"/>
+      <path d="M13 28 L27.5 37.5" stroke="#ffb300" stroke-width="2.6" stroke-linecap="round" fill="none"/>
+      <rect x="18.3" y="31.5" width="3.6" height="3.6" rx="0.9" fill="#ffb300"/>
+      <circle cx="20" cy="21" r="8.4" fill="#ffd9ae"/>
+      <circle cx="14.2" cy="24.2" r="1.15" fill="#ff9d80" opacity=".55"/>
+      <circle cx="25.8" cy="24.2" r="1.15" fill="#ff9d80" opacity=".55"/>
+      <circle cx="16.6" cy="21.3" r="1.35" fill="#3a2a1a"/>
+      <circle cx="23.4" cy="21.3" r="1.35" fill="#3a2a1a"/>
+      <path d="M16.3 24.8c1.1 1.5 6.3 1.5 7.4 0" stroke="#a85c2a" stroke-width="1.4" stroke-linecap="round" fill="none"/>
+      <path d="M10.6 18.2a9.4 9.4 0 0 1 18.8 0z" fill="#ffcc33"/>
+      <rect x="9" y="17" width="22" height="2.8" rx="1.4" fill="#ffcc33"/>
+      <path d="M18.3 10.2c0-1 .8-1.7 1.7-1.7s1.7.7 1.7 1.7" stroke="#e0a300" stroke-width="1" fill="none" stroke-linecap="round"/>
+    </svg>
+    <span class="ai-guide-panel-titles">
+      <span class="ai-guide-panel-title">ポッくん</span>
+      <span class="ai-guide-panel-subtitle">ポッくんが案内します</span>
+    </span>
+    <button type="button" class="ai-guide-panel-close" id="ai-guide-close" aria-label="閉じる"><span class="icon-slot" data-icon="x-circle"></span></button>
+  </div>
+  <div class="ai-guide-messages" id="ai-guide-messages"></div>
+  <div class="ai-guide-quick-replies" id="ai-guide-quick-replies"></div>
+  <div class="ai-guide-input-row">
+    <input type="text" id="ai-guide-input" placeholder="質問を入力(例: 経費申請したい)">
+    <button type="button" id="ai-guide-send" aria-label="送信"><span class="icon-slot" data-icon="chevron-right"></span></button>
+  </div>
+</div>
+
+<script src="icons.js"></script>
+<script src="app.js"></script>
 </body>
 </html>
