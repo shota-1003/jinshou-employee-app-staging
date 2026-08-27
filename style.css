@@ -881,6 +881,17 @@ button.link {
 .item-new-site-wrap, .item-meeting-block, .item-entertainment-block {
   margin-top: 6px; padding: 12px 14px; background: oklch(1 0 0 / 5%); border-radius: var(--radius-sm); border: 1px dashed var(--border-strong);
 }
+/* ===== 接待交際費: 複数会社(取引先)入力ブロック(2026-08-27) ===== */
+.ent-company-block {
+  margin-top: 10px; padding: 12px 14px; background: oklch(1 0 0 / 5%); border-radius: var(--radius-sm); border: 1px dashed var(--border-strong);
+}
+.ent-company-block-header {
+  display: flex; align-items: center; justify-content: space-between; font-weight: 700; margin-bottom: 6px;
+}
+.ent-company-block-header .ent-company-remove { padding: 4px 10px; font-size: 12px; width: auto; }
+.ent-summary {
+  margin-top: 12px; padding: 10px 12px; background: oklch(1 0 0 / 6%); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7;
+}
 .participant-select { margin-top: 6px; }
 .participant-search-input { margin-bottom: 6px; }
 .participant-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 160px; overflow-y: auto; }

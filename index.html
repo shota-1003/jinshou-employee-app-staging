@@ -1735,19 +1735,16 @@
       <label for="ent-purpose">目的<span class="required-mark">(必須)</span></label>
       <input type="text" id="ent-purpose" placeholder="例: 新規案件の受注御礼">
 
-      <label>取引先<span class="required-mark">(必須)</span></label>
-      <input type="text" id="ent-partner" list="vendor-list">
-      <input type="hidden" id="ent-partner-id">
-
-      <label for="ent-partner-participants">取引先参加者</label>
-      <div class="hint-inline">氏名が分かれば入力(任意)</div>
-      <input type="text" id="ent-partner-participants" placeholder="例: 山田様、鈴木様">
-      <label for="ent-partner-count">取引先参加人数<span class="required-mark">(必須)</span></label>
-      <input type="number" id="ent-partner-count" min="1">
+      <label>接待先(取引先)<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">複数の会社が同席する場合は「＋取引先会社を追加」で増やせます。参加人数と氏名が分かる人数は一致しなくても申請できます。</div>
+      <div id="ent-companies"></div>
+      <button type="button" class="secondary" id="ent-company-add">＋取引先会社を追加</button>
 
       <label>自社参加者<span class="required-mark">(必須)</span></label>
       <div class="participant-select" id="ent-our-participants"></div>
       <div class="hint-inline">自社人数: <span id="ent-our-count">0</span>名(自動計算)</div>
+
+      <div class="ent-summary" id="ent-summary"></div>
 
       <label for="ent-note">備考</label>
       <div class="hint-inline">任意</div>
@@ -1787,19 +1784,16 @@
       <label for="ent-late-purpose">目的<span class="required-mark">(必須)</span></label>
       <input type="text" id="ent-late-purpose" placeholder="例: 新規案件の受注御礼">
 
-      <label>取引先<span class="required-mark">(必須)</span></label>
-      <input type="text" id="ent-late-partner" list="vendor-list">
-      <input type="hidden" id="ent-late-partner-id">
-
-      <label for="ent-late-partner-participants">取引先参加者</label>
-      <div class="hint-inline">氏名が分かれば入力(任意)</div>
-      <input type="text" id="ent-late-partner-participants" placeholder="例: 山田様、鈴木様">
-      <label for="ent-late-partner-count">取引先参加人数<span class="required-mark">(必須)</span></label>
-      <input type="number" id="ent-late-partner-count" min="1">
+      <label>接待先(取引先)<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">複数の会社が同席する場合は「＋取引先会社を追加」で増やせます。参加人数と氏名が分かる人数は一致しなくても申請できます。</div>
+      <div id="ent-late-companies"></div>
+      <button type="button" class="secondary" id="ent-late-company-add">＋取引先会社を追加</button>
 
       <label>自社参加者<span class="required-mark">(必須)</span></label>
       <div class="participant-select" id="ent-late-our-participants"></div>
       <div class="hint-inline">自社人数: <span id="ent-late-our-count">0</span>名(自動計算)</div>
+
+      <div class="ent-summary" id="ent-late-summary"></div>
 
       <label for="ent-late-reason">事前に申請できなかった具体的な理由<span class="required-mark">(必須・15文字以上)</span></label>
       <div class="hint-inline">「忘れていた」等の簡単な理由ではなく、具体的な事情を記入してください。管理者が承認可否を判断する材料になります。</div>

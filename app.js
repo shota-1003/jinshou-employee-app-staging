@@ -4956,11 +4956,86 @@ async function loadMyHealthList() {
 
 // ---------- 接待・会食 事前申請(社員) ----------
 
+// 接待先(取引先)を複数会社ぶん動的に管理するウィジェット。通常フォーム・特別後日申請
+// フォームの両方で共有する(2026-08-27、複数会社対応)。会社ごとに「参加人数」は必須だが
+// 「参加者名」は自由テキストで、人数と名前の件数が一致しなくても申請できる仕様。
+function createEntCompanyList(containerId, addBtnId, summaryId, getOurCount) {
+  const container = document.getElementById(containerId);
+  let seq = 0;
+
+  function recalcSummary() {
+    let partnerTotal = 0;
+    container.querySelectorAll('.ent-company-block').forEach((b) => {
+      partnerTotal += Number(b.querySelector('.ent-company-count').value || 0);
+    });
+    const ourTotal = getOurCount();
+    const el = document.getElementById(summaryId);
+    if (el) el.innerHTML = `社外参加者合計: <b>${partnerTotal}</b>名　自社参加者合計: <b>${ourTotal}</b>名　総参加人数: <b>${partnerTotal + ourTotal}</b>名`;
+  }
+
+  function updateRemoveButtons() {
+    const blocks = container.querySelectorAll('.ent-company-block');
+    blocks.forEach((b) => { b.querySelector('.ent-company-remove').style.display = blocks.length > 1 ? '' : 'none'; });
+  }
+
+  function addBlock() {
+    seq += 1;
+    const block = document.createElement('div');
+    block.className = 'ent-company-block';
+    block.innerHTML = `
+      <div class="ent-company-block-header">
+        <span>取引先${seq}</span>
+        <button type="button" class="secondary danger ent-company-remove">✕ この会社を削除</button>
+      </div>
+      <label>会社名<span class="required-mark">(必須)</span></label>
+      <input type="text" class="ent-company-name" list="vendor-list">
+      <label>参加人数<span class="required-mark">(必須)</span></label>
+      <input type="number" class="ent-company-count" min="1">
+      <label>参加者名(分かる範囲・任意)</label>
+      <div class="hint-inline">人数ぶん全員の氏名が分からなくても申請できます(例: 5名中2名だけ判明でも可)</div>
+      <input type="text" class="ent-company-names" placeholder="例: 山田様、佐藤様">`;
+    container.appendChild(block);
+    block.querySelector('.ent-company-count').addEventListener('input', recalcSummary);
+    block.querySelector('.ent-company-remove').addEventListener('click', () => { block.remove(); updateRemoveButtons(); recalcSummary(); });
+    updateRemoveButtons();
+    recalcSummary();
+  }
+
+  document.getElementById(addBtnId).addEventListener('click', addBlock);
+
+  return {
+    reset() { container.innerHTML = ''; seq = 0; addBlock(); },
+    recalcSummary,
+    getCompanies() {
+      return Array.from(container.querySelectorAll('.ent-company-block')).map((b) => {
+        const name = b.querySelector('.ent-company-name').value.trim();
+        const partnerId = vendorNameToId.get(name) || null;
+        return {
+          business_partner_id: partnerId,
+          new_company_name: partnerId ? null : name,
+          participant_count: Number(b.querySelector('.ent-company-count').value || 0),
+          participant_names: b.querySelector('.ent-company-names').value.trim() || null,
+          __name: name,
+        };
+      });
+    },
+  };
+}
+
+function validateEntCompanies(companies, errorElId) {
+  if (companies.length === 0) { showError(errorElId, '接待先の取引先を1社以上入力してください。'); return false; }
+  for (const c of companies) {
+    if (!c.__name) { showError(errorElId, '取引先の会社名を入力してください。'); return false; }
+    if (!c.participant_count) { showError(errorElId, '各取引先の参加人数を入力してください。'); return false; }
+  }
+  return true;
+}
+
 let entOurParticipantSelect = null;
+let entCompanyList = null;
 
 function resetEntertainmentForm() {
-  ['ent-datetime', 'ent-store', 'ent-amount', 'ent-purpose', 'ent-partner', 'ent-partner-participants', 'ent-partner-count', 'ent-note'].forEach((id) => { document.getElementById(id).value = ''; });
-  document.getElementById('ent-partner-id').value = '';
+  ['ent-datetime', 'ent-store', 'ent-amount', 'ent-purpose', 'ent-note'].forEach((id) => { document.getElementById(id).value = ''; });
   hideError('ent-error');
   document.getElementById('ent-goto-late-btn').style.display = 'none';
   // 通常の事前申請フォームでは過去日を選ばせない(実際の防止はサーバー側だが、
@@ -4968,45 +5043,42 @@ function resetEntertainmentForm() {
   const todayStr = new Date().toISOString().slice(0, 10);
   document.getElementById('ent-datetime').min = `${todayStr}T00:00`;
   entOurParticipantSelect = createParticipantSelect(document.getElementById('ent-our-participants'));
-  entOurParticipantSelect.setOnChange(() => { document.getElementById('ent-our-count').textContent = entOurParticipantSelect.getCount(); });
+  entCompanyList = createEntCompanyList('ent-companies', 'ent-company-add', 'ent-summary', () => entOurParticipantSelect.getCount());
+  entOurParticipantSelect.setOnChange(() => { document.getElementById('ent-our-count').textContent = entOurParticipantSelect.getCount(); entCompanyList.recalcSummary(); });
   document.getElementById('ent-our-count').textContent = '0';
+  entCompanyList.reset();
 }
 
 async function doSubmitEntertainmentPreapproval() {
   const session = getSession();
   const datetime = document.getElementById('ent-datetime').value;
   const purpose = document.getElementById('ent-purpose').value.trim();
-  const partnerText = document.getElementById('ent-partner').value.trim();
-  const partnerCount = Number(document.getElementById('ent-partner-count').value || 0);
   hideError('ent-error');
 
   if (!datetime) { showError('ent-error', '予定日時を入力してください。'); return; }
   if (!purpose) { showError('ent-error', '目的を入力してください。'); return; }
-  if (!partnerText) { showError('ent-error', '取引先を選択または入力してください。'); return; }
-  if (!partnerCount) { showError('ent-error', '取引先の参加人数を入力してください。'); return; }
+  const companies = entCompanyList.getCompanies();
+  if (!validateEntCompanies(companies, 'ent-error')) return;
   const ourCodes = entOurParticipantSelect ? entOurParticipantSelect.getSelectedCodes() : [];
   if (ourCodes.length === 0) { showError('ent-error', '自社参加者を選択してください。'); return; }
 
   // 過去日提出の可否(特例許可の有無)は社員ごとに違うため、ここでは判定せずサーバーの
   // 判定に委ねる(特例許可がある社員は過去日でもこのフォームで正常に送信できる)。
   // 特例がない社員が過去日を送った場合は、下のcatchでサーバーからの案内メッセージを表示する。
-  const partnerId = vendorNameToId.get(partnerText) || null;
-
   const btn = document.getElementById('ent-submit');
   btn.disabled = true;
   try {
-    await rpc('submit_entertainment_preapproval', {
+    await rpc('submit_entertainment_preapproval_multi', {
       p_employee_code: session.employeeCode,
       p_planned_datetime: new Date(datetime).toISOString(),
       p_planned_store: document.getElementById('ent-store').value.trim() || null,
       p_planned_amount: document.getElementById('ent-amount').value ? Number(document.getElementById('ent-amount').value) : null,
       p_purpose: purpose,
-      p_business_partner_id: partnerId,
-      p_new_partner_name: partnerId ? null : partnerText,
-      p_partner_participants: document.getElementById('ent-partner-participants').value.trim() || null,
-      p_partner_participant_count: partnerCount,
+      p_partner_companies: companies.map(({ __name, ...c }) => c),
       p_our_participant_employee_codes: ourCodes,
       p_note: document.getElementById('ent-note').value.trim() || null,
+      p_is_special_late_application: false,
+      p_late_reason: null,
     });
     showDone('接待・会食の事前申請を送信しました。管理者の承認をお待ちください。', 'menu-apply');
   } catch (e) {
@@ -5021,52 +5093,46 @@ async function doSubmitEntertainmentPreapproval() {
 // ---------- 接待・会食 特別後日申請(社員、事前申請できなかった過去日分) ----------
 
 let entLateOurParticipantSelect = null;
+let entLateCompanyList = null;
 
 function resetEntertainmentLateForm() {
-  ['ent-late-datetime', 'ent-late-store', 'ent-late-amount', 'ent-late-purpose', 'ent-late-partner',
-    'ent-late-partner-participants', 'ent-late-partner-count', 'ent-late-reason', 'ent-late-note'].forEach((id) => { document.getElementById(id).value = ''; });
-  document.getElementById('ent-late-partner-id').value = '';
+  ['ent-late-datetime', 'ent-late-store', 'ent-late-amount', 'ent-late-purpose', 'ent-late-reason', 'ent-late-note'].forEach((id) => { document.getElementById(id).value = ''; });
   document.getElementById('ent-late-ack').checked = false;
   document.getElementById('ent-late-submit').disabled = true;
   hideError('ent-late-error');
   entLateOurParticipantSelect = createParticipantSelect(document.getElementById('ent-late-our-participants'));
-  entLateOurParticipantSelect.setOnChange(() => { document.getElementById('ent-late-our-count').textContent = entLateOurParticipantSelect.getCount(); });
+  entLateCompanyList = createEntCompanyList('ent-late-companies', 'ent-late-company-add', 'ent-late-summary', () => entLateOurParticipantSelect.getCount());
+  entLateOurParticipantSelect.setOnChange(() => { document.getElementById('ent-late-our-count').textContent = entLateOurParticipantSelect.getCount(); entLateCompanyList.recalcSummary(); });
   document.getElementById('ent-late-our-count').textContent = '0';
+  entLateCompanyList.reset();
 }
 
 async function doSubmitEntertainmentLatePreapproval() {
   const session = getSession();
   const datetime = document.getElementById('ent-late-datetime').value;
   const purpose = document.getElementById('ent-late-purpose').value.trim();
-  const partnerText = document.getElementById('ent-late-partner').value.trim();
-  const partnerCount = Number(document.getElementById('ent-late-partner-count').value || 0);
   const reason = document.getElementById('ent-late-reason').value.trim();
   hideError('ent-late-error');
 
   if (!datetime) { showError('ent-late-error', '接待の実施日時を入力してください。'); return; }
   if (!purpose) { showError('ent-late-error', '目的を入力してください。'); return; }
-  if (!partnerText) { showError('ent-late-error', '取引先を選択または入力してください。'); return; }
-  if (!partnerCount) { showError('ent-late-error', '取引先の参加人数を入力してください。'); return; }
+  const companies = entLateCompanyList.getCompanies();
+  if (!validateEntCompanies(companies, 'ent-late-error')) return;
   const ourCodes = entLateOurParticipantSelect ? entLateOurParticipantSelect.getSelectedCodes() : [];
   if (ourCodes.length === 0) { showError('ent-late-error', '自社参加者を選択してください。'); return; }
   if (reason.length < 15) { showError('ent-late-error', '事前に申請できなかった具体的な理由を15文字以上で入力してください。'); return; }
   if (!document.getElementById('ent-late-ack').checked) { showError('ent-late-error', '確認のチェックを入れてください。'); return; }
 
-  const partnerId = vendorNameToId.get(partnerText) || null;
-
   const btn = document.getElementById('ent-late-submit');
   btn.disabled = true;
   try {
-    await rpc('submit_entertainment_preapproval', {
+    await rpc('submit_entertainment_preapproval_multi', {
       p_employee_code: session.employeeCode,
       p_planned_datetime: new Date(datetime).toISOString(),
       p_planned_store: document.getElementById('ent-late-store').value.trim() || null,
       p_planned_amount: document.getElementById('ent-late-amount').value ? Number(document.getElementById('ent-late-amount').value) : null,
       p_purpose: purpose,
-      p_business_partner_id: partnerId,
-      p_new_partner_name: partnerId ? null : partnerText,
-      p_partner_participants: document.getElementById('ent-late-partner-participants').value.trim() || null,
-      p_partner_participant_count: partnerCount,
+      p_partner_companies: companies.map(({ __name, ...c }) => c),
       p_our_participant_employee_codes: ourCodes,
       p_note: document.getElementById('ent-late-note').value.trim() || null,
       p_is_special_late_application: true,
