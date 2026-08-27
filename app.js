@@ -2965,6 +2965,10 @@ async function loadAnnounceBanner() {
 // until_dateならdisplay_untilの日付までは表示し続け、それ以外(hide_after_read等)は
 // 既読になった時点でホームから消える(お知らせ履歴/申請履歴では引き続き確認できる)。
 function shouldShowOnHome(a) {
+  // display_until(表示終了日時)は既読/未読に関わらず必ず優先する(2026-08-28修正:
+  // 未読の場合は無条件でtrueを返していたため、表示期間を過ぎた未読のお知らせが
+  // ホームに表示され続けてしまっていた)。
+  if (a.display_mode === 'until_date' && a.display_until && new Date(a.display_until) < new Date()) return false;
   if (!a.is_read) return true;
   if (a.display_mode === 'persist_after_read') return true;
   if (a.display_mode === 'until_date' && a.display_until) {
