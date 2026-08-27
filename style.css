@@ -892,6 +892,22 @@ button.link {
 .ent-summary {
   margin-top: 12px; padding: 10px 12px; background: oklch(1 0 0 / 6%); border-radius: var(--radius-sm); font-size: 13px; line-height: 1.7;
 }
+/* ===== 共通社員選択(カード形式、2026-08-28新設) ===== */
+.emp-picker-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+.emp-picker-grid { max-height: 320px; overflow-y: auto; }
+.emp-picker-group-label { font-size: 12px; font-weight: 700; color: var(--text-muted); margin: 10px 0 4px; }
+.emp-picker-cards { display: flex; flex-wrap: wrap; gap: 8px; }
+.emp-picker-card {
+  padding: 10px 14px; font-size: 14px; font-weight: 600; border-radius: 999px;
+  border: 1px solid var(--border-strong); background: var(--card-bg); color: var(--text);
+  min-height: 40px; /* スマホの片手タップ操作を優先(タップ領域確保) */
+}
+.emp-picker-card.selected { background: var(--accent); border-color: var(--accent); color: var(--accent-contrast, #fff); }
+
+/* ===== 勤務中ステータス(外出・遅刻・早退、2026-08-28新設) ===== */
+.status-board-row { width: 100%; text-align: left; }
+.tag.danger { background: oklch(0.6 0.2 25 / 15%); color: var(--danger); border-radius: 999px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+
 .participant-select { margin-top: 6px; }
 .participant-search-input { margin-bottom: 6px; }
 .participant-results { display: flex; flex-direction: column; gap: 4px; margin-bottom: 6px; max-height: 160px; overflow-y: auto; }

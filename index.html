@@ -149,6 +149,11 @@
         <span class="home-card-label">会議</span>
         <span class="home-card-desc">会議費を申請</span>
       </button>
+      <button type="button" class="home-card" data-nav="status-submit">
+        <span class="icon-slot" data-icon="log-out"></span>
+        <span class="home-card-label">外出・遅刻・早退</span>
+        <span class="home-card-desc">一時離脱や早退を報告</span>
+      </button>
     </div>
 
     <div id="home-events-area"></div>
@@ -1405,6 +1410,11 @@
         <span class="home-card-label">日報管理</span>
         <span class="home-card-desc">検索・未提出確認・確認処理</span>
       </button>
+      <button type="button" class="home-card" data-nav="admin-status-board">
+        <span class="icon-slot" data-icon="map-pin"></span>
+        <span class="home-card-label">今どこ？</span>
+        <span class="home-card-desc">社員の勤務状態を一覧確認</span>
+      </button>
     </div>
 
     <div class="section-title">よく使う管理機能</div>
@@ -1810,6 +1820,83 @@
       <div class="error" id="ent-late-error"></div>
       <button id="ent-late-submit" class="danger-submit" disabled>特別後日申請として送信する</button>
     </div>
+  </section>
+
+  <!-- 勤務中ステータス: 外出・遅刻・早退の報告(2026-08-28、9/1本番運用開始向け新機能) -->
+  <section id="screen-status-submit" class="screen">
+    <button type="button" class="back-link" data-nav="menu">戻る</button>
+    <div class="form-title">外出・遅刻・早退</div>
+
+    <div class="card" id="status-active-outings-card" style="display:none;">
+      <div class="section-title">現在、外出・離脱中です</div>
+      <div id="status-active-outings-list"></div>
+    </div>
+
+    <div class="card">
+      <div class="section-title">外出・一時離脱を報告</div>
+      <div class="hint" style="margin-bottom:10px;">銀行・役所・買い物・私用・現場移動・通院等、勤務中に一時的に離れる場合はこちらから。</div>
+      <label for="status-outing-category">区分<span class="required-mark">(必須)</span></label>
+      <select id="status-outing-category">
+        <option value="業務外出">業務外出</option>
+        <option value="私用外出">私用外出</option>
+        <option value="一時離脱">一時離脱</option>
+        <option value="現場移動">現場移動</option>
+        <option value="病院等">病院等(一般表示では詳細を隠します)</option>
+        <option value="その他">その他</option>
+      </select>
+      <label for="status-outing-destination">行き先</label>
+      <input type="text" id="status-outing-destination" placeholder="例: 徳島銀行本店">
+      <label for="status-outing-reason">理由</label>
+      <input type="text" id="status-outing-reason" placeholder="例: 入金のため">
+      <label for="status-outing-expected-return">予定帰着時刻</label>
+      <input type="datetime-local" id="status-outing-expected-return">
+      <div class="checkbox-row">
+        <input type="checkbox" id="status-outing-will-return" checked>
+        <label>本日中に戻る予定がある</label>
+      </div>
+      <label for="status-outing-note">備考</label>
+      <textarea id="status-outing-note"></textarea>
+      <div class="error" id="status-outing-error"></div>
+      <button id="status-outing-submit">外出を報告する</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">遅刻を報告</div>
+      <label for="status-late-expected-arrival">到着予定時刻<span class="required-mark">(必須)</span></label>
+      <input type="datetime-local" id="status-late-expected-arrival">
+      <label for="status-late-reason">理由<span class="required-mark">(必須)</span></label>
+      <input type="text" id="status-late-reason" placeholder="例: 電車遅延のため">
+      <label for="status-late-note">備考</label>
+      <textarea id="status-late-note"></textarea>
+      <div class="error" id="status-late-error"></div>
+      <button id="status-late-submit" class="secondary">遅刻を報告する</button>
+    </div>
+
+    <div class="card">
+      <div class="section-title">早退を報告</div>
+      <div class="hint" style="margin-bottom:10px;">「今日はもう戻りません」という場合はこちらから。</div>
+      <label for="status-early-reason">理由<span class="required-mark">(必須)</span></label>
+      <input type="text" id="status-early-reason" placeholder="例: 通院のため">
+      <label for="status-early-note">備考</label>
+      <textarea id="status-early-note"></textarea>
+      <div class="error" id="status-early-error"></div>
+      <button id="status-early-submit" class="danger-submit">早退を報告する</button>
+    </div>
+  </section>
+
+  <!-- 管理者: 「今どこ？」ダッシュボード -->
+  <section id="screen-admin-status-board" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ホームに戻る</button>
+    <div class="form-title">今どこ？</div>
+    <div class="hint" style="margin-bottom:12px;">本日の全社員の勤務状態です。名前をタップすると本日の時系列を確認できます。</div>
+    <div id="admin-status-board-list"></div>
+  </section>
+
+  <!-- 管理者: 社員1名の本日の時系列(外出・戻り・遅刻・早退の履歴) -->
+  <section id="screen-status-timeline" class="screen">
+    <button type="button" class="back-link" data-nav="admin-status-board">戻る</button>
+    <div class="form-title" id="status-timeline-title">本日の記録</div>
+    <div id="status-timeline-list"></div>
   </section>
 
   <!-- 接待事前申請: 実績の更新(参加者・人数の変更) -->

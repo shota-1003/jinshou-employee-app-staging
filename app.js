@@ -1001,6 +1001,85 @@ function createParticipantSelect(container) {
   };
 }
 
+// 共通: カード形式の社員選択コンポーネント(2026-08-28新設)。検索テキスト入力だけの
+// createParticipantSelectより、スマホでの片手タップ選択のストレスが小さい代替として、
+// 今後の申請・報告画面で再利用する想定(接待事前申請の自社参加者選択で最初に採用)。
+// createParticipantSelectと同じインターフェース(setOnChange/getSelectedCodes/getCount/
+// setSelectedCodes)を持つため、呼び出し元の他のコードを変更せずに差し替えられる。
+function createEmployeeCardPicker(container) {
+  const selected = new Map();
+  container.innerHTML = `
+    <input type="text" class="participant-search-input" placeholder="氏名・社員番号で絞り込み...">
+    <div class="emp-picker-chips"></div>
+    <div class="emp-picker-grid"></div>
+  `;
+  const input = container.querySelector('.participant-search-input');
+  const chips = container.querySelector('.emp-picker-chips');
+  const grid = container.querySelector('.emp-picker-grid');
+  let allEmployees = [];
+  let onChange = null;
+
+  function render() {
+    const q = input.value.trim();
+    const matches = allEmployees.filter((e) => q === '' || e.employee_name.includes(q) || e.employee_code.includes(q));
+    const groups = new Map();
+    matches.forEach((e) => {
+      const key = e.department || 'その他';
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(e);
+    });
+    grid.innerHTML = Array.from(groups.entries()).map(([dept, emps]) => `
+      <div class="emp-picker-group-label">${dept}</div>
+      <div class="emp-picker-cards">
+        ${emps.map((e) => `<button type="button" class="emp-picker-card${selected.has(e.employee_code) ? ' selected' : ''}" data-code="${e.employee_code}">${e.employee_name}</button>`).join('')}
+      </div>
+    `).join('');
+    grid.querySelectorAll('.emp-picker-card').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const code = btn.dataset.code;
+        const emp = allEmployees.find((e) => e.employee_code === code);
+        if (selected.has(code)) selected.delete(code); else selected.set(code, emp ? emp.employee_name : code);
+        render();
+        if (onChange) onChange();
+      });
+    });
+    chips.innerHTML = Array.from(selected.entries()).map(([code, name]) => `
+      <span class="participant-chip" data-code="${code}">${name}<button type="button">${icon('x-circle')}</button></span>
+    `).join('');
+    chips.querySelectorAll('.participant-chip button').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selected.delete(btn.closest('.participant-chip').dataset.code);
+        render();
+        if (onChange) onChange();
+      });
+    });
+  }
+
+  const employeesLoaded = (async () => {
+    const session = getSession();
+    try { allEmployees = await rpc('list_employees_for_selector', { p_employee_code: session.employeeCode }); } catch (e) { /* 無視 */ }
+    render();
+  })();
+
+  input.addEventListener('input', render);
+
+  return {
+    setOnChange(cb) { onChange = cb; },
+    getSelectedCodes() { return Array.from(selected.keys()); },
+    getCount() { return selected.size; },
+    async setSelectedCodes(codes) {
+      await employeesLoaded;
+      selected.clear();
+      (codes || []).forEach((code) => {
+        const emp = allEmployees.find((e) => e.employee_code === code);
+        selected.set(code, emp ? emp.employee_name : code);
+      });
+      render();
+      if (onChange) onChange();
+    },
+  };
+}
+
 const participantSelects = new Map(); // itemId -> インスタンス(経費明細ごとの自社参加者選択)
 
 // 領収書の日付・店舗・金額から、承認済みの接待事前申請を検索して紐付け候補を出す。
@@ -5047,7 +5126,7 @@ function resetEntertainmentForm() {
   // ここでは選択の時点で気づけるようにする)。同日(当日事後申請)は引き続き選択可能。
   const todayStr = new Date().toISOString().slice(0, 10);
   document.getElementById('ent-datetime').min = `${todayStr}T00:00`;
-  entOurParticipantSelect = createParticipantSelect(document.getElementById('ent-our-participants'));
+  entOurParticipantSelect = createEmployeeCardPicker(document.getElementById('ent-our-participants'));
   entCompanyList = createEntCompanyList('ent-companies', 'ent-company-add', 'ent-summary', () => entOurParticipantSelect.getCount());
   entOurParticipantSelect.setOnChange(() => { document.getElementById('ent-our-count').textContent = entOurParticipantSelect.getCount(); entCompanyList.recalcSummary(); });
   document.getElementById('ent-our-count').textContent = '0';
@@ -5105,7 +5184,7 @@ function resetEntertainmentLateForm() {
   document.getElementById('ent-late-ack').checked = false;
   document.getElementById('ent-late-submit').disabled = true;
   hideError('ent-late-error');
-  entLateOurParticipantSelect = createParticipantSelect(document.getElementById('ent-late-our-participants'));
+  entLateOurParticipantSelect = createEmployeeCardPicker(document.getElementById('ent-late-our-participants'));
   entLateCompanyList = createEntCompanyList('ent-late-companies', 'ent-late-company-add', 'ent-late-summary', () => entLateOurParticipantSelect.getCount());
   entLateOurParticipantSelect.setOnChange(() => { document.getElementById('ent-late-our-count').textContent = entLateOurParticipantSelect.getCount(); entLateCompanyList.recalcSummary(); });
   document.getElementById('ent-late-our-count').textContent = '0';
@@ -5147,6 +5226,189 @@ async function doSubmitEntertainmentLatePreapproval() {
   } catch (e) {
     showError('ent-late-error', e.message || '送信に失敗しました。');
     btn.disabled = !document.getElementById('ent-late-ack').checked;
+  }
+}
+
+// ---------- 勤務中ステータス: 外出・遅刻・早退(2026-08-28、9/1本番運用開始向け新機能) ----------
+
+async function loadStatusSubmitScreen() {
+  hideError('status-outing-error'); hideError('status-late-error'); hideError('status-early-error');
+  document.getElementById('status-outing-category').value = '業務外出';
+  ['status-outing-destination', 'status-outing-reason', 'status-outing-expected-return', 'status-outing-note',
+    'status-late-expected-arrival', 'status-late-reason', 'status-late-note',
+    'status-early-reason', 'status-early-note'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('status-outing-will-return').checked = true;
+
+  const session = getSession();
+  const card = document.getElementById('status-active-outings-card');
+  const list = document.getElementById('status-active-outings-list');
+  card.style.display = 'none';
+  try {
+    const rows = await rpc('get_employee_status_timeline', { p_employee_code: session.employeeCode, p_target_employee_code: session.employeeCode, p_work_date: null });
+    const active = rows.filter((r) => r.status === 'active' && r.event_type === 'outing');
+    if (active.length === 0) return;
+    card.style.display = '';
+    list.innerHTML = active.map((r) => `
+      <div class="plain-list-row">
+        <div><b>${r.category || ''}</b> ${r.destination || ''}</div>
+        <div class="hint-inline">${r.reason || ''}${r.expected_return_at ? ` (予定: ${new Date(r.expected_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })})` : ''}</div>
+        <button type="button" class="secondary" data-return-id="${r.id}">戻りました</button>
+      </div>`).join('');
+    list.querySelectorAll('[data-return-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await rpc('mark_status_report_returned', { p_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.returnId) });
+          showDone('お帰りなさい。戻ったことを記録しました。', 'status-submit');
+        } catch (e) {
+          btn.disabled = false;
+          alert(e.message || '処理に失敗しました。');
+        }
+      });
+    });
+  } catch (e) { /* 一覧取得に失敗してもフォーム自体は使えるようにする */ }
+}
+
+async function doSubmitStatusOuting() {
+  const session = getSession();
+  const category = document.getElementById('status-outing-category').value;
+  const destination = document.getElementById('status-outing-destination').value.trim() || null;
+  const reason = document.getElementById('status-outing-reason').value.trim() || null;
+  const expectedReturn = document.getElementById('status-outing-expected-return').value;
+  const willReturn = document.getElementById('status-outing-will-return').checked;
+  const note = document.getElementById('status-outing-note').value.trim() || null;
+  hideError('status-outing-error');
+  const isBusinessUse = category === '業務外出' || category === '現場移動';
+  const visibility = category === '病院等' ? 'sensitive' : 'general';
+
+  const btn = document.getElementById('status-outing-submit');
+  btn.disabled = true;
+  try {
+    await rpc('submit_status_report_outing', {
+      p_employee_code: session.employeeCode,
+      p_category: category,
+      p_destination: destination,
+      p_reason: reason,
+      p_is_business_use: isBusinessUse,
+      p_will_return_today: willReturn,
+      p_expected_return_at: expectedReturn ? new Date(expectedReturn).toISOString() : null,
+      p_note: note,
+      p_visibility: visibility,
+      p_target_employee_code: null,
+    });
+    showDone('外出を報告しました。戻ったら「戻りました」から報告してください。', 'menu');
+  } catch (e) {
+    showError('status-outing-error', e.message || '送信に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doSubmitStatusLate() {
+  const session = getSession();
+  const expectedArrival = document.getElementById('status-late-expected-arrival').value;
+  const reason = document.getElementById('status-late-reason').value.trim();
+  const note = document.getElementById('status-late-note').value.trim() || null;
+  hideError('status-late-error');
+  if (!expectedArrival) { showError('status-late-error', '到着予定時刻を入力してください。'); return; }
+  if (!reason) { showError('status-late-error', '理由を入力してください。'); return; }
+
+  const btn = document.getElementById('status-late-submit');
+  btn.disabled = true;
+  try {
+    await rpc('submit_status_report_late_arrival', {
+      p_employee_code: session.employeeCode,
+      p_scheduled_start_at: null,
+      p_expected_arrival_at: new Date(expectedArrival).toISOString(),
+      p_reason: reason,
+      p_note: note,
+    });
+    showDone('遅刻を報告しました。', 'menu');
+  } catch (e) {
+    showError('status-late-error', e.message || '送信に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doSubmitStatusEarly() {
+  const session = getSession();
+  const reason = document.getElementById('status-early-reason').value.trim();
+  const note = document.getElementById('status-early-note').value.trim() || null;
+  hideError('status-early-error');
+  if (!reason) { showError('status-early-error', '理由を入力してください。'); return; }
+
+  const btn = document.getElementById('status-early-submit');
+  btn.disabled = true;
+  try {
+    await rpc('submit_status_report_early_leave', {
+      p_employee_code: session.employeeCode,
+      p_early_leave_at: new Date().toISOString(),
+      p_reason: reason,
+      p_note: note,
+    });
+    showDone('早退を報告しました。お疲れさまでした。', 'menu');
+  } catch (e) {
+    showError('status-early-error', e.message || '送信に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+const STATUS_BOARD_LABEL = {
+  working: { emoji: '🟢', label: '勤務中' },
+  out: { emoji: '🟡', label: '外出中' },
+  late: { emoji: '🔵', label: '遅刻報告中' },
+  early_left: { emoji: '🔴', label: '早退' },
+};
+
+async function loadAdminStatusBoard() {
+  const session = getSession();
+  const list = document.getElementById('admin-status-board-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_get_employee_status_board', { p_admin_employee_code: session.employeeCode });
+    if (rows.length === 0) { list.innerHTML = '<div class="hint">社員データがありません。</div>'; return; }
+    list.innerHTML = rows.map((r) => {
+      const s = STATUS_BOARD_LABEL[r.current_state] || STATUS_BOARD_LABEL.working;
+      const overdueTag = r.is_overdue ? ' <span class="tag danger">帰着予定超過</span>' : '';
+      const detail = r.current_state === 'working' ? '' :
+        `${r.category || ''}${r.destination ? `・${r.destination}` : ''}${r.expected_return_at ? `・${new Date(r.expected_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}帰社予定` : ''}`;
+      return `<button type="button" class="plain-list-row status-board-row" data-code="${r.employee_code}" data-name="${r.employee_name}">
+        <div>${s.emoji} <b>${r.employee_name}</b>${overdueTag}</div>
+        <div class="hint-inline">${s.label}${detail ? `　${detail}` : ''}</div>
+      </button>`;
+    }).join('');
+    list.querySelectorAll('.status-board-row').forEach((row) => {
+      row.addEventListener('click', () => openStatusTimeline(row.dataset.code, row.dataset.name));
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
+  }
+}
+
+const STATUS_EVENT_LABEL = { outing: '外出', late_arrival: '遅刻', early_leave: '早退' };
+
+async function openStatusTimeline(employeeCode, employeeName) {
+  document.getElementById('status-timeline-title').textContent = `${employeeName}さんの本日の記録`;
+  showScreen('status-timeline');
+  const session = getSession();
+  const list = document.getElementById('status-timeline-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('get_employee_status_timeline', { p_employee_code: session.employeeCode, p_target_employee_code: employeeCode, p_work_date: null });
+    if (rows.length === 0) { list.innerHTML = '<div class="hint">本日の記録はありません。</div>'; return; }
+    list.innerHTML = rows.map((r) => `
+      <div class="plain-list-row">
+        <div><b>${STATUS_EVENT_LABEL[r.event_type] || r.event_type}</b> ${r.category || ''} ${r.destination || ''}</div>
+        <div class="hint-inline">${r.reason || ''}</div>
+        <div class="hint-inline">報告: ${new Date(r.reported_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}
+          ${r.actual_return_at ? ` / 帰着: ${new Date(r.actual_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : ''}
+          ${r.actual_arrival_at ? ` / 出勤: ${new Date(r.actual_arrival_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : ''}
+        </div>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
   }
 }
 
@@ -8352,6 +8614,10 @@ function init() {
     document.getElementById('ent-late-submit').disabled = !e.target.checked;
   });
 
+  document.getElementById('status-outing-submit').addEventListener('click', doSubmitStatusOuting);
+  document.getElementById('status-late-submit').addEventListener('click', doSubmitStatusLate);
+  document.getElementById('status-early-submit').addEventListener('click', doSubmitStatusEarly);
+
   document.getElementById('license-type-submit').addEventListener('click', doSaveLicenseType);
   document.getElementById('purpose-submit').addEventListener('click', doSavePurpose);
 
@@ -8761,6 +9027,8 @@ function init() {
   SCREEN_ENTER_HOOKS['my-qual'] = () => { loadMyQualifications(); loadMyHealthSummary(); };
   SCREEN_ENTER_HOOKS['my-health'] = loadMyHealthList;
   SCREEN_ENTER_HOOKS['entertainment-submit'] = resetEntertainmentForm;
+  SCREEN_ENTER_HOOKS['status-submit'] = loadStatusSubmitScreen;
+  SCREEN_ENTER_HOOKS['admin-status-board'] = loadAdminStatusBoard;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;
   SCREEN_ENTER_HOOKS['entertainment-admin'] = () => {
