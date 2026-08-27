@@ -110,6 +110,11 @@
         <span class="home-card-label" id="home-leave-label">休暇申請</span>
         <span class="home-card-desc" id="home-leave-desc">残日数を確認・申請する</span>
       </button>
+      <button type="button" class="home-card" data-nav="status-board-general">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">在席状況</span>
+        <span class="home-card-desc">社員の勤務中/外出中を確認</span>
+      </button>
     </div>
 
     <div id="home-upcoming-events-area"></div>
@@ -129,11 +134,6 @@
         <span class="home-card-label">経費</span>
         <span class="home-card-desc">立替・会社経費</span>
       </button>
-      <button type="button" class="home-card" data-nav="leave">
-        <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label">有給休暇</span>
-        <span class="home-card-desc">休みを申請する</span>
-      </button>
       <button type="button" class="home-card" data-nav="joyo-denpyo-list">
         <span class="icon-slot" data-icon="clipboard-list"></span>
         <span class="home-card-label">常用伝票</span>
@@ -144,15 +144,20 @@
         <span class="home-card-label">支給品</span>
         <span class="home-card-desc">制服・安全用品</span>
       </button>
+      <button type="button" class="home-card" data-nav="status-submit">
+        <span class="icon-slot" data-icon="log-out"></span>
+        <span class="home-card-label">外出・遅刻・早退</span>
+        <span class="home-card-desc">一時離脱や早退を報告</span>
+      </button>
       <button type="button" class="home-card" data-nav="meeting">
         <span class="icon-slot" data-icon="users-round"></span>
         <span class="home-card-label">会議</span>
         <span class="home-card-desc">会議費を申請</span>
       </button>
-      <button type="button" class="home-card" data-nav="status-submit">
-        <span class="icon-slot" data-icon="log-out"></span>
-        <span class="home-card-label">外出・遅刻・早退</span>
-        <span class="home-card-desc">一時離脱や早退を報告</span>
+      <button type="button" class="home-card" data-nav="leave">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">休暇申請</span>
+        <span class="home-card-desc">休みを申請する</span>
       </button>
     </div>
 
@@ -174,7 +179,7 @@
       </button>
       <button type="button" class="home-card" data-nav="leave">
         <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label">有給休暇</span>
+        <span class="home-card-label">休暇申請</span>
         <span class="home-card-desc">休みを申請する</span>
       </button>
       <button type="button" class="home-card" data-nav="expense">
@@ -217,7 +222,7 @@
 
   <!-- 日報入力 -->
   <section id="screen-daily-report" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="card">
       <div class="form-title">日報を入力する</div>
       <div class="hint" style="margin-bottom:10px;">現場と勤務区分(終日・午前・午後)を選ぶと、人工は自動で計算されます。人工を直接入力することはありません。</div>
@@ -658,7 +663,7 @@
 
   <!-- 資格・免許申請フォーム -->
   <section id="screen-qual-submit" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="card">
       <div class="form-title">資格・免許を登録する</div>
       <div class="hint" style="margin-bottom:10px;">証明書の写真またはPDFを添付できます(任意)。登録後、管理者が内容を確認して有効化します。</div>
@@ -715,7 +720,7 @@
 
   <!-- 健康診断 登録フォーム -->
   <section id="screen-health-submit" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="card">
       <div class="form-title">健康診断を登録する</div>
       <div class="hint" style="margin-bottom:10px;">受診票の写真・PDFを添付できます(任意)。内容は本人と管理者のみ確認できます。</div>
@@ -809,7 +814,7 @@
 
   <!-- 有給申請フォーム -->
   <section id="screen-leave" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
 
     <div class="card summary-card">
       <div class="hint-inline" id="leave-summary-period" style="margin-bottom:8px;"></div>
@@ -854,7 +859,7 @@
   <!-- 経費立替申請フォーム(複数明細) -->
   <!-- 経費(申請種類の選択) -->
   <section id="screen-expense-select" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">経費</div>
     <div class="hint" style="margin-bottom:6px;">領収書1枚だけをその場で申請する場合</div>
     <div class="home-card-grid" style="margin-bottom:18px;">
@@ -1099,7 +1104,7 @@
 
   <!-- 会議申請フォーム -->
   <section id="screen-meeting" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="card">
       <div class="form-title">会議申請</div>
       <label for="meeting-date">会議日</label>
@@ -1263,7 +1268,7 @@
 
   <!-- 支給品申請フォーム(選択式。品目一覧からタップで選ぶ、一覧に無い物だけ「その他」から自由入力) -->
   <section id="screen-supply-request" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">支給品申請</div>
     <div class="hint" style="margin-bottom:12px;">支給品を選んでください。一覧に無い物は「上記以外」を選んで品名を入力できます。</div>
     <div class="supply-select-grid" id="supply-select-grid"></div>
@@ -1383,7 +1388,7 @@
 
   <!-- 管理者ダッシュボード -->
   <section id="screen-admin-dashboard" class="screen">
-    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">管理者ダッシュボード</div>
     <div class="hint" style="margin-bottom:12px;">今すぐ対応が必要なことをまとめて表示しています。件数をタップすると一覧に移動します。</div>
 
@@ -1686,7 +1691,7 @@
 
   <!-- 新規現場の確認(管理者) -->
   <section id="screen-site-admin" class="screen">
-    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">現場管理</div>
     <div class="card">
       <div class="form-title" style="font-size:15px;">新規現場を登録</div>
@@ -1824,7 +1829,7 @@
 
   <!-- 勤務中ステータス: 外出・遅刻・早退の報告(2026-08-28、9/1本番運用開始向け新機能) -->
   <section id="screen-status-submit" class="screen">
-    <button type="button" class="back-link" data-nav="menu">戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu">戻る</button>
     <div class="form-title">外出・遅刻・早退</div>
 
     <div class="card" id="status-active-outings-card" style="display:none;">
@@ -1882,6 +1887,15 @@
       <div class="error" id="status-early-error"></div>
       <button id="status-early-submit" class="danger-submit">早退を報告する</button>
     </div>
+  </section>
+
+  <!-- 全社員共通: 在席状況(2026-08-28、ユーザー指示。管理者専用の「今どこ？」とは別に、
+       社員同士がセンシティブな詳細理由を見ずに在席状況だけ確認できる画面) -->
+  <section id="screen-status-board-general" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">在席状況</div>
+    <div class="hint" style="margin-bottom:12px;">本日の社員の在席状況です。理由等の詳細は管理者のみ確認できます。</div>
+    <div id="status-board-general-list"></div>
   </section>
 
   <!-- 管理者: 「今どこ？」ダッシュボード -->
@@ -2544,7 +2558,7 @@
 
   <!-- 常用伝票 一覧 -->
   <section id="screen-joyo-denpyo-list" class="screen">
-    <button type="button" class="back-link" data-nav="menu-apply">申請一覧に戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">常用伝票</div>
     <button type="button" id="jd-new-btn">＋ 新規作成</button>
     <div class="search-bar" style="margin-top:14px;">
@@ -2640,7 +2654,7 @@
 
   <!-- 社内イベント 一覧(社員) -->
   <section id="screen-events" class="screen">
-    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">社内イベント</div>
     <div id="events-list"></div>
   </section>

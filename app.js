@@ -212,6 +212,10 @@ const ADMIN_SCREENS = new Set([
   'subcontractor-company-admin', 'subcontractor-worker-admin',
 ]);
 let inAdminMode = false;
+// 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
+// showScreenでpushStateするたびに増え、popstateで戻るたびに減る。0の間はまだ本当の遷移元が
+// 無い(リロード直後等)ことを示す。
+let appNavDepth = 0;
 
 function showScreen(id, opts) {
   opts = opts || {};
@@ -235,6 +239,7 @@ function showScreen(id, opts) {
   });
   if (!opts.fromPopstate && !preAuthScreens.includes(id)) {
     history.pushState({ screen: id }, '', location.pathname + location.search);
+    appNavDepth += 1;
   }
   window.scrollTo(0, 0);
   if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
@@ -242,9 +247,20 @@ function showScreen(id, opts) {
 
 window.addEventListener('popstate', (e) => {
   if (!getSession()) return; // ログイン前はブラウザ標準の戻る動作に任せる
+  if (appNavDepth > 0) appNavDepth -= 1;
   const id = (e.state && e.state.screen) || 'menu';
   if (document.getElementById(`screen-${id}`)) showScreen(id, { fromPopstate: true });
 });
+
+// 「戻る」ボタンの遷移元復帰(2026-08-28、ユーザー指示): 同じ機能画面がホーム/申請一覧など
+// 複数の入口から開かれる場合、「戻る」は固定の画面ではなく実際に開いた入口へ戻るべき、という
+// 指示に対応する。history.pushStateは画面遷移のたびに既に積んでいるため、本当に前の画面が
+// あるとわかっている場合(appNavDepthで管理)だけhistory.back()を使い、直接この画面を開いた
+// (リロード等でアプリ内の遷移履歴が無い)場合はdata-navの固定先へ安全にフォールバックする。
+function goBackToOrigin(fallbackTarget) {
+  if (appNavDepth > 0) { history.back(); return; }
+  showScreen(fallbackTarget);
+}
 
 // 各種申請の完了画面(screen-done)は共通だが、「メニューに戻る」を常にホームへ
 // 固定すると申請のたびにホームへ戻されて不便なため、申請元の画面へ戻れるように
@@ -2924,8 +2940,12 @@ async function loadAnnounceBanner() {
   area.innerHTML = '';
   try {
     const rows = await rpc('get_my_announcements', { p_employee_code: session.employeeCode });
+    // related_type='daily_reports'(本日の日報未提出の自動通知)は、同じ内容を「今日やること」の
+    // own_daily_reportが既により具体的な導線(タップで日報入力画面へ)込みで表示しているため、
+    // ここで重複表示しない(2026-08-28、ユーザー指摘: 「会社からのお知らせ」と「今日やること」で
+    // 実質同じ内容が重複表示される)。
     const importantOnes = (rows || [])
-      .filter((a) => (a.importance === 'important' || a.importance === 'critical') && shouldShowOnHome(a))
+      .filter((a) => (a.importance === 'important' || a.importance === 'critical') && shouldShowOnHome(a) && a.related_type !== 'daily_reports')
       .sort((a, b) => (a.importance === b.importance ? 0 : a.importance === 'critical' ? -1 : 1) || new Date(b.created_at) - new Date(a.created_at));
     if (importantOnes.length === 0) return;
     area.innerHTML = importantOnes.map((important) => `
@@ -5382,6 +5402,39 @@ async function loadAdminStatusBoard() {
     list.querySelectorAll('.status-board-row').forEach((row) => {
       row.addEventListener('click', () => openStatusTimeline(row.dataset.code, row.dataset.name));
     });
+  } catch (e) {
+    list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
+  }
+}
+
+// 全社員共通の在席状況(2026-08-28、ユーザー指示): 管理者専用のadmin_get_employee_status_boardとは
+// 別に、destination/reason/categoryを一切受け取らないget_employee_status_board_generalを使う。
+// 「休暇」状態も表示できるよう、STATUS_BOARD_LABELにon_leaveを追加する(管理者版のカードでは
+// on_leaveは発生しないため既存のSTATUS_BOARD_LABEL自体は変更しない)。
+const STATUS_BOARD_GENERAL_LABEL = {
+  working: { emoji: '🟢', label: '勤務中' },
+  out: { emoji: '🟡', label: '外出中' },
+  late: { emoji: '🔵', label: '遅刻報告中' },
+  early_left: { emoji: '🔴', label: '早退済' },
+  on_leave: { emoji: '⚪', label: '休暇' },
+};
+
+async function loadStatusBoardGeneral() {
+  const session = getSession();
+  const list = document.getElementById('status-board-general-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('get_employee_status_board_general', { p_employee_code: session.employeeCode });
+    if (rows.length === 0) { list.innerHTML = '<div class="hint">社員データがありません。</div>'; return; }
+    list.innerHTML = rows.map((r) => {
+      const s = STATUS_BOARD_GENERAL_LABEL[r.current_state] || STATUS_BOARD_GENERAL_LABEL.working;
+      const returnDetail = r.expected_return_at
+        ? `　戻り予定 ${new Date(r.expected_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : '';
+      return `<div class="plain-list-row status-board-row">
+        <div>${s.emoji} <b>${r.employee_name}</b></div>
+        <div class="hint-inline">${s.label}${returnDetail}</div>
+      </div>`;
+    }).join('');
   } catch (e) {
     list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
   }
@@ -8953,6 +9006,7 @@ function init() {
     el.addEventListener('click', () => {
       const target = el.getAttribute('data-nav');
       if (el.disabled) return;
+      if (el.classList.contains('back-to-origin')) { goBackToOrigin(target); return; }
       if (target === 'menu') { enterMenu(); return; }
       if (target === 'expense') { showScreen('expense-select'); return; }
       if (target === 'expense-advance') { enterExpenseScreen('employee_advance'); return; }
@@ -9029,6 +9083,7 @@ function init() {
   SCREEN_ENTER_HOOKS['entertainment-submit'] = resetEntertainmentForm;
   SCREEN_ENTER_HOOKS['status-submit'] = loadStatusSubmitScreen;
   SCREEN_ENTER_HOOKS['admin-status-board'] = loadAdminStatusBoard;
+  SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;
   SCREEN_ENTER_HOOKS['entertainment-admin'] = () => {
