@@ -1137,3 +1137,75 @@ button.link {
   .bottom-nav, .app-header { display: none !important; }
   .jd-print-page { box-shadow: none; margin: 0; border-radius: 0; }
 }
+
+/* ===== Staging/Production取り違え防止(2026-08-28) =====
+   IS_STAGING=trueのビルド(Stagingデプロイのみ)でapp.jsがbodyへ.is-stagingクラスを付与した
+   場合にのみ効くスコープ済みの上書き。Production側はこのクラスが一切付かないため、
+   ここに書いたスタイルはProduction画面には絶対に出ない。 */
+.staging-banner {
+  display: none;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  width: 100%;
+  background: repeating-linear-gradient(135deg, oklch(0.74 0.19 55) 0 16px, oklch(0.64 0.2 45) 16px 32px);
+  color: oklch(0.16 0.03 55);
+  font-family: var(--font-display);
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: .02em;
+  text-align: center;
+  padding: 7px 10px;
+  line-height: 1.35;
+  box-shadow: 0 4px 14px -6px oklch(0 0 0 / 60%);
+}
+.staging-build-info {
+  display: none;
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  z-index: 25;
+  text-align: center;
+  font-size: 10px;
+  letter-spacing: .01em;
+  color: oklch(0.16 0.03 55);
+  background: oklch(0.74 0.19 55 / 92%);
+  padding: 3px 8px;
+  pointer-events: none;
+}
+body.is-staging .staging-banner,
+body.is-staging .staging-build-info { display: block; }
+body.is-staging .app-header {
+  top: 34px;
+  background: color-mix(in oklch, oklch(0.64 0.2 45) 22%, var(--card-bg-solid) 78%);
+  border-bottom: 2px solid oklch(0.74 0.19 55);
+}
+body.is-staging .bottom-nav { padding-bottom: calc(env(safe-area-inset-bottom, 0) + 16px); }
+/* 画面全体にうっすら「STAGING」の透かしを繰り返し表示し、スクリーンショットだけを見ても
+   本番と取り違えないようにする。操作の邪魔にならないようpointer-events:noneかつ低い不透明度。 */
+body.is-staging::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  opacity: .05;
+  background-image: repeating-linear-gradient(
+    -30deg,
+    transparent, transparent 120px,
+    oklch(0.74 0.19 55) 120px 122px
+  );
+  background-size: 340px 340px;
+}
+body.is-staging::after {
+  content: 'STAGING';
+  position: fixed;
+  top: 45%; left: 50%;
+  transform: translate(-50%, -50%) rotate(-22deg);
+  font-family: var(--font-display);
+  font-size: 15vw;
+  font-weight: 900;
+  color: oklch(0.74 0.19 55 / 7%);
+  z-index: 1;
+  pointer-events: none;
+  white-space: nowrap;
+}

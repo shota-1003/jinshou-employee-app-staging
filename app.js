@@ -18,6 +18,16 @@
 
 const SUPABASE_URL = 'https://fnhpplsuwanuxwktthqv.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuaHBwbHN1d2FudXh3a3R0aHF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTkxODYsImV4cCI6MjEwMzM5NTE4Nn0.l3Rafu627Pe2e-aM6zG7FOlijPuyjp7xba_pYGFtG50';
+// Staging/Production取り違え防止用フラグ(2026-08-28)。ソース上は常にfalseで、
+// scripts/deploy-employee-portal-staging.jsがコピー先だけをtrueへ書き換える
+// (SUPABASE_URL/ANON_KEYと同じ「ソースは変更しない、コピー先だけ差し替える」方式)。
+// Production側のデプロイ経路ではこの行を一切書き換えないため、本番に誤って
+// Staging表示が出ることは構造的に無い。
+const IS_STAGING = true;
+// 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
+// タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
+const APP_BUILD_VERSION = 'jinshou-employee-app-v65-staging';
+const BUILD_DEPLOYED_AT = '2026-08-27T23:23:07.589Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8604,7 +8614,23 @@ function openAiGuidePanel() {
 
 // ---------- 初期化 ----------
 
+// Staging/Production取り違え防止(2026-08-28)。ログイン画面を含む全画面で、IS_STAGINGが
+// trueのビルドだけbodyへ.is-stagingクラスを付け、アプリ名・タブタイトル・ビルド情報表示を
+// 切り替える。Productionはこの関数自体は呼ばれるが、IS_STAGINGがfalseなので何もしない。
+function applyStagingIndicator() {
+  if (!IS_STAGING) return;
+  document.body.classList.add('is-staging');
+  document.title = '迅翔興業 社員ポータル STAGING';
+  const titleEl = document.getElementById('app-header-title');
+  if (titleEl) titleEl.textContent = '社員ポータル｜アップデート用';
+  const versionEl = document.getElementById('staging-build-version');
+  if (versionEl) versionEl.textContent = APP_BUILD_VERSION || '-';
+  const timeEl = document.getElementById('staging-build-time');
+  if (timeEl) timeEl.textContent = BUILD_DEPLOYED_AT ? new Date(BUILD_DEPLOYED_AT).toLocaleString('ja-JP') : '不明';
+}
+
 function init() {
+  applyStagingIndicator();
   hydrateIcons(document);
 
   document.getElementById('login-btn').addEventListener('click', doSubmitEmployeeCode);
