@@ -727,7 +727,12 @@ async function loadHomeAnnouncePreview() {
       if (!isPersonal && !a.is_read) return 0;
       return 1;
     };
-    const visible = (rows || []).filter((a) => a.importance === 'normal' && shouldShowOnHome(a))
+    // related_type='daily_reports'(日報未提出の自動通知)は、同じ内容を「今日やること」の
+    // own_daily_reportが既に表示しているため、ここでも重複表示しない(2026-08-28、ユーザー指摘:
+    // 「会社からのお知らせ：本日の日報未提出です」「今日やること：本日は日報がまだ記入されて
+    // いません」の重複。importance='normal'の古い通知にも適用するため、importance='important'の
+    // バナー側(loadAnnounceBanner)と同じ除外条件をここにも適用する)。
+    const visible = (rows || []).filter((a) => a.importance === 'normal' && shouldShowOnHome(a) && a.related_type !== 'daily_reports')
       .sort((a, b) => homeRank(a) - homeRank(b) || new Date(b.created_at) - new Date(a.created_at));
     if (visible.length === 0) { area.innerHTML = '<div class="hint">お知らせはありません。</div>'; return; }
     const top = visible.slice(0, 3);
