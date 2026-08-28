@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T13:59:10.838Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T14:09:32.965Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -3234,7 +3234,7 @@ const DASH_CARDS = [
   { key: 'unanswered_consultations', filter: null, label: '未対応の匿名相談', icon: 'message-circle', nav: 'anon-admin', status: 'pending' },
   { key: 'pending_qualifications', filter: null, label: '資格の確認待ち', icon: 'graduation-cap', nav: 'qual-admin', status: 'pending' },
   { key: 'qualification_expiring_count', filter: null, label: '期限が近い資格', icon: 'clock', nav: 'qual-admin', status: 'pending' },
-  { key: 'category_review_needed_count', filter: null, label: '勘定科目の確認待ち', icon: 'hash', nav: 'category-review', status: 'pending' },
+  { key: 'category_review_needed_count', filter: null, label: '経費の勘定科目 要確認', icon: 'hash', nav: 'category-review', status: 'pending' },
   { key: 'pending_info_change_requests', filter: null, label: '個人情報の変更申請', icon: 'user', nav: 'info-change-admin', status: 'pending' },
   { key: 'pending_sites', filter: null, label: '新規現場の確認待ち', icon: 'map-pin', nav: 'site-admin', status: 'pending' },
   { key: 'pending_entertainment_preapprovals', filter: null, label: '接待事前申請 承認待ち', icon: 'users-round', nav: 'entertainment-admin', status: 'pending' },
