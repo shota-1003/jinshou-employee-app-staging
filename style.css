@@ -1209,3 +1209,14 @@ body.is-staging::after {
   pointer-events: none;
   white-space: nowrap;
 }
+
+/* 2026-08-28(第4弾): 在席状況は毎日全員が使う主要機能ではないため、今日やること相当の
+   高さの横長1行カードへ縮小(ユーザー指示。以前の大きなhome-cardより低い専用スタイル)。 */
+.home-status-compact {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-md);
+  padding: 12px 16px; margin-bottom: 8px; cursor: pointer; font-family: inherit; box-shadow: var(--shadow-sm);
+}
+.home-status-compact-label { font-size: 12.5px; font-weight: 700; color: var(--text); flex-shrink: 0; }
+.home-status-compact-desc { font-size: 12px; color: var(--text-muted); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-status-compact .icon-slot:last-child { color: var(--text-faint); flex-shrink: 0; }

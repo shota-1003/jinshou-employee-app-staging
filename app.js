@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v67-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T01:30:02.480Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v69-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T02:10:44.944Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -595,11 +595,11 @@ async function renderHomeLeaveCard(session) {
   } catch (e) { /* 取れなくても遷移自体はできる */ }
 }
 
-// ホーム「在席状況」カードに、タップせずとも一目で分かる現在人数のサマリーを表示する
-// (2026-08-28、ユーザー指示: 「勤務中○名/外出中○名/遅刻○名/早退○名」の形式で、ホームを
-// 情報過多にしないよう既存の在席状況カードの説明文だけを動的に差し替える。新しい行や
-// セクションは追加しない)。get_employee_status_board_generalは既にセンシティブな理由等を
-// 返さない設計のため、そのまま再利用して件数だけ集計する(新規RPCは追加しない)。
+// ホーム「今日の在席・不在」カードに、タップせずとも一目で分かる現在人数のサマリーを表示する
+// (2026-08-28第4弾、ユーザー指示: 在席状況は補助機能のため横長コンパクトな1行カードへ縮小し、
+// 「休暇○人｜外出○人｜遅刻○人｜早退○人」の形式で表示する)。get_employee_status_board_generalは
+// 既にセンシティブな理由等を返さない設計のため、そのまま再利用して件数だけ集計する
+// (新規RPCは追加しない)。
 async function renderHomeStatusSummaryCard(session) {
   const descEl = document.getElementById('home-status-summary-desc');
   if (!descEl) return;
@@ -610,7 +610,7 @@ async function renderHomeStatusSummaryCard(session) {
     const total = counts.on_leave + counts.out + counts.late + counts.early_left;
     descEl.textContent = total === 0
       ? '現在、共有事項はありません'
-      : `休暇${counts.on_leave}・外出中${counts.out}・遅刻${counts.late}・早退${counts.early_left}`;
+      : `休暇${counts.on_leave}人｜外出${counts.out}人｜遅刻${counts.late}人｜早退${counts.early_left}人`;
   } catch (e) { /* 取れなくても遷移自体はできる */ }
 }
 
@@ -5838,14 +5838,69 @@ const JAPAN_PREFECTURES = [
   '鳥取県', '島根県', '岡山県', '広島県', '山口県', '徳島県', '香川県', '愛媛県', '高知県', '福岡県',
   '佐賀県', '長崎県', '熊本県', '大分県', '宮崎県', '鹿児島県', '沖縄県',
 ];
-function populateSitePrefectureSelect() {
-  const sel = document.getElementById('site-create-prefecture');
+function populateSitePrefectureSelect(selectId) {
+  const sel = document.getElementById(selectId || 'site-create-prefecture');
   if (sel.options.length > 1) return;
   JAPAN_PREFECTURES.forEach((p) => {
     const opt = document.createElement('option');
     opt.value = p; opt.textContent = p;
     sel.appendChild(opt);
   });
+}
+
+// ---------- 現場を登録申請(2026-08-28第4弾、一般社員向け) ----------
+
+function resetProposeSiteForm() {
+  document.getElementById('propose-site-name').value = '';
+  document.getElementById('propose-site-notes').value = '';
+  document.getElementById('propose-site-out-of-prefecture').checked = false;
+  document.getElementById('propose-site-prefecture').value = '';
+  document.getElementById('propose-site-candidates').style.display = 'none';
+  hideError('propose-site-error');
+  populateSitePrefectureSelect('propose-site-prefecture');
+}
+
+async function doProposeSite(forceCreate) {
+  const session = getSession();
+  const name = document.getElementById('propose-site-name').value.trim();
+  const prefecture = document.getElementById('propose-site-prefecture').value || null;
+  const isOutOfPrefecture = document.getElementById('propose-site-out-of-prefecture').checked;
+  const notes = document.getElementById('propose-site-notes').value.trim() || null;
+  const candidatesEl = document.getElementById('propose-site-candidates');
+  hideError('propose-site-error');
+  candidatesEl.style.display = 'none';
+  if (!name) { showError('propose-site-error', '現場名を入力してください。'); return; }
+
+  const btn = document.getElementById('propose-site-submit');
+  btn.disabled = true;
+  try {
+    const result = await rpc('propose_new_site', {
+      p_employee_code: session.employeeCode, p_site_name: name, p_prefecture: prefecture,
+      p_is_out_of_prefecture: isOutOfPrefecture, p_notes: notes, p_force_create: !!forceCreate,
+    });
+    const r = result[0];
+    if (r.created) {
+      showDone('現場を登録申請しました。管理者の確認後、正式な現場になります。', 'menu-apply');
+    } else if (r.similar_candidates) {
+      document.getElementById('propose-site-candidates-list').innerHTML = r.similar_candidates.map((c) => `
+        <button type="button" class="secondary propose-site-candidate-btn" data-site-id="${c.site_id}" style="display:block;width:100%;text-align:left;margin-top:6px;">
+          「${c.site_name}」(類似度${Math.round(c.similarity * 100)}%)
+        </button>
+      `).join('');
+      candidatesEl.style.display = 'block';
+      document.querySelectorAll('.propose-site-candidate-btn').forEach((cbtn) => {
+        cbtn.addEventListener('click', () => {
+          showDone(`既存の現場「${cbtn.textContent.trim()}」を使ってください。新規登録はしていません。`, 'menu-apply');
+        });
+      });
+    } else {
+      showDone('既存の現場と同じ名前のため、その現場をそのまま使えます。新規登録はしていません。', 'menu-apply');
+    }
+  } catch (e) {
+    showError('propose-site-error', e.message || '登録申請に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
 }
 
 async function doCreateSite(forceCreate) {
@@ -8828,6 +8883,8 @@ function init() {
   document.getElementById('status-early-submit').addEventListener('click', doSubmitStatusEarly);
 
   document.getElementById('action-item-submit').addEventListener('click', doCreateActionItem);
+  document.getElementById('propose-site-submit').addEventListener('click', () => doProposeSite(false));
+  document.getElementById('propose-site-force-create-btn').addEventListener('click', () => doProposeSite(true));
 
   document.getElementById('license-type-submit').addEventListener('click', doSaveLicenseType);
   document.getElementById('purpose-submit').addEventListener('click', doSavePurpose);
@@ -9243,6 +9300,7 @@ function init() {
   SCREEN_ENTER_HOOKS['admin-status-board'] = loadAdminStatusBoard;
   SCREEN_ENTER_HOOKS['my-action-items'] = loadMyActionItems;
   SCREEN_ENTER_HOOKS['admin-action-item-create'] = resetActionItemCreateForm;
+  SCREEN_ENTER_HOOKS['propose-site'] = resetProposeSiteForm;
   SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;

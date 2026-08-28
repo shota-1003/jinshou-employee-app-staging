@@ -100,38 +100,42 @@
     </div>
     <div class="home-announce-block" id="home-announce-block"></div>
 
-    <div class="section-title">在席状況</div>
-    <div class="home-card-grid" style="margin-bottom:12px;">
-      <button type="button" class="home-card" data-nav="status-board-general">
-        <span class="icon-slot" data-icon="users-round"></span>
-        <span class="home-card-label">在席状況</span>
-        <span class="home-card-desc" id="home-status-summary-desc">社員の勤務中/外出中を確認</span>
-      </button>
-    </div>
+    <!-- 2026-08-28(第4弾): 在席状況は「補助機能」であり毎日全員が見る主要機能ではないため、
+         今日やること程度の高さの横長コンパクトな1行カードへ縮小(ユーザー指示)。 -->
+    <button type="button" class="home-status-compact" data-nav="status-board-general">
+      <span class="icon-slot" data-icon="users-round"></span>
+      <span class="home-status-compact-label">今日の在席・不在</span>
+      <span class="home-status-compact-desc" id="home-status-summary-desc">社員の勤務中/外出中を確認</span>
+      <span class="icon-slot" data-icon="chevron-right"></span>
+    </button>
 
-    <div class="section-title">今月の状況</div>
-    <div class="stat-mini-row" id="home-month-stats" style="cursor:pointer;"></div>
-    <div class="home-card-grid" style="margin-bottom:12px;">
-      <button type="button" class="home-card" data-nav="my-daily-reports">
-        <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label">日報履歴・カレンダー</span>
-        <span class="home-card-desc">提出履歴と月間カレンダー</span>
-      </button>
-      <button type="button" class="home-card" data-nav="entertainment-submit">
-        <span class="icon-slot" data-icon="users-round"></span>
-        <span class="home-card-label">接待・会食</span>
-        <span class="home-card-desc">事前申請(接待前に)</span>
-      </button>
-    </div>
+    <div class="stat-mini-row" id="home-month-stats" style="cursor:pointer;margin-top:10px;"></div>
 
     <div id="home-upcoming-events-area"></div>
 
+    <!-- 2026-08-28(第4弾): 実運用の利用頻度順(高→低)に並び替え。日報/日報履歴/休暇申請/
+         外出・遅刻・早退/経費/常用伝票/支給品/会議/接待・会食(ユーザー指示)。 -->
     <div class="section-title">よく使う機能</div>
     <div class="home-card-grid">
       <button type="button" class="home-card" id="home-daily-report-card" data-nav="daily-report">
         <span class="icon-slot" data-icon="clipboard-list"></span>
         <span class="home-card-label" id="home-daily-report-label">日報</span>
         <span class="home-card-desc" id="home-daily-report-desc">今日の現場・勤務区分</span>
+      </button>
+      <button type="button" class="home-card" data-nav="my-daily-reports">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">日報履歴</span>
+        <span class="home-card-desc">提出履歴と月間カレンダー</span>
+      </button>
+      <button type="button" class="home-card" data-nav="leave">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label" id="home-leave-label">休暇申請</span>
+        <span class="home-card-desc" id="home-leave-desc">休みを申請する</span>
+      </button>
+      <button type="button" class="home-card" data-nav="status-submit">
+        <span class="icon-slot" data-icon="log-out"></span>
+        <span class="home-card-label">外出・遅刻・早退</span>
+        <span class="home-card-desc">一時離脱や早退を報告</span>
       </button>
       <button type="button" class="home-card" data-nav="expense">
         <span class="icon-slot" data-icon="receipt"></span>
@@ -148,20 +152,15 @@
         <span class="home-card-label">支給品</span>
         <span class="home-card-desc">制服・安全用品</span>
       </button>
-      <button type="button" class="home-card" data-nav="status-submit">
-        <span class="icon-slot" data-icon="log-out"></span>
-        <span class="home-card-label">外出・遅刻・早退</span>
-        <span class="home-card-desc">一時離脱や早退を報告</span>
-      </button>
       <button type="button" class="home-card" data-nav="meeting">
         <span class="icon-slot" data-icon="users-round"></span>
         <span class="home-card-label">会議</span>
         <span class="home-card-desc">会議費を申請</span>
       </button>
-      <button type="button" class="home-card" data-nav="leave">
-        <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label" id="home-leave-label">休暇申請</span>
-        <span class="home-card-desc" id="home-leave-desc">休みを申請する</span>
+      <button type="button" class="home-card" data-nav="entertainment-submit">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">接待・会食</span>
+        <span class="home-card-desc">事前申請(接待前に)</span>
       </button>
     </div>
 
@@ -221,7 +220,35 @@
         <span class="home-card-label">健康診断</span>
         <span class="home-card-desc">受診結果を登録する</span>
       </button>
+      <button type="button" class="home-card" data-nav="propose-site">
+        <span class="icon-slot" data-icon="map-pin"></span>
+        <span class="home-card-label">現場を登録申請</span>
+        <span class="home-card-desc">新しい現場を追加してほしいとき</span>
+      </button>
     </div>
+  </section>
+
+  <!-- 2026-08-28(第4弾): 一般社員が新しい現場を登録申請できる画面。日報を経由しなくても、
+       事前に現場だけ登録申請できる(ユーザー指示)。既存のadmin_register_siteと同じ重複検出
+       ロジック(propose_new_site)を使い、似ている現場があれば先にそちらを提示する。 -->
+  <section id="screen-propose-site" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">現場を登録申請</div>
+    <div class="hint" style="margin-bottom:12px;">登録後は管理者の確認を経て正式な現場になります。承認待ちの間もその現場名で日報を提出できます。</div>
+    <label for="propose-site-name">現場名(必須)</label>
+    <input type="text" id="propose-site-name" placeholder="例: ○○様邸新築工事">
+    <label for="propose-site-prefecture">都道府県</label>
+    <select id="propose-site-prefecture"><option value="">選択してください</option></select>
+    <div class="checkbox-row"><input type="checkbox" id="propose-site-out-of-prefecture"><label for="propose-site-out-of-prefecture">県外の現場</label></div>
+    <label for="propose-site-notes">備考(任意)</label>
+    <textarea id="propose-site-notes" rows="2"></textarea>
+    <div id="propose-site-candidates" style="display:none;margin-top:12px;">
+      <div class="hint">よく似た現場が登録されています。こちらではありませんか？</div>
+      <div id="propose-site-candidates-list"></div>
+      <button type="button" id="propose-site-force-create-btn" class="secondary" style="margin-top:8px;">それでも新しい現場として登録する</button>
+    </div>
+    <div class="error" id="propose-site-error"></div>
+    <button type="button" id="propose-site-submit">登録申請する</button>
   </section>
 
   <!-- 日報入力 -->
