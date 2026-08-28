@@ -63,7 +63,9 @@
       <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
       <div class="login-company" id="pin-register-name">初めての方へ</div>
       <div class="card">
-        <div class="hint" style="margin-bottom:14px;">今後ログインに使う暗証番号(4〜6桁の数字)を設定してください。次回からはこの暗証番号だけでログインできます。</div>
+        <div class="hint" style="margin-bottom:14px;">初めてのご利用には、管理者から伝えられた初回登録コードが必要です。今後ログインに使う暗証番号(4〜6桁の数字)もあわせて設定してください。次回からはこの暗証番号だけでログインできます。</div>
+        <label for="pin-register-first-code">初回登録コード(管理者から伝えられたもの)</label>
+        <input type="text" id="pin-register-first-code" autocomplete="off" autocapitalize="characters" placeholder="例: QMSJCN8R2C">
         <label for="pin-register-code">暗証番号(4〜6桁)</label>
         <input type="password" id="pin-register-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
         <label for="pin-register-confirm">確認のためもう一度入力</label>
@@ -2389,6 +2391,17 @@
       <div id="employee-detail-requests-list"></div>
     </div>
     <div class="tab-panel" id="employee-detail-panel-devices">
+      <div class="card">
+        <div class="row1"><span>ポータル利用許可</span><span id="employee-detail-portal-access-status" class="mini-tag">-</span></div>
+        <div class="hint" style="margin:6px 0;">停止すると、この社員のログイン・既存の全端末が即座に使えなくなります。</div>
+        <button type="button" class="secondary" id="employee-detail-portal-access-toggle-btn">-</button>
+      </div>
+      <div class="card">
+        <div class="row1"><span>初回登録コード</span><span id="employee-detail-first-code-status" class="mini-tag">-</span></div>
+        <div class="hint" style="margin:6px 0;">初めてポータルを利用する社員へ、このコードを個別にお伝えください(LINE等)。1回使用すると失効します。</div>
+        <button type="button" class="secondary" id="employee-detail-issue-first-code-btn">初回登録コードを発行する</button>
+        <div id="employee-detail-first-code-result" style="display:none;"></div>
+      </div>
       <div class="hint">ログイン中の端末を一覧表示します。不審な端末や紛失した端末は無効化できます。無効化された端末は、次回利用時に暗証番号の再入力が必要になります。</div>
       <button type="button" class="secondary danger" id="employee-detail-revoke-all-devices-btn">この社員の全端末を無効化する</button>
       <div id="employee-detail-devices-list"></div>

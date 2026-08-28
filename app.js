@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v69-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T03:46:10.847Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v70-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T04:07:22.058Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -425,10 +425,15 @@ async function doVerifyPin() {
 }
 
 async function doRegisterPin() {
+  const firstCode = document.getElementById('pin-register-first-code').value.trim();
   const pin = document.getElementById('pin-register-code').value.trim();
   const pinConfirm = document.getElementById('pin-register-confirm').value.trim();
   hideError('pin-register-error');
 
+  if (!firstCode) {
+    showError('pin-register-error', '初回登録コードを入力してください。管理者から伝えられていない場合は管理者へお問い合わせください。');
+    return;
+  }
   if (!/^[0-9]{4,6}$/.test(pin)) {
     showError('pin-register-error', '暗証番号は4〜6桁の数字で入力してください。');
     return;
@@ -441,10 +446,11 @@ async function doRegisterPin() {
   const btn = document.getElementById('pin-register-submit');
   btn.disabled = true;
   try {
-    const rows = await rpc('register_employee_pin', { p_employee_code: pendingLoginCode, p_pin: pin });
+    const rows = await rpc('register_employee_pin', { p_employee_code: pendingLoginCode, p_first_login_code: firstCode, p_pin: pin });
     const emp = rows[0];
     setSession({ employeeCode: pendingLoginCode, employeeId: emp.out_employee_id, employeeName: emp.out_employee_name, requestRole: emp.out_request_role });
     setDeviceAuth(pendingLoginCode, emp.out_device_token);
+    document.getElementById('pin-register-first-code').value = '';
     document.getElementById('pin-register-code').value = '';
     document.getElementById('pin-register-confirm').value = '';
     if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
@@ -3916,21 +3922,69 @@ async function switchEmployeeDetailTab(tab) {
   else if (tab === 'devices') await loadEmployeeDetailDevices();
 }
 
+async function loadEmployeeDetailPortalAccess() {
+  const session = getSession();
+  const code = currentEmployeeDetailCode;
+  try {
+    const rows = await rpc('admin_list_employees', { p_admin_employee_code: session.employeeCode, p_search: code, p_status_filter: null, p_sort: 'code' });
+    const e = (rows || []).find((r) => r.employee_code === code);
+    if (!e) return;
+    const statusEl = document.getElementById('employee-detail-portal-access-status');
+    const toggleBtn = document.getElementById('employee-detail-portal-access-toggle-btn');
+    statusEl.textContent = e.portal_access_enabled ? '許可中' : '停止中';
+    statusEl.className = 'mini-tag ' + (e.portal_access_enabled ? 'info' : 'danger');
+    toggleBtn.textContent = e.portal_access_enabled ? '利用を停止する' : '利用を再開する';
+    toggleBtn.onclick = async () => {
+      const enabling = !e.portal_access_enabled;
+      if (!enabling && !confirm('この社員のポータル利用を停止します。既存の全端末も即座に使えなくなります。よろしいですか？')) return;
+      toggleBtn.disabled = true;
+      try {
+        await rpc('admin_set_portal_access', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code, p_enabled: enabling });
+        await loadEmployeeDetailPortalAccess();
+        await loadEmployeeDetailDevices();
+      } catch (e2) { alert(e2.message); }
+      toggleBtn.disabled = false;
+    };
+
+    const codeStatusEl = document.getElementById('employee-detail-first-code-status');
+    codeStatusEl.textContent = e.has_registered_pin ? '初回登録済み' : (e.has_valid_first_login_code ? '発行済み(未使用)' : '未発行');
+    codeStatusEl.className = 'mini-tag ' + (e.has_registered_pin ? 'info' : (e.has_valid_first_login_code ? 'warn' : ''));
+    const issueBtn = document.getElementById('employee-detail-issue-first-code-btn');
+    const resultEl = document.getElementById('employee-detail-first-code-result');
+    resultEl.style.display = 'none';
+    issueBtn.textContent = e.has_valid_first_login_code ? '再発行する(古いコードは失効します)' : '初回登録コードを発行する';
+    issueBtn.onclick = async () => {
+      if (e.has_valid_first_login_code && !confirm('既に有効なコードがあります。再発行すると古いコードは使えなくなります。よろしいですか？')) return;
+      issueBtn.disabled = true;
+      try {
+        const r = await rpc('admin_issue_first_login_code', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
+        const info = r[0];
+        resultEl.style.display = 'block';
+        resultEl.innerHTML = `<div class="hint" style="margin-top:8px;">コード: <b style="font-size:16px; letter-spacing:1px;">${info.out_code}</b>(このコードはこの画面を離れると二度と表示できません。今すぐ本人へお伝えください。有効期限: ${new Date(info.out_expires_at).toLocaleDateString('ja-JP')})</div>`;
+        await loadEmployeeDetailPortalAccess();
+      } catch (e2) { alert(e2.message); }
+      issueBtn.disabled = false;
+    };
+  } catch (e) { /* 読み込み失敗時は静かに諦める(端末一覧は別途表示されるため) */ }
+}
+
 async function loadEmployeeDetailDevices() {
   const session = getSession();
   const code = currentEmployeeDetailCode;
   const listEl = document.getElementById('employee-detail-devices-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  await loadEmployeeDetailPortalAccess();
   try {
     const rows = await rpc('admin_list_employee_devices', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">この社員はまだどの端末からもログインしていません。</div>'; return; }
     listEl.innerHTML = rows.map((d) => `
       <div class="admin-result-item">
-        <div class="row1"><span>${d.device_label || '不明な端末'}</span><span class="status-badge ${d.is_active && d.employee_status === 'active' ? 'done' : 'rejected'}">${!d.is_active ? '無効化済み' : (d.employee_status !== 'active' ? '本人が利用停止中' : '有効')}</span></div>
+        <div class="row1"><span>${d.device_label || '不明な端末'}</span><span class="status-badge ${d.approval_status === 'pending' ? 'warn' : (d.is_active && d.employee_status === 'active' ? 'done' : 'rejected')}">${d.approval_status === 'pending' ? '承認待ち' : (d.approval_status === 'rejected' ? '却下済み' : (!d.is_active ? '無効化済み' : (d.employee_status !== 'active' ? '本人が利用停止中' : '有効')))}</span></div>
         <div class="row2">初回ログイン: ${new Date(d.created_at).toLocaleString('ja-JP')}</div>
         <div class="row2">最終利用: ${new Date(d.last_seen_at).toLocaleString('ja-JP')}${d.last_seen_ip ? `・${d.last_seen_ip}` : ''}</div>
-        ${!d.is_active ? `<div class="row2">無効化: ${d.revoked_at ? new Date(d.revoked_at).toLocaleString('ja-JP') : ''}(${d.revoked_by === 'self' ? '本人がログアウト' : (d.revoked_by === 'system:employee_inactive' ? '退職・利用停止による自動遮断' : `管理者(${d.revoked_by})が無効化`)})</div>` : ''}
-        ${d.is_active ? `<button type="button" class="return-btn" data-revoke-device-id="${d.id}">この端末を無効化する</button>` : ''}
+        ${!d.is_active && d.approval_status !== 'pending' ? `<div class="row2">無効化: ${d.revoked_at ? new Date(d.revoked_at).toLocaleString('ja-JP') : ''}(${d.revoked_by === 'self' ? '本人がログアウト' : (d.revoked_by === 'system:employee_inactive' ? '退職・利用停止による自動遮断' : `管理者(${d.revoked_by})が無効化`)})</div>` : ''}
+        ${d.approval_status === 'pending' ? `<button type="button" class="approve-btn" data-approve-device-id="${d.id}">承認する</button><button type="button" class="reject-btn" data-reject-device-id="${d.id}">却下する</button>` : ''}
+        ${d.approval_status === 'approved' && d.is_active ? `<button type="button" class="return-btn" data-revoke-device-id="${d.id}">この端末を無効化する</button>` : ''}
       </div>
     `).join('');
     listEl.querySelectorAll('[data-revoke-device-id]').forEach((btn) => {
@@ -3944,6 +3998,25 @@ async function loadEmployeeDetailDevices() {
           alert(e.message);
           btn.disabled = false;
         }
+      });
+    });
+    listEl.querySelectorAll('[data-approve-device-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await rpc('admin_decide_device_approval', { p_admin_employee_code: session.employeeCode, p_device_id: Number(btn.dataset.approveDeviceId), p_action: 'approve' });
+          await loadEmployeeDetailDevices();
+        } catch (e) { alert(e.message); btn.disabled = false; }
+      });
+    });
+    listEl.querySelectorAll('[data-reject-device-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('この端末からの利用申請を却下しますか?')) return;
+        btn.disabled = true;
+        try {
+          await rpc('admin_decide_device_approval', { p_admin_employee_code: session.employeeCode, p_device_id: Number(btn.dataset.rejectDeviceId), p_action: 'reject' });
+          await loadEmployeeDetailDevices();
+        } catch (e) { alert(e.message); btn.disabled = false; }
       });
     });
   } catch (e) {
