@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v66-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T00:26:07.528Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v67-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T01:30:02.480Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -659,10 +659,12 @@ async function renderHomeUpcomingEvents(session) {
 // 提出済み/未提出/要確認の3状態を出し分け、タップ先も状態に応じて変える
 // (未提出→入力画面、それ以外→詳細確認画面)。「よく使う機能」の日報カード(入力用)とは別に、
 // ホーム上部で状態そのものが一目で分かるようにする。
+// 2026-08-28(第3弾): 独立した「本日の日報未提出」バナーはホームから廃止し、同内容は
+// 「今日やること」(get_my_today_tasksのown_daily_report/needs_review/rejected各行)へ
+// 一本化した(同じ情報を複数箇所に出さない、ユーザー指示)。ここでは、休暇でも未提出でもない
+// 「今日は休みとして登録する」のワンタップ導線だけを、今日やることの直下に残す
+// (提出済み・休暇登録済みの日は表示しない)。
 async function renderHomeDailyReportStatusBanner(session) {
-  const banner = document.getElementById('home-daily-report-status-banner');
-  const labelEl = document.getElementById('home-daily-report-status-label');
-  const detailEl = document.getElementById('home-daily-report-status-detail');
   const restBtn = document.getElementById('home-daily-report-mark-rest-btn');
   restBtn.style.display = 'none';
   const today = todayJST();
@@ -672,48 +674,11 @@ async function renderHomeDailyReportStatusBanner(session) {
       rpc('get_my_leave_status_for_date', { p_employee_code: session.employeeCode, p_date: today }),
     ]);
     const leave = leaveRows && leaveRows[0] && leaveRows[0].is_on_leave ? leaveRows[0] : null;
-    banner.style.display = 'flex';
-    banner.classList.remove('urgent', 'done');
-    banner.onclick = null;
-
-    if (!rows || rows.length === 0) {
-      if (leave) {
-        // item#9: 休暇として登録済みの日は「未提出」警告を出さない。
-        banner.classList.add('done');
-        labelEl.textContent = leave.leave_category === 'paid_leave' ? '本日は有給です' : `本日は${leave.leave_category_label}です`;
-        detailEl.textContent = leave.approval_status === 'approved' ? '承認済み' : '承認待ち・タップして確認';
-        banner.onclick = () => showScreen('history');
-      } else {
-        // 未提出。15時以降は「まだ提出されていません」として強調する(それより前は通常表示)。
-        const hourJST = Number(new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' })).getHours());
-        const isLate = hourJST >= 15;
-        banner.classList.toggle('urgent', isLate);
-        labelEl.textContent = isLate ? '本日の日報がまだ提出されていません' : '本日の日報：未提出';
-        detailEl.textContent = 'タップして入力する';
-        banner.onclick = () => showScreen('daily-report');
-        // item#10: 「日報を書く」か「今日は休みとして登録する」を選べるようにする。
-        restBtn.style.display = '';
-        restBtn.onclick = (e) => { e.stopPropagation(); openQuickRestRegisterFromHome(today); };
-      }
-    } else if (rows.some((r) => r.needs_review)) {
-      banner.classList.add('urgent');
-      labelEl.textContent = '🔴 本日の日報：要確認';
-      detailEl.textContent = '内容に確認が必要な点があります。タップして確認';
-      banner.onclick = () => openMyDailyReportDetail(today);
-    } else if (rows.some((r) => r.report_status === 'rejected')) {
-      banner.classList.add('urgent');
-      labelEl.textContent = '🔴 本日の日報：修正依頼あり';
-      detailEl.textContent = '管理者から修正依頼が届いています。タップして確認';
-      banner.onclick = () => openMyDailyReportDetail(today);
-    } else {
-      banner.classList.add('done');
-      labelEl.textContent = '本日の日報：提出済み ✓';
-      detailEl.textContent = 'タップして内容を確認';
-      banner.onclick = () => openMyDailyReportDetail(today);
+    if ((!rows || rows.length === 0) && !leave) {
+      restBtn.style.display = '';
+      restBtn.onclick = () => openQuickRestRegisterFromHome(today);
     }
-  } catch (e) {
-    banner.style.display = 'none';
-  }
+  } catch (e) { /* 取れなくても今日やること側の表示は別途機能する */ }
 }
 
 // executiveはadmin-dashboard(全管理メニュー)、日報担当(nippo_admin、executiveではない)は
@@ -1220,10 +1185,10 @@ function enterExpenseScreen(category) {
   showScreen('expense');
 }
 
-async function populateSiteSelect(selectEl, query) {
+async function populateSiteSelect(selectEl, query, dailyReportOnly) {
   try {
     const session = getSession();
-    const rows = await rpc('search_sites', { p_query: query || null, p_employee_code: session ? session.employeeCode : null });
+    const rows = await rpc('search_sites', { p_query: query || null, p_employee_code: session ? session.employeeCode : null, p_daily_report_only: !!dailyReportOnly });
     const current = selectEl.value;
     const recent = rows.filter((s) => s.recently_used);
     const others = rows.filter((s) => !s.recently_used);
@@ -5503,6 +5468,90 @@ async function loadStatusBoardGeneral() {
   }
 }
 
+// ---------- Action Center(2026-08-28、管理者から社員個人/複数社員への指示) ----------
+
+async function loadMyActionItems() {
+  const session = getSession();
+  const list = document.getElementById('my-action-items-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('get_my_action_items', { p_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="hint">現在、対応が必要な指示はありません。</div>'; return; }
+    list.innerHTML = rows.map((r) => `
+      <div class="card" data-id="${r.id}" style="margin-bottom:10px;">
+        <div style="font-weight:700;">${r.is_overdue ? '<span class="tag danger">期限超過</span> ' : ''}${r.title}</div>
+        ${r.body ? `<div class="hint-inline" style="white-space:pre-wrap;margin-top:4px;">${r.body}</div>` : ''}
+        <div class="hint-inline" style="margin-top:6px;">${r.due_date ? `期限: ${r.due_date}・` : ''}発行: ${r.created_by_name}</div>
+        <button type="button" class="secondary action-item-done-btn" style="margin-top:8px;">完了にする</button>
+      </div>
+    `).join('');
+    list.querySelectorAll('.action-item-done-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const card = btn.closest('[data-id]');
+        btn.disabled = true;
+        try {
+          await rpc('mark_action_item_done', { p_employee_code: session.employeeCode, p_action_item_id: Number(card.dataset.id) });
+          await loadMyActionItems();
+        } catch (e) { btn.disabled = false; window.alert(e.message || '操作に失敗しました。'); }
+      });
+    });
+  } catch (e) {
+    list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
+  }
+}
+
+let actionItemEmployeeSelect = null;
+
+function resetActionItemCreateForm() {
+  ['action-item-title', 'action-item-body', 'action-item-due-date'].forEach((id) => { document.getElementById(id).value = ''; });
+  hideError('action-item-error');
+  actionItemEmployeeSelect = createEmployeeCardPicker(document.getElementById('action-item-employee-picker'));
+  loadAdminActionItemsList();
+}
+
+async function doCreateActionItem() {
+  const session = getSession();
+  const title = document.getElementById('action-item-title').value.trim();
+  const body = document.getElementById('action-item-body').value.trim();
+  const dueDate = document.getElementById('action-item-due-date').value || null;
+  const codes = actionItemEmployeeSelect ? actionItemEmployeeSelect.getSelectedCodes() : [];
+  hideError('action-item-error');
+  if (!title) { showError('action-item-error', 'タイトルを入力してください。'); return; }
+  if (codes.length === 0) { showError('action-item-error', '対象社員を選択してください。'); return; }
+
+  const btn = document.getElementById('action-item-submit');
+  btn.disabled = true;
+  try {
+    await rpc('admin_create_action_item', {
+      p_admin_employee_code: session.employeeCode, p_title: title, p_body: body || null,
+      p_due_date: dueDate, p_employee_codes: codes, p_department: null,
+    });
+    showDone('指示を発行しました。', 'admin-dashboard');
+  } catch (e) {
+    showError('action-item-error', e.message || '発行に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function loadAdminActionItemsList() {
+  const session = getSession();
+  const list = document.getElementById('admin-action-items-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_action_items', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="hint">まだ指示を発行していません。</div>'; return; }
+    list.innerHTML = rows.map((r) => `
+      <div class="plain-list-row">
+        <div><b>${r.title}</b></div>
+        <div class="hint-inline">${r.due_date ? `期限: ${r.due_date}・` : ''}完了 ${r.completed_count}/${r.recipient_count}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '';
+  }
+}
+
 const STATUS_EVENT_LABEL = { outing: '外出', late_arrival: '遅刻', early_leave: '早退' };
 
 async function openStatusTimeline(employeeCode, employeeName) {
@@ -5719,21 +5768,49 @@ async function loadSiteAdminList() {
   try {
     const rows = await rpc('admin_list_pending_sites', { p_admin_employee_code: session.employeeCode });
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">確認待ちの新規現場はありません。</div>'; return; }
-    listEl.innerHTML = rows.map((s) => `
+    // 2026-08-28: 現場が見つからず日報等から自由入力された仮現場について、既存の類似現場候補
+    // (admin_get_site_merge_candidates)を表示し、「新規登録」だけでなく「既存現場へ統合」も
+    // その場で選べるようにする(表記揺れによる現場の重複作成を防ぐ、ユーザー指示)。
+    const candidateLists = await Promise.all(rows.map((s) =>
+      rpc('admin_get_site_merge_candidates', { p_admin_employee_code: session.employeeCode, p_site_id: s.id }).catch(() => [])));
+    listEl.innerHTML = rows.map((s, i) => {
+      const candidates = candidateLists[i] || [];
+      const candidatesHtml = candidates.length > 0 ? `
+        <div class="hint-inline" style="margin-top:6px;">似ている既存の現場:</div>
+        ${candidates.map((c) => `
+          <button type="button" class="secondary site-merge-btn" data-candidate-id="${c.candidate_site_id}" style="margin:2px 4px 0 0;">
+            「${c.candidate_site_name}」へ統合(類似度${Math.round(c.similarity * 100)}%)
+          </button>
+        `).join('')}
+      ` : '';
+      return `
       <div class="qual-item" data-id="${s.id}">
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"></div>
         <div class="row2">${new Date(s.created_at).toLocaleString('ja-JP')}</div>
+        ${candidatesHtml}
         <div class="qual-verify-btns">
-          <button type="button" class="approve-btn">承認する</button>
+          <button type="button" class="approve-btn">新規現場として承認する</button>
           <button type="button" class="reject-btn">却下する</button>
         </div>
-      </div>
-    `).join('');
+      </div>`;
+    }).join('');
     listEl.querySelectorAll('.approve-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doDecideSite(e.target.closest('.qual-item'), 'active'));
     });
     listEl.querySelectorAll('.reject-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doDecideSite(e.target.closest('.qual-item'), 'inactive'));
+    });
+    listEl.querySelectorAll('.site-merge-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const item = btn.closest('.qual-item');
+        const fromId = Number(item.dataset.id);
+        const intoId = Number(btn.dataset.candidateId);
+        btn.disabled = true;
+        try {
+          await rpc('admin_merge_sites', { p_admin_employee_code: session.employeeCode, p_from_site_id: fromId, p_into_site_id: intoId, p_reason: null });
+          await loadSiteAdminList();
+        } catch (e) { btn.disabled = false; window.alert(e.message || '統合に失敗しました。'); }
+      });
     });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
@@ -6020,10 +6097,10 @@ function addDailyReportEntry(prefill) {
   const siteSearch = clone.querySelector('.dr-site-search');
   const newSiteWrap = clone.querySelector('.dr-new-site-wrap');
   const newSiteToggleBtn = clone.querySelector('.dr-new-site-toggle-btn');
-  populateSiteSelect(siteSelect, '').then(() => {
+  populateSiteSelect(siteSelect, '', true).then(() => {
     if (prefill && prefill.site_id) siteSelect.value = String(prefill.site_id);
   });
-  siteSearch.addEventListener('input', () => populateSiteSelect(siteSelect, siteSearch.value.trim()));
+  siteSearch.addEventListener('input', () => populateSiteSelect(siteSelect, siteSearch.value.trim(), true));
   siteSelect.addEventListener('change', () => {
     if (siteSelect.value === '__new__') newSiteWrap.style.display = 'block';
   });
@@ -6095,7 +6172,7 @@ function applyRecentSiteToEntry(siteId, siteName) {
     target = entryEls[entryEls.length - 1];
   }
   const select = target.querySelector('.dr-site-select');
-  populateSiteSelect(select, siteName).then(() => { select.value = String(siteId); });
+  populateSiteSelect(select, siteName, true).then(() => { select.value = String(siteId); });
 }
 
 async function loadDailyReportRecentSites() {
@@ -8750,6 +8827,8 @@ function init() {
   document.getElementById('status-late-submit').addEventListener('click', doSubmitStatusLate);
   document.getElementById('status-early-submit').addEventListener('click', doSubmitStatusEarly);
 
+  document.getElementById('action-item-submit').addEventListener('click', doCreateActionItem);
+
   document.getElementById('license-type-submit').addEventListener('click', doSaveLicenseType);
   document.getElementById('purpose-submit').addEventListener('click', doSavePurpose);
 
@@ -9162,6 +9241,8 @@ function init() {
   SCREEN_ENTER_HOOKS['entertainment-submit'] = resetEntertainmentForm;
   SCREEN_ENTER_HOOKS['status-submit'] = loadStatusSubmitScreen;
   SCREEN_ENTER_HOOKS['admin-status-board'] = loadAdminStatusBoard;
+  SCREEN_ENTER_HOOKS['my-action-items'] = loadMyActionItems;
+  SCREEN_ENTER_HOOKS['admin-action-item-create'] = resetActionItemCreateForm;
   SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;

@@ -85,6 +85,13 @@
       <div class="greeting-sub" id="menu-greeting-sub"></div>
     </div>
 
+    <!-- 2026-08-28(第3弾): ホーム表示順を「今日やること→重要なお知らせ→会社からのお知らせ→
+         在席状況→その他機能」へ変更。独立していた「本日の日報未提出」バナーは廃止し、
+         今日やること内の同内容の行に一本化する(同じ情報を複数箇所へ出さない)。 -->
+    <div class="section-title">今日やること</div>
+    <div class="today-list" id="today-list"></div>
+    <button type="button" class="link" id="home-daily-report-mark-rest-btn" style="display:none;margin:2px 0 10px 0;">今日は休みとして登録する</button>
+
     <div id="announce-banner-area"></div>
 
     <div class="home-announce-header">
@@ -93,15 +100,14 @@
     </div>
     <div class="home-announce-block" id="home-announce-block"></div>
 
-    <div id="home-daily-report-status-banner" class="today-item" style="cursor:pointer;display:none;">
-      <span class="today-item-icon"><span class="icon-slot" data-icon="clipboard-list"></span></span>
-      <div class="today-item-body">
-        <div class="today-item-label" id="home-daily-report-status-label">本日の日報</div>
-        <div class="today-item-count" id="home-daily-report-status-detail"></div>
-      </div>
-      <span class="today-item-arrow"><span class="icon-slot" data-icon="chevron-right"></span></span>
+    <div class="section-title">在席状況</div>
+    <div class="home-card-grid" style="margin-bottom:12px;">
+      <button type="button" class="home-card" data-nav="status-board-general">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <span class="home-card-label">在席状況</span>
+        <span class="home-card-desc" id="home-status-summary-desc">社員の勤務中/外出中を確認</span>
+      </button>
     </div>
-    <button type="button" class="link" id="home-daily-report-mark-rest-btn" style="display:none;margin:2px 0 0 44px;">今日は休みとして登録する</button>
 
     <div class="section-title">今月の状況</div>
     <div class="stat-mini-row" id="home-month-stats" style="cursor:pointer;"></div>
@@ -111,22 +117,14 @@
         <span class="home-card-label">日報履歴・カレンダー</span>
         <span class="home-card-desc">提出履歴と月間カレンダー</span>
       </button>
-      <button type="button" class="home-card" data-nav="leave">
-        <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label" id="home-leave-label">休暇申請</span>
-        <span class="home-card-desc" id="home-leave-desc">残日数を確認・申請する</span>
-      </button>
-      <button type="button" class="home-card" data-nav="status-board-general">
+      <button type="button" class="home-card" data-nav="entertainment-submit">
         <span class="icon-slot" data-icon="users-round"></span>
-        <span class="home-card-label">在席状況</span>
-        <span class="home-card-desc" id="home-status-summary-desc">社員の勤務中/外出中を確認</span>
+        <span class="home-card-label">接待・会食</span>
+        <span class="home-card-desc">事前申請(接待前に)</span>
       </button>
     </div>
 
     <div id="home-upcoming-events-area"></div>
-
-    <div class="section-title">今日やること</div>
-    <div class="today-list" id="today-list"></div>
 
     <div class="section-title">よく使う機能</div>
     <div class="home-card-grid">
@@ -162,8 +160,8 @@
       </button>
       <button type="button" class="home-card" data-nav="leave">
         <span class="icon-slot" data-icon="calendar"></span>
-        <span class="home-card-label">休暇申請</span>
-        <span class="home-card-desc">休みを申請する</span>
+        <span class="home-card-label" id="home-leave-label">休暇申請</span>
+        <span class="home-card-desc" id="home-leave-desc">休みを申請する</span>
       </button>
     </div>
 
@@ -1435,6 +1433,11 @@
         <span class="home-card-label">会社からのお知らせ</span>
         <span class="home-card-desc">作成・配信先選択・既読/確認状況</span>
       </button>
+      <button type="button" class="home-card" data-nav="admin-action-item-create">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <span class="home-card-label">指示を発行</span>
+        <span class="home-card-desc">個人/複数社員へ期限付きの指示</span>
+      </button>
     </div>
 
     <div class="dash-card-grid" id="admin-dashboard-grid"></div>
@@ -2467,6 +2470,33 @@
     <button type="button" class="back-link" data-nav="admin-announce">戻る</button>
     <div class="form-title" id="announce-status-title">既読状況</div>
     <div id="announce-status-list"></div>
+  </section>
+
+  <!-- 2026-08-28: Action Center(管理者からの指示、社員本人向け) -->
+  <section id="screen-my-action-items" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">管理者からの指示</div>
+    <div class="hint" style="margin-bottom:12px;">対応が終わったら「完了にする」を押してください。期限を過ぎても自動的には消えません。</div>
+    <div id="my-action-items-list"></div>
+  </section>
+
+  <!-- 2026-08-28: Action Center(管理者が個人/複数社員/部署へ指示を発行) -->
+  <section id="screen-admin-action-item-create" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">指示を発行</div>
+    <label for="action-item-title">タイトル</label>
+    <input type="text" id="action-item-title" placeholder="例: 安全書類の再提出">
+    <label for="action-item-body">内容</label>
+    <textarea id="action-item-body" rows="4" placeholder="具体的に何をしてほしいか"></textarea>
+    <label for="action-item-due-date">期限(任意)</label>
+    <input type="date" id="action-item-due-date">
+    <label>対象社員</label>
+    <div class="hint">選択した社員全員の「今日やること」に表示されます。</div>
+    <div id="action-item-employee-picker"></div>
+    <div class="error" id="action-item-error"></div>
+    <button type="button" id="action-item-submit">発行する</button>
+    <div class="section-title" style="margin-top:20px;">発行済みの指示</div>
+    <div id="admin-action-items-list"></div>
   </section>
 
   <!-- 匿名相談トップ(送る/自分の相談一覧) -->
