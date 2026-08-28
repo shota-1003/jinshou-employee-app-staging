@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v69-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T03:17:25.161Z';
+const BUILD_DEPLOYED_AT = '2026-08-28T03:46:10.847Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -328,6 +328,10 @@ async function tryResumeDeviceSession() {
     setSession({ employeeCode: auth.employeeCode, employeeId: info.out_employee_id, employeeName: info.out_employee_name, requestRole: info.out_request_role });
     return true;
   } catch (e) {
+    // この端末が管理者の承認待ちなだけの場合は、トークンを消さずに承認待ち画面へ留める
+    // (ここでclearDeviceAuth()してしまうと、承認待ちの間にアプリを開くたびPIN再入力を要求し、
+    // そのたびに新しい「承認待ち端末」が作られてしまう)。
+    if ((e.message || '').includes('承認待ち')) return 'pending';
     clearDeviceAuth();
     return false;
   }
@@ -335,7 +339,9 @@ async function tryResumeDeviceSession() {
 
 // 起動時: 端末が社員番号を覚えていれば暗証番号入力画面へ、覚えていなければ社員番号入力画面へ。
 async function startLoginFlow() {
-  if (await tryResumeDeviceSession()) { enterMenu(); return; }
+  const resumeResult = await tryResumeDeviceSession();
+  if (resumeResult === true) { enterMenu(); return; }
+  if (resumeResult === 'pending') { showScreen('device-pending'); return; }
 
   const remembered = getRememberedCode();
   if (!remembered) { showScreen('login'); return; }
@@ -409,6 +415,7 @@ async function doVerifyPin() {
     setSession({ employeeCode: pendingLoginCode, employeeId: emp.out_employee_id, employeeName: emp.out_employee_name, requestRole: emp.out_request_role });
     setDeviceAuth(pendingLoginCode, emp.out_device_token);
     document.getElementById('pin-entry-code').value = '';
+    if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
     showError('pin-entry-error', e.message);
@@ -440,12 +447,23 @@ async function doRegisterPin() {
     setDeviceAuth(pendingLoginCode, emp.out_device_token);
     document.getElementById('pin-register-code').value = '';
     document.getElementById('pin-register-confirm').value = '';
+    if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
     showError('pin-register-error', e.message);
   } finally {
     btn.disabled = false;
   }
+}
+
+// 承認待ち画面の「更新して確認する」ボタン。承認されていればenterMenu()、まだなら
+// 画面はそのまま(showScreenは何度呼んでも安全)。
+async function retryDevicePending() {
+  const btn = document.getElementById('device-pending-retry');
+  if (btn) btn.disabled = true;
+  const resumeResult = await tryResumeDeviceSession();
+  if (resumeResult === true) { enterMenu(); }
+  if (btn) btn.disabled = false;
 }
 
 // 「別の社員番号でログインし直す」= 実質的なログアウト。既にログイン済みであれば、
@@ -5990,6 +6008,45 @@ async function loadAllSitesList() {
   }
 }
 
+// ---------- 端末承認(管理者、2026-08-28セキュリティ強化) ----------
+
+async function loadDeviceApprovalList() {
+  const session = getSession();
+  const listEl = document.getElementById('device-approval-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_pending_devices', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">承認待ちの端末はありません。</div>'; return; }
+    listEl.innerHTML = rows.map((r) => `
+      <div class="qual-item" data-id="${r.device_id}">
+        <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span class="mini-tag danger">承認待ち</span></div>
+        <div class="row2">申請日時: ${new Date(r.created_at).toLocaleString('ja-JP')}・既存の承認済み端末: ${r.existing_approved_count}台</div>
+        <div class="qual-verify-btns">
+          <button type="button" class="approve-btn">承認する</button>
+          <button type="button" class="reject-btn">却下する</button>
+        </div>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('.approve-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = Number(e.target.closest('.qual-item').dataset.id);
+        try { await rpc('admin_decide_device_approval', { p_admin_employee_code: session.employeeCode, p_device_id: id, p_action: 'approve' }); await loadDeviceApprovalList(); }
+        catch (e2) { window.alert(e2.message || '承認に失敗しました。'); }
+      });
+    });
+    listEl.querySelectorAll('.reject-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const id = Number(e.target.closest('.qual-item').dataset.id);
+        if (!window.confirm('この端末からの利用申請を却下します。よろしいですか？')) return;
+        try { await rpc('admin_decide_device_approval', { p_admin_employee_code: session.employeeCode, p_device_id: id, p_action: 'reject' }); await loadDeviceApprovalList(); }
+        catch (e2) { window.alert(e2.message || '却下に失敗しました。'); }
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
 // ---------- 免許種別マスター管理(管理者) ----------
 
 function resetLicenseTypeForm() {
@@ -8802,6 +8859,9 @@ function init() {
   document.getElementById('pin-register-submit').addEventListener('click', doRegisterPin);
   document.getElementById('pin-register-switch').addEventListener('click', switchEmployee);
 
+  document.getElementById('device-pending-retry').addEventListener('click', retryDevicePending);
+  document.getElementById('device-pending-switch').addEventListener('click', switchEmployee);
+
   document.getElementById('logout-btn').addEventListener('click', switchEmployee);
   document.getElementById('logout-btn-2').addEventListener('click', switchEmployee);
 
@@ -9325,6 +9385,10 @@ function init() {
     populateSitePrefectureSelect();
     loadSiteAdminList();
     loadAllSitesList();
+  };
+  SCREEN_ENTER_HOOKS['device-approval-admin'] = async () => {
+    if (!(await isNippoAdmin())) { enterMenu(); return; }
+    loadDeviceApprovalList();
   };
   document.getElementById('site-create-submit').addEventListener('click', () => doCreateSite(false));
   let siteListSearchTimer = null;

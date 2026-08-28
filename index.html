@@ -75,6 +75,21 @@
     </div>
   </section>
 
+  <!-- 2026-08-28: セキュリティ強化(新端末は管理者承認制)により、承認待ちの間はここで止める。
+       トークン自体は既に発行済み(setDeviceAuth済み)なので、承認され次第「更新して確認する」で
+       そのままenterMenu()できる。 -->
+  <section id="screen-device-pending" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company">この端末は承認待ちです</div>
+      <div class="card">
+        <div class="hint" style="margin-bottom:14px;">セキュリティのため、新しい端末からのご利用には管理者の承認が必要です。承認され次第ご利用いただけます。承認までしばらくお待ちください。</div>
+        <button id="device-pending-retry">更新して確認する</button>
+        <button class="link" id="device-pending-switch">別の社員番号でログイン</button>
+      </div>
+    </div>
+  </section>
+
   <!-- メニュー画面(ホーム)。ここには個別の申請フォームを直接置かず、「今日やること」+
        大きなカテゴリーカード(申請/自分の情報/会社/管理者)だけを表示する。各カテゴリーを
        タップした先の専用画面で、初めてそのカテゴリーの中身(フォーム一覧等)を表示する構造。 -->
@@ -1480,6 +1495,11 @@
 
     <div class="section-title">管理メニュー</div>
     <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="device-approval-admin">
+        <span class="icon-slot" data-icon="smartphone"></span>
+        <div class="menu-item-body">端末承認<span class="desc">新しい端末からの利用申請を承認/却下</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="admin-all-requests">
         <span class="icon-slot" data-icon="clipboard-list"></span>
         <div class="menu-item-body">申請管理<span class="desc">全申請を種類横断で検索・確認</span></div>
@@ -1726,6 +1746,15 @@
   </section>
 
   <!-- 新規現場の確認(管理者) -->
+  <!-- 2026-08-28: セキュリティ強化。新しい端末からの利用は管理者承認制にしたため、
+       承認待ち一覧をここで確認・承認/却下する。 -->
+  <section id="screen-device-approval-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">端末承認</div>
+    <div class="hint" style="margin:0 0 10px;">新しい端末からポータルを開いた社員が一覧に表示されます。本人からの申請であることを確認してから承認してください。</div>
+    <div id="device-approval-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
   <section id="screen-site-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">現場管理</div>
