@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v70-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T04:07:22.058Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v71-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T04:12:47.941Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1072,20 +1072,16 @@ function createEmployeeCardPicker(container) {
   let onChange = null;
 
   function render() {
+    // 2026-08-28: 社員向け選択画面では役職・職種・部署等の分類を一切表示しない
+    // (ユーザー指示: 一般社員が他の社員の内部区分を見る必要はない)。氏名だけのフラットな
+    // 一覧にする(在籍中の全社員を1つのリストとして表示、部署等でグループ分けしない)。
     const q = input.value.trim();
     const matches = allEmployees.filter((e) => q === '' || e.employee_name.includes(q) || e.employee_code.includes(q));
-    const groups = new Map();
-    matches.forEach((e) => {
-      const key = e.department || 'その他';
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(e);
-    });
-    grid.innerHTML = Array.from(groups.entries()).map(([dept, emps]) => `
-      <div class="emp-picker-group-label">${dept}</div>
+    grid.innerHTML = `
       <div class="emp-picker-cards">
-        ${emps.map((e) => `<button type="button" class="emp-picker-card${selected.has(e.employee_code) ? ' selected' : ''}" data-code="${e.employee_code}">${e.employee_name}</button>`).join('')}
+        ${matches.map((e) => `<button type="button" class="emp-picker-card${selected.has(e.employee_code) ? ' selected' : ''}" data-code="${e.employee_code}">${e.employee_name}</button>`).join('')}
       </div>
-    `).join('');
+    `;
     grid.querySelectorAll('.emp-picker-card').forEach((btn) => {
       btn.addEventListener('click', () => {
         const code = btn.dataset.code;
@@ -1109,7 +1105,9 @@ function createEmployeeCardPicker(container) {
 
   const employeesLoaded = (async () => {
     const session = getSession();
-    try { allEmployees = await rpc('list_employees_for_selector', { p_employee_code: session.employeeCode }); } catch (e) { /* 無視 */ }
+    // 2026-08-28: 社員選択画面では氏名・社員番号以外を返さないlist_employees_for_participant_select
+    // を使う(list_employees_for_selectorは部署・役職まで返すため、社員向け選択UIには使わない)。
+    try { allEmployees = await rpc('list_employees_for_participant_select', { p_employee_code: session.employeeCode }); } catch (e) { /* 無視 */ }
     render();
   })();
 
@@ -2127,11 +2125,23 @@ async function submitBulkExpenseDecision(decision, reason) {
 
 // ---------- 会議申請 ----------
 
+let meetingParticipantSelect = null;
+function resetMeetingForm() {
+  if (!meetingParticipantSelect) {
+    meetingParticipantSelect = createEmployeeCardPicker(document.getElementById('meeting-participants'));
+    meetingParticipantSelect.setOnChange(() => {
+      document.getElementById('meeting-participant-count').textContent = meetingParticipantSelect.getCount();
+    });
+  } else {
+    meetingParticipantSelect.setSelectedCodes([]);
+  }
+}
+
 async function doSubmitMeeting() {
   const session = getSession();
   const date = document.getElementById('meeting-date').value;
   const place = document.getElementById('meeting-place').value.trim();
-  const headcount = document.getElementById('meeting-headcount').value;
+  const participantCodes = meetingParticipantSelect ? meetingParticipantSelect.getSelectedCodes() : [];
   const hasMeal = document.getElementById('meeting-meal').checked;
   const content = document.getElementById('meeting-content').value.trim();
   const amount = document.getElementById('meeting-amount').value;
@@ -2142,6 +2152,10 @@ async function doSubmitMeeting() {
     showError('meeting-error', '会議日・会議内容は必須です。');
     return;
   }
+  if (participantCodes.length === 0) {
+    showError('meeting-error', '参加社員を1人以上選択してください。');
+    return;
+  }
 
   const btn = document.getElementById('meeting-submit');
   btn.disabled = true;
@@ -2150,15 +2164,17 @@ async function doSubmitMeeting() {
       p_employee_code: session.employeeCode,
       p_meeting_date: date,
       p_place: place || null,
-      p_headcount: headcount ? Number(headcount) : null,
+      p_headcount: null,
       p_has_meal: hasMeal,
       p_content: content,
       p_amount: amount ? Number(amount) : null,
       p_receive_method: receive,
+      p_participant_employee_codes: participantCodes,
     });
     showDone('会議申請を受け付けました。承認をお待ちください。', 'menu-apply');
-    ['meeting-date', 'meeting-place', 'meeting-headcount', 'meeting-content', 'meeting-amount'].forEach((id) => { document.getElementById(id).value = ''; });
+    ['meeting-date', 'meeting-place', 'meeting-content', 'meeting-amount'].forEach((id) => { document.getElementById(id).value = ''; });
     document.getElementById('meeting-meal').checked = false;
+    meetingParticipantSelect.setSelectedCodes([]);
   } catch (e) {
     showError('meeting-error', '送信に失敗しました。もう一度お試しください。');
   } finally {
@@ -9463,6 +9479,7 @@ function init() {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDeviceApprovalList();
   };
+  SCREEN_ENTER_HOOKS['meeting'] = resetMeetingForm;
   document.getElementById('site-create-submit').addEventListener('click', () => doCreateSite(false));
   let siteListSearchTimer = null;
   document.getElementById('site-list-search').addEventListener('input', (e) => {
