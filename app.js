@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v65-staging';
-const BUILD_DEPLOYED_AT = '2026-08-27T23:24:36.310Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v66-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T00:26:07.528Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -605,9 +605,12 @@ async function renderHomeStatusSummaryCard(session) {
   if (!descEl) return;
   try {
     const rows = await rpc('get_employee_status_board_general', { p_employee_code: session.employeeCode });
-    const counts = { working: 0, out: 0, late: 0, early_left: 0 };
+    const counts = { on_leave: 0, out: 0, late: 0, early_left: 0 };
     (rows || []).forEach((r) => { if (counts[r.current_state] !== undefined) counts[r.current_state] += 1; });
-    descEl.textContent = `勤務中${counts.working}・外出中${counts.out}・遅刻${counts.late}・早退${counts.early_left}`;
+    const total = counts.on_leave + counts.out + counts.late + counts.early_left;
+    descEl.textContent = total === 0
+      ? '現在、共有事項はありません'
+      : `休暇${counts.on_leave}・外出中${counts.out}・遅刻${counts.late}・早退${counts.early_left}`;
   } catch (e) { /* 取れなくても遷移自体はできる */ }
 }
 
@@ -5455,17 +5458,32 @@ async function loadAdminStatusBoard() {
   }
 }
 
-// 全社員共通の在席状況(2026-08-28、ユーザー指示): 管理者専用のadmin_get_employee_status_boardとは
+// 全社員共通の在席状況(2026-08-28制定、2026-08-28仕様変更): 管理者専用のadmin_get_employee_status_boardとは
 // 別に、destination/reason/categoryを一切受け取らないget_employee_status_board_generalを使う。
-// 「休暇」状態も表示できるよう、STATUS_BOARD_LABELにon_leaveを追加する(管理者版のカードでは
-// on_leaveは発生しないため既存のSTATUS_BOARD_LABEL自体は変更しない)。
-const STATUS_BOARD_GENERAL_LABEL = {
-  working: { emoji: '🟢', label: '勤務中' },
-  out: { emoji: '🟡', label: '外出中' },
-  late: { emoji: '🔵', label: '遅刻報告中' },
-  early_left: { emoji: '🔴', label: '早退済' },
-  on_leave: { emoji: '⚪', label: '休暇' },
-};
+// 社員ポータルは勤怠打刻システムではないため、「勤務中」を自動的に断定表示することを廃止し、
+// 休暇/外出中/遅刻/早退という「通常と違う状態」だけを、その順番でグループ表示する
+// (RPC側でも同じ優先順位でソート済みのため、フロントはグループ単位に振り分けるだけでよい)。
+const STATUS_GENERAL_GROUPS = [
+  { state: 'on_leave', title: '本日休暇', emoji: '⚪' },
+  { state: 'out', title: '外出中', emoji: '🟡' },
+  { state: 'late', title: '遅刻', emoji: '🔵' },
+  { state: 'early_left', title: '早退', emoji: '🔴' },
+];
+
+function renderStatusGeneralRow(group, r) {
+  const time = r.detail_time
+    ? new Date(r.detail_time).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' }) : '';
+  let stateLine;
+  if (group.state === 'on_leave') stateLine = '休暇';
+  else if (group.state === 'out') stateLine = '外出中';
+  else if (group.state === 'late') stateLine = time ? `${time}頃予定` : '遅刻';
+  else stateLine = time ? `${time}早退` : '早退';
+  const returnDetail = group.state === 'out' && time ? `　戻り予定 ${time}` : '';
+  return `<div class="plain-list-row status-board-row">
+    <div>${group.emoji} <b>${r.employee_name}</b></div>
+    <div class="hint-inline">${stateLine}${returnDetail}</div>
+  </div>`;
+}
 
 async function loadStatusBoardGeneral() {
   const session = getSession();
@@ -5473,16 +5491,13 @@ async function loadStatusBoardGeneral() {
   list.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('get_employee_status_board_general', { p_employee_code: session.employeeCode });
-    if (rows.length === 0) { list.innerHTML = '<div class="hint">社員データがありません。</div>'; return; }
-    list.innerHTML = rows.map((r) => {
-      const s = STATUS_BOARD_GENERAL_LABEL[r.current_state] || STATUS_BOARD_GENERAL_LABEL.working;
-      const returnDetail = r.expected_return_at
-        ? `　戻り予定 ${new Date(r.expected_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : '';
-      return `<div class="plain-list-row status-board-row">
-        <div>${s.emoji} <b>${r.employee_name}</b></div>
-        <div class="hint-inline">${s.label}${returnDetail}</div>
-      </div>`;
-    }).join('');
+    if (rows.length === 0) { list.innerHTML = '<div class="hint">現在、共有事項はありません。</div>'; return; }
+    const byState = {};
+    rows.forEach((r) => { (byState[r.current_state] = byState[r.current_state] || []).push(r); });
+    list.innerHTML = STATUS_GENERAL_GROUPS.filter((g) => byState[g.state] && byState[g.state].length > 0).map((g) => `
+      <div class="section-title">${g.title}(${byState[g.state].length}名)</div>
+      ${byState[g.state].map((r) => renderStatusGeneralRow(g, r)).join('')}
+    `).join('');
   } catch (e) {
     list.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
   }
