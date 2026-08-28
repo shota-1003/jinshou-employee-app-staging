@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v71-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T04:12:47.941Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v72-staging';
+const BUILD_DEPLOYED_AT = '2026-08-28T04:30:50.123Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2363,6 +2363,17 @@ const SUPPLY_ICON_BY_NAME = {
 let selectedSupplyMasterId = null;
 let selectedSupplyMasterItem = null;
 
+let supplyMasterCache = [];
+async function loadSupplyMasterCache() {
+  supplyMasterCache = await rpc('list_supply_master', {});
+  return supplyMasterCache;
+}
+
+function populateSizeSelect(selectEl, sizeOptions) {
+  const opts = (sizeOptions && sizeOptions.length > 0) ? sizeOptions : ['S', 'M', 'L', 'LL', '3L', '4L', '5L', 'XL', 'XXL', 'フリー'];
+  selectEl.innerHTML = '<option value="">選択してください</option>' + opts.map((s) => `<option value="${s}">${s}</option>`).join('');
+}
+
 async function loadSupplySelectGrid() {
   const grid = document.getElementById('supply-select-grid');
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
@@ -2370,8 +2381,8 @@ async function loadSupplySelectGrid() {
   selectedSupplyMasterId = null;
   selectedSupplyMasterItem = null;
   try {
-    const rows = await rpc('list_supply_master', {});
-    const cards = rows.map((m) => ({ id: m.id, name: m.item_name, requiresSize: m.requires_size, icon: SUPPLY_ICON_BY_NAME[m.item_name] || 'package' }));
+    const rows = await loadSupplyMasterCache();
+    const cards = rows.map((m) => ({ id: m.id, name: m.item_name, requiresSize: m.requires_size, sizeOptions: m.size_options, icon: SUPPLY_ICON_BY_NAME[m.item_name] || 'package' }));
     cards.push({ id: 'other', name: '上記以外', requiresSize: false, icon: 'plus' });
     grid.innerHTML = cards.map((c) => `
       <button type="button" class="supply-select-card" data-id="${c.id}" data-name="${c.name}" data-requires-size="${c.requiresSize}">
@@ -2380,76 +2391,107 @@ async function loadSupplySelectGrid() {
       </button>
     `).join('');
     grid.querySelectorAll('.supply-select-card').forEach((el) => {
-      el.addEventListener('click', () => selectSupplyMasterCard(el));
+      el.addEventListener('click', () => selectSupplyMasterCard(el, cards));
     });
   } catch (e) {
     grid.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
-function selectSupplyMasterCard(el) {
-  document.querySelectorAll('.supply-select-card').forEach((c) => c.classList.remove('selected'));
+function selectSupplyMasterCard(el, cards) {
+  document.querySelectorAll('#supply-select-grid .supply-select-card').forEach((c) => c.classList.remove('selected'));
   el.classList.add('selected');
   const isOther = el.dataset.id === 'other';
   selectedSupplyMasterId = isOther ? null : Number(el.dataset.id);
   selectedSupplyMasterItem = el.dataset.name;
+  const card = cards.find((c) => String(c.id) === el.dataset.id);
 
   document.getElementById('supply-req-detail').style.display = 'block';
   document.getElementById('supply-req-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
   document.getElementById('supply-req-other-wrap').style.display = isOther ? 'block' : 'none';
-  document.getElementById('supply-req-size-wrap').style.display = (el.dataset.requiresSize === 'true') ? 'block' : 'none';
+  document.getElementById('supply-req-qty').value = 1;
+  document.getElementById('supply-req-reason').value = '';
+  const requiresSize = el.dataset.requiresSize === 'true';
+  document.getElementById('supply-req-size-wrap').style.display = requiresSize ? 'block' : 'none';
+  if (requiresSize) populateSizeSelect(document.getElementById('supply-req-size'), card && card.sizeOptions);
   document.getElementById('supply-req-master-id').value = selectedSupplyMasterId || '';
 }
 
-async function doSubmitSupplyRequest() {
-  const session = getSession();
+let supplyReqCart = [];
+function renderSupplyReqCart() {
+  const el = document.getElementById('supply-req-cart');
+  const submitBtn = document.getElementById('supply-req-submit');
+  if (supplyReqCart.length === 0) {
+    el.innerHTML = '<div class="hint">まだ品目が追加されていません。</div>';
+    submitBtn.disabled = true;
+    return;
+  }
+  el.innerHTML = supplyReqCart.map((it, i) => `
+    <div class="supply-item">
+      <div class="row1"><span>${it.item_name}${it.size ? '(' + it.size + ')' : ''}</span><span>${it.quantity}個</span></div>
+      ${it.reason ? `<div class="row2">${it.reason}</div>` : ''}
+      <button type="button" class="reject-btn" data-remove-idx="${i}">削除</button>
+    </div>
+  `).join('');
+  el.querySelectorAll('[data-remove-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => { supplyReqCart.splice(Number(btn.dataset.removeIdx), 1); renderSupplyReqCart(); });
+  });
+  submitBtn.disabled = false;
+}
+
+function resetSupplyRequestScreen() {
+  supplyReqCart = [];
+  renderSupplyReqCart();
+  hideError('supply-req-submit-error');
+  loadSupplySelectGrid();
+}
+
+function doAddSupplyReqItem() {
   const isOther = selectedSupplyMasterId == null;
   const otherName = document.getElementById('supply-req-other-name').value.trim();
-  const qty = document.getElementById('supply-req-qty').value;
-  const size = document.getElementById('supply-req-size').value.trim();
-  const kind = document.getElementById('supply-req-kind').value;
-  const reasonInput = document.getElementById('supply-req-reason').value.trim();
-  const reason = [kind, reasonInput].filter(Boolean).join(' / ');
+  const qty = Number(document.getElementById('supply-req-qty').value) || 1;
+  const size = document.getElementById('supply-req-size-wrap').style.display !== 'none' ? document.getElementById('supply-req-size').value : '';
+  const reason = document.getElementById('supply-req-reason').value.trim();
   hideError('supply-req-error');
 
   if (!selectedSupplyMasterItem) { showError('supply-req-error', '支給品を選択してください。'); return; }
   if (isOther && !otherName) { showError('supply-req-error', '上記以外の支給品名を入力してください。'); return; }
-  if (!reasonInput) { showError('supply-req-error', '申請理由を入力してください。'); return; }
 
+  supplyReqCart.push({
+    master_item_id: selectedSupplyMasterId, item_name: isOther ? otherName : selectedSupplyMasterItem,
+    quantity: qty, size: size || null, reason: reason || null,
+  });
+  renderSupplyReqCart();
+  document.getElementById('supply-req-detail').style.display = 'none';
+  document.querySelectorAll('#supply-select-grid .supply-select-card').forEach((c) => c.classList.remove('selected'));
+}
+
+async function doSubmitSupplyRequestBulk() {
+  const session = getSession();
+  hideError('supply-req-submit-error');
+  if (supplyReqCart.length === 0) { showError('supply-req-submit-error', '品目を1件以上追加してください。'); return; }
   const btn = document.getElementById('supply-req-submit');
   btn.disabled = true;
   try {
-    await rpc('submit_supply_request', {
-      p_employee_code: session.employeeCode,
-      p_item_name: isOther ? otherName : null,
-      p_quantity: qty ? Number(qty) : 1,
-      p_size: size || null,
-      p_reason: reason,
-      p_master_item_id: selectedSupplyMasterId,
-    });
+    await rpc('submit_supply_request_bulk', { p_employee_code: session.employeeCode, p_items: supplyReqCart });
     showDone('支給品申請を受け付けました。承認をお待ちください。', 'menu-apply');
   } catch (e) {
-    showError('supply-req-error', e.message || '送信に失敗しました。もう一度お試しください。');
-  } finally {
+    showError('supply-req-submit-error', e.message || '送信に失敗しました。もう一度お試しください。');
     btn.disabled = false;
   }
 }
 
-function formatElapsed(days) {
-  if (days == null) return '';
-  if (days < 30) return `${days}日`;
-  if (days < 365) return `${Math.floor(days / 30)}ヶ月`;
-  const years = Math.floor(days / 365);
-  const months = Math.floor((days % 365) / 30);
-  return months > 0 ? `${years}年${months}ヶ月` : `${years}年`;
-}
-
-const SUPPLY_STATUS_LABEL = {
-  unset: '<span class="mini-tag muted">必要数未設定</span>',
-  ok: '<span class="mini-tag done">OK</span>',
-  shortage: '<span class="mini-tag danger">不足</span>',
-  excess: '<span class="mini-tag warn">超過</span>',
+const SUPPLY_SOURCE_TYPE_LABEL = {
+  initial_holding: '初期保有登録', issuance: '通常支給', exchange: '交換', return: '返却', loss: '紛失', additional: '追加支給',
 };
+
+function formatSupplyIssuedDate(r) {
+  if (r.date_precision === 'approximate') return r.approximate_note || 'おおよその時期';
+  if (r.date_precision === 'unknown') return '時期不明';
+  if (!r.issued_date) return '-';
+  if (r.date_precision === 'year_month') return new Date(r.issued_date).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' });
+  return new Date(r.issued_date).toLocaleDateString('ja-JP');
+}
 
 async function loadMySupplyHoldings() {
   const session = getSession();
@@ -2457,11 +2499,10 @@ async function loadMySupplyHoldings() {
   el.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('get_my_supply_holdings', { p_employee_code: session.employeeCode });
-    if (!rows || rows.length === 0) { el.innerHTML = '<div class="hint">品目が登録されていません。</div>'; return; }
+    if (!rows || rows.length === 0) { el.innerHTML = '<div class="hint">現在保有している支給品はありません。</div>'; return; }
     el.innerHTML = rows.map((r) => `
       <div class="supply-item">
-        <div class="row1"><span>${r.item_name}</span><span>${r.current_quantity}個${r.required_quantity != null ? ` / 必要${r.required_quantity}個` : ''}</span></div>
-        <div class="row2">${SUPPLY_STATUS_LABEL[r.status] || ''}${r.status === 'shortage' ? `(不足${r.required_quantity - r.current_quantity})` : ''}${r.status === 'excess' ? `(超過${r.current_quantity - r.required_quantity})` : ''}</div>
+        <div class="row1"><span>${r.item_name}${r.size ? '　' + r.size : ''}</span><span>${r.current_quantity}個</span></div>
       </div>
     `).join('');
   } catch (e) {
@@ -2469,70 +2510,9 @@ async function loadMySupplyHoldings() {
   }
 }
 
-async function loadMySupplyDiscrepancies() {
-  const session = getSession();
-  const el = document.getElementById('my-supply-discrepancies');
-  el.innerHTML = '<div class="hint">読み込み中...</div>';
-  try {
-    const rows = await rpc('get_my_supply_discrepancies', { p_employee_code: session.employeeCode });
-    const SDR_STATUS_LABEL = { employee_confirmed: '報告済み(管理者確認待ち)', admin_confirmed: '管理者確認済み(確定待ち)', resolved: '確定済み' };
-    el.innerHTML = `
-      <button type="button" class="secondary" id="my-supply-report-btn" style="margin-bottom:8px;">差異を報告する</button>
-      ${(!rows || rows.length === 0) ? '<div class="hint">報告した差異はありません。</div>' : rows.map((r) => `
-        <div class="supply-item">
-          <div class="row1"><span>${r.item_name}</span><span class="mini-tag ${r.status === 'resolved' ? 'done' : 'warn'}">${SDR_STATUS_LABEL[r.status] || r.status}</span></div>
-          <div class="row2">システム上${r.system_quantity}個 → 報告${r.reported_quantity}個${r.employee_note ? `・${r.employee_note}` : ''}</div>
-          ${r.admin_note ? `<div class="row2">管理者: ${r.admin_note}</div>` : ''}
-        </div>
-      `).join('')}
-    `;
-    const btn = document.getElementById('my-supply-report-btn');
-    if (btn) btn.addEventListener('click', openSupplyDiscrepancyReportForm);
-  } catch (e) {
-    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
-}
-
-async function openSupplyDiscrepancyReportForm() {
-  const session = getSession();
-  showScreen('supply-discrepancy-report');
-  hideError('sdr-error');
-  document.getElementById('sdr-quantity').value = '';
-  document.getElementById('sdr-note').value = '';
-  try {
-    const rows = await rpc('get_my_supply_holdings', { p_employee_code: session.employeeCode });
-    const sel = document.getElementById('sdr-item');
-    sel.innerHTML = (rows || []).map((r) => `<option value="${r.master_item_id}" data-qty="${r.current_quantity}">${r.item_name}(現在${r.current_quantity}個)</option>`).join('');
-    const updateHint = () => {
-      const opt = sel.selectedOptions[0];
-      document.getElementById('sdr-system-quantity').textContent = opt ? `システム上の現在保有数: ${opt.dataset.qty}個` : '';
-    };
-    sel.onchange = updateHint;
-    updateHint();
-  } catch (e) { /* 一覧が空でもフォーム自体は開ける */ }
-}
-
-async function doSubmitSupplyDiscrepancy() {
-  const session = getSession();
-  const masterItemId = Number(document.getElementById('sdr-item').value);
-  const quantity = document.getElementById('sdr-quantity').value;
-  const note = document.getElementById('sdr-note').value.trim() || null;
-  hideError('sdr-error');
-  if (!masterItemId) { showError('sdr-error', '品目を選択してください。'); return; }
-  if (quantity === '' || Number(quantity) < 0) { showError('sdr-error', '実際に持っている数を入力してください。'); return; }
-  try {
-    await rpc('report_supply_discrepancy', { p_employee_code: session.employeeCode, p_master_item_id: masterItemId, p_reported_quantity: Number(quantity), p_note: note });
-    showDone('差異を報告しました。管理者確認をお待ちください。', 'my-supply');
-    await loadMySupplyDiscrepancies();
-  } catch (e) {
-    showError('sdr-error', e.message || '報告に失敗しました。');
-  }
-}
-
 async function loadMySupply() {
   const session = getSession();
   loadMySupplyHoldings();
-  loadMySupplyDiscrepancies();
   const listEl = document.getElementById('my-supply-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
@@ -2541,20 +2521,160 @@ async function loadMySupply() {
       listEl.innerHTML = '<div class="hint">まだ支給履歴がありません。</div>';
       return;
     }
-    listEl.innerHTML = '';
-    rows.forEach((r) => {
-      const div = document.createElement('div');
-      div.className = 'supply-item';
-      div.innerHTML = `
-        <div class="row1"><span>${r.item_name}</span><span>${r.quantity}個${r.size ? '(' + r.size + ')' : ''}</span></div>
-        <div class="row2">支給日: ${r.issued_date}${r.condition === 'new' ? '・新品' : r.condition === 'used' ? '・中古' : ''}</div>
-        <div class="elapsed">経過: ${formatElapsed(r.elapsed_days)}${r.needs_return ? (r.returned_date ? `・返却済(${r.returned_date})` : '・返却必要') : ''}</div>
-      `;
-      listEl.appendChild(div);
+    listEl.innerHTML = rows.map((r) => `
+      <div class="supply-item">
+        <div class="row1"><span>${r.item_name}${r.size ? '(' + r.size + ')' : ''}</span><span>${r.quantity}個</span></div>
+        <div class="row2"><span class="mini-tag ${r.source_type === 'initial_holding' ? 'info' : ''}">${SUPPLY_SOURCE_TYPE_LABEL[r.source_type] || r.source_type}</span>${formatSupplyIssuedDate(r)}</div>
+        ${r.needs_return ? `<div class="elapsed">${r.returned_date ? `返却済(${new Date(r.returned_date).toLocaleDateString('ja-JP')})` : '返却必要'}</div>` : ''}
+        ${r.source_type === 'initial_holding' && r.registered_by_self ? `<button type="button" class="secondary" data-edit-ih-id="${r.id}" data-edit-ih='${JSON.stringify(r).replace(/'/g, "&#39;")}'>この登録を修正する</button>` : ''}
+      </div>
+    `).join('');
+    listEl.querySelectorAll('[data-edit-ih-id]').forEach((btn) => {
+      btn.addEventListener('click', () => openEditInitialHolding(JSON.parse(btn.dataset.editIh.replace(/&#39;/g, "'"))));
     });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
+}
+
+// ---------- 現在保有している支給品の初期登録 ----------
+
+let selectedSupplyIhMasterId = null;
+let selectedSupplyIhMasterItem = null;
+let supplyIhCart = [];
+
+async function loadSupplyIhSelectGrid() {
+  const grid = document.getElementById('supply-ih-select-grid');
+  grid.innerHTML = '<div class="hint">読み込み中...</div>';
+  document.getElementById('supply-ih-detail').style.display = 'none';
+  selectedSupplyIhMasterId = null;
+  selectedSupplyIhMasterItem = null;
+  try {
+    const rows = await loadSupplyMasterCache();
+    const cards = rows.map((m) => ({ id: m.id, name: m.item_name, requiresSize: m.requires_size, sizeOptions: m.size_options, icon: SUPPLY_ICON_BY_NAME[m.item_name] || 'package' }));
+    cards.push({ id: 'other', name: '上記以外', requiresSize: false, icon: 'plus' });
+    grid.innerHTML = cards.map((c) => `
+      <button type="button" class="supply-select-card" data-id="${c.id}" data-name="${c.name}" data-requires-size="${c.requiresSize}">
+        ${icon(c.icon)}
+        <span class="supply-select-card-label">${c.name}</span>
+      </button>
+    `).join('');
+    grid.querySelectorAll('.supply-select-card').forEach((el) => {
+      el.addEventListener('click', () => selectSupplyIhMasterCard(el, cards));
+    });
+  } catch (e) {
+    grid.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function toggleSupplyIhPrecisionFields() {
+  const precision = document.getElementById('supply-ih-precision').value;
+  document.getElementById('supply-ih-date-wrap').style.display = (precision === 'exact' || precision === 'year_month') ? 'block' : 'none';
+  document.getElementById('supply-ih-date').type = precision === 'year_month' ? 'month' : 'date';
+  document.getElementById('supply-ih-approx-wrap').style.display = (precision === 'approximate') ? 'block' : 'none';
+}
+
+function selectSupplyIhMasterCard(el, cards) {
+  document.querySelectorAll('#supply-ih-select-grid .supply-select-card').forEach((c) => c.classList.remove('selected'));
+  el.classList.add('selected');
+  const isOther = el.dataset.id === 'other';
+  selectedSupplyIhMasterId = isOther ? null : Number(el.dataset.id);
+  selectedSupplyIhMasterItem = el.dataset.name;
+  const card = cards.find((c) => String(c.id) === el.dataset.id);
+
+  document.getElementById('supply-ih-detail').style.display = 'block';
+  document.getElementById('supply-ih-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
+  document.getElementById('supply-ih-other-wrap').style.display = isOther ? 'block' : 'none';
+  document.getElementById('supply-ih-qty').value = 1;
+  document.getElementById('supply-ih-note').value = '';
+  document.getElementById('supply-ih-precision').value = 'unknown';
+  toggleSupplyIhPrecisionFields();
+  const requiresSize = el.dataset.requiresSize === 'true';
+  document.getElementById('supply-ih-size-wrap').style.display = requiresSize ? 'block' : 'none';
+  if (requiresSize) populateSizeSelect(document.getElementById('supply-ih-size'), card && card.sizeOptions);
+  document.getElementById('supply-ih-master-id').value = selectedSupplyIhMasterId || '';
+}
+
+function renderSupplyIhCart() {
+  const el = document.getElementById('supply-ih-cart');
+  const submitBtn = document.getElementById('supply-ih-submit');
+  if (supplyIhCart.length === 0) {
+    el.innerHTML = '<div class="hint">まだ品目が追加されていません。</div>';
+    submitBtn.disabled = true;
+    return;
+  }
+  el.innerHTML = supplyIhCart.map((it, i) => `
+    <div class="supply-item">
+      <div class="row1"><span>${it.item_name}${it.size ? '(' + it.size + ')' : ''}</span><span>${it.quantity}個</span></div>
+      <div class="row2">${formatSupplyIssuedDate({ date_precision: it.date_precision, issued_date: it.issued_date, approximate_note: it.approximate_note })}</div>
+      <button type="button" class="reject-btn" data-remove-idx="${i}">削除</button>
+    </div>
+  `).join('');
+  el.querySelectorAll('[data-remove-idx]').forEach((btn) => {
+    btn.addEventListener('click', () => { supplyIhCart.splice(Number(btn.dataset.removeIdx), 1); renderSupplyIhCart(); });
+  });
+  submitBtn.disabled = false;
+}
+
+function resetSupplyInitialHoldingScreen() {
+  supplyIhCart = [];
+  renderSupplyIhCart();
+  hideError('supply-ih-submit-error');
+  loadSupplyIhSelectGrid();
+}
+
+function doAddSupplyIhItem() {
+  const isOther = selectedSupplyIhMasterId == null;
+  const otherName = document.getElementById('supply-ih-other-name').value.trim();
+  const qty = Number(document.getElementById('supply-ih-qty').value) || 1;
+  const size = document.getElementById('supply-ih-size-wrap').style.display !== 'none' ? document.getElementById('supply-ih-size').value : '';
+  const precision = document.getElementById('supply-ih-precision').value;
+  const dateVal = document.getElementById('supply-ih-date').value;
+  const approxNote = document.getElementById('supply-ih-approx-note').value.trim();
+  const note = document.getElementById('supply-ih-note').value.trim();
+  hideError('supply-ih-error');
+
+  if (!selectedSupplyIhMasterItem) { showError('supply-ih-error', '支給品を選択してください。'); return; }
+  if (isOther && !otherName) { showError('supply-ih-error', '上記以外の支給品名を入力してください。'); return; }
+  if ((precision === 'exact' || precision === 'year_month') && !dateVal) { showError('supply-ih-error', '支給日を入力してください。'); return; }
+  if (precision === 'approximate' && !approxNote) { showError('supply-ih-error', 'おおよその時期を入力してください。'); return; }
+
+  supplyIhCart.push({
+    item_name: isOther ? otherName : selectedSupplyIhMasterItem, quantity: qty, size: size || null,
+    date_precision: precision, issued_date: precision === 'year_month' ? (dateVal + '-01') : (dateVal || null),
+    approximate_note: precision === 'approximate' ? approxNote : null, note: note || null,
+  });
+  renderSupplyIhCart();
+  document.getElementById('supply-ih-detail').style.display = 'none';
+  document.querySelectorAll('#supply-ih-select-grid .supply-select-card').forEach((c) => c.classList.remove('selected'));
+}
+
+async function doSubmitSupplyInitialHoldingBulk() {
+  const session = getSession();
+  hideError('supply-ih-submit-error');
+  if (supplyIhCart.length === 0) { showError('supply-ih-submit-error', '品目を1件以上追加してください。'); return; }
+  const btn = document.getElementById('supply-ih-submit');
+  btn.disabled = true;
+  try {
+    await rpc('submit_initial_holding', { p_employee_code: session.employeeCode, p_items: supplyIhCart });
+    showDone('現在保有している支給品を登録しました。', 'my-supply');
+  } catch (e) {
+    showError('supply-ih-submit-error', e.message || '登録に失敗しました。もう一度お試しください。');
+    btn.disabled = false;
+  }
+}
+
+function openEditInitialHolding(row) {
+  const session = getSession();
+  const newQty = window.prompt('数量を入力してください', row.quantity);
+  if (newQty === null) return;
+  const newNote = window.prompt('備考(任意)', row.reason || '');
+  if (newNote === null) return;
+  rpc('update_my_initial_holding', {
+    p_employee_code: session.employeeCode, p_issuance_id: row.id, p_item_name: row.item_name, p_size: row.size,
+    p_quantity: Number(newQty) || row.quantity, p_date_precision: row.date_precision, p_issued_date: row.issued_date,
+    p_approximate_note: row.approximate_note, p_note: newNote,
+  }).then(() => loadMySupply()).catch((e) => window.alert(e.message || '修正に失敗しました。'));
 }
 
 // ---------- 管理者画面 ----------
@@ -2668,6 +2788,7 @@ async function doAdminRecordIssuance() {
       p_admin_employee_code: session.employeeCode, p_target_employee_code: targetCode, p_issued_date: date,
       p_item_name: masterId ? null : otherItem, p_quantity: qty ? Number(qty) : 1, p_size: size || null, p_condition: condition,
       p_reason: reason || null, p_needs_return: needsReturn, p_note: note || null, p_master_item_id: masterId,
+      p_source_type: document.getElementById('admin-issue-source-type').value,
     });
     ['admin-issue-date', 'admin-issue-item', 'admin-issue-size', 'admin-issue-reason', 'admin-issue-note'].forEach((id) => { document.getElementById(id).value = ''; });
     document.getElementById('admin-issue-qty').value = '1';
@@ -4989,14 +5110,9 @@ async function loadSupplyMasterAdmin() {
     listEl.innerHTML = rows.map((m) => `
       <div class="supply-item" data-id="${m.id}" style="${m.active ? '' : 'opacity:.5;'}">
         <div class="row1"><span>${m.item_name}</span><span>${m.active ? '有効' : '停止中'}</span></div>
-        <div class="row2">${m.requires_size ? 'サイズ入力あり' : 'サイズ入力なし'}・表示順${m.sort_order}</div>
-        <div class="row2" style="display:flex;align-items:center;gap:6px;">
-          <span>全社員共通の必要数:</span>
-          <input type="number" min="0" step="1" class="supply-required-qty-input" style="width:64px;" value="${m.required_quantity != null ? m.required_quantity : ''}" placeholder="未設定">
-          <button type="button" class="secondary save-required-qty-btn">保存</button>
-        </div>
+        <div class="row2">${m.requires_size ? `サイズ選択あり(${(m.size_options || []).join('・') || '未設定'})` : 'サイズ選択なし'}・表示順${m.sort_order}</div>
         <div class="qual-verify-btns">
-          <button type="button" class="edit-master-btn" data-name="${m.item_name}" data-requires-size="${m.requires_size}" data-sort="${m.sort_order}">編集</button>
+          <button type="button" class="edit-master-btn" data-name="${m.item_name}" data-requires-size="${m.requires_size}" data-sort="${m.sort_order}" data-size-options="${(m.size_options || []).join(',')}">編集</button>
           <button type="button" class="reject-btn toggle-active-btn" data-active="${m.active}">${m.active ? '停止する' : '再開する'}</button>
         </div>
       </div>
@@ -5007,6 +5123,8 @@ async function loadSupplyMasterAdmin() {
         document.getElementById('supply-master-edit-id').value = item.dataset.id;
         document.getElementById('supply-master-name').value = btn.dataset.name;
         document.getElementById('supply-master-requires-size').checked = btn.dataset.requiresSize === 'true';
+        document.getElementById('supply-master-size-options-wrap').style.display = btn.dataset.requiresSize === 'true' ? 'block' : 'none';
+        document.getElementById('supply-master-size-options').value = btn.dataset.sizeOptions || '';
         document.getElementById('supply-master-sort').value = btn.dataset.sort;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
@@ -5018,18 +5136,6 @@ async function loadSupplyMasterAdmin() {
         loadSupplyMasterAdmin();
       });
     });
-    listEl.querySelectorAll('.save-required-qty-btn').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const item = btn.closest('.supply-item');
-        const input = item.querySelector('.supply-required-qty-input');
-        const val = input.value === '' ? null : Number(input.value);
-        try {
-          await rpc('admin_set_supply_required_quantity', { p_admin_employee_code: session.employeeCode, p_master_item_id: Number(item.dataset.id), p_required_quantity: val });
-          btn.textContent = '保存しました';
-          setTimeout(() => { btn.textContent = '保存'; }, 1500);
-        } catch (e) { alert(e.message || '保存に失敗しました。'); }
-      });
-    });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -5039,6 +5145,8 @@ function resetSupplyMasterForm() {
   document.getElementById('supply-master-edit-id').value = '';
   document.getElementById('supply-master-name').value = '';
   document.getElementById('supply-master-requires-size').checked = false;
+  document.getElementById('supply-master-size-options-wrap').style.display = 'none';
+  document.getElementById('supply-master-size-options').value = '';
   document.getElementById('supply-master-sort').value = '100';
   hideError('supply-master-error');
 }
@@ -5048,6 +5156,7 @@ async function doSaveSupplyMasterItem() {
   const id = document.getElementById('supply-master-edit-id').value;
   const name = document.getElementById('supply-master-name').value.trim();
   const requiresSize = document.getElementById('supply-master-requires-size').checked;
+  const sizeOptions = document.getElementById('supply-master-size-options').value.split(',').map((s) => s.trim()).filter(Boolean);
   const sortOrder = Number(document.getElementById('supply-master-sort').value || 100);
   hideError('supply-master-error');
   if (!name) { showError('supply-master-error', '品目名を入力してください。'); return; }
@@ -5057,13 +5166,87 @@ async function doSaveSupplyMasterItem() {
   try {
     await rpc('admin_upsert_supply_master_item', {
       p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_item_name: name,
-      p_requires_size: requiresSize, p_sort_order: sortOrder,
+      p_requires_size: requiresSize, p_sort_order: sortOrder, p_size_options: requiresSize && sizeOptions.length > 0 ? sizeOptions : null,
     });
     await loadSupplyMasterAdmin();
   } catch (e) {
     showError('supply-master-error', e.message || '保存に失敗しました。');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ---------- 支給品申請の確認(管理者、まとめて承認/却下) ----------
+
+async function loadSupplyRequestAdminList() {
+  const session = getSession();
+  const listEl = document.getElementById('supply-request-admin-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_pending_supply_items', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">承認待ちの支給品申請はありません。</div>'; return; }
+    const byRequest = new Map();
+    rows.forEach((r) => {
+      if (!byRequest.has(r.employee_request_id)) byRequest.set(r.employee_request_id, { employee_name: r.employee_name, employee_code: r.employee_code, requested_at: r.requested_at, items: [] });
+      byRequest.get(r.employee_request_id).items.push(r);
+    });
+    listEl.innerHTML = Array.from(byRequest.entries()).map(([reqId, g]) => `
+      <div class="card" data-request-id="${reqId}">
+        <div class="row1"><span>${g.employee_name}(${g.employee_code})</span><span>${new Date(g.requested_at).toLocaleString('ja-JP')}</span></div>
+        ${g.items.map((it) => `
+          <div class="supply-item" data-item-request-id="${it.item_request_id}">
+            <div class="row1"><span>${it.item_name}</span></div>
+            ${it.reason ? `<div class="row2">${it.reason}</div>` : ''}
+            <div class="row2" style="display:flex; gap:6px; align-items:center;">
+              数量 <input type="number" min="1" class="decide-qty-input" style="width:56px;" value="${it.quantity}">
+              サイズ <input type="text" class="decide-size-input" style="width:64px;" value="${it.size || ''}">
+            </div>
+            <div class="qual-verify-btns">
+              <button type="button" class="approve-btn decide-approve-btn">承認する</button>
+              <button type="button" class="reject-btn decide-reject-btn">却下する</button>
+            </div>
+          </div>
+        `).join('')}
+        <button type="button" class="secondary approve-all-btn" style="margin-top:8px;">この申請の全品を承認する</button>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('.decide-approve-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const item = btn.closest('.supply-item');
+        const decision = {
+          item_request_id: Number(item.dataset.itemRequestId), action: 'approve',
+          quantity: Number(item.querySelector('.decide-qty-input').value) || 1,
+          size: item.querySelector('.decide-size-input').value.trim() || null,
+        };
+        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: [decision] }); await loadSupplyRequestAdminList(); }
+        catch (e) { window.alert(e.message || '承認に失敗しました。'); }
+      });
+    });
+    listEl.querySelectorAll('.decide-reject-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const reason = window.prompt('却下理由を入力してください');
+        if (reason === null || !reason.trim()) return;
+        const item = btn.closest('.supply-item');
+        const decision = { item_request_id: Number(item.dataset.itemRequestId), action: 'reject', reason };
+        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: [decision] }); await loadSupplyRequestAdminList(); }
+        catch (e) { window.alert(e.message || '却下に失敗しました。'); }
+      });
+    });
+    listEl.querySelectorAll('.approve-all-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const card = btn.closest('.card');
+        const decisions = Array.from(card.querySelectorAll('.supply-item')).map((item) => ({
+          item_request_id: Number(item.dataset.itemRequestId), action: 'approve',
+          quantity: Number(item.querySelector('.decide-qty-input').value) || 1,
+          size: item.querySelector('.decide-size-input').value.trim() || null,
+        }));
+        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: decisions }); await loadSupplyRequestAdminList(); }
+        catch (e) { window.alert(e.message || '承認に失敗しました。'); }
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
@@ -8968,7 +9151,15 @@ function init() {
 
   document.getElementById('meeting-submit').addEventListener('click', doSubmitMeeting);
 
-  document.getElementById('supply-req-submit').addEventListener('click', doSubmitSupplyRequest);
+  document.getElementById('supply-req-add-btn').addEventListener('click', doAddSupplyReqItem);
+  document.getElementById('supply-req-submit').addEventListener('click', doSubmitSupplyRequestBulk);
+  document.getElementById('supply-ih-add-btn').addEventListener('click', doAddSupplyIhItem);
+  document.getElementById('supply-ih-submit').addEventListener('click', doSubmitSupplyInitialHoldingBulk);
+  document.getElementById('supply-ih-precision').addEventListener('change', toggleSupplyIhPrecisionFields);
+  document.getElementById('my-supply-initial-holding-btn').addEventListener('click', () => showScreen('supply-initial-holding'));
+  document.getElementById('supply-master-requires-size').addEventListener('change', (e) => {
+    document.getElementById('supply-master-size-options-wrap').style.display = e.target.checked ? 'block' : 'none';
+  });
 
   document.getElementById('admin-employee-select').addEventListener('change', loadAdminEmployeeDetail);
   document.getElementById('admin-issue-submit').addEventListener('click', doAdminRecordIssuance);
@@ -9177,7 +9368,6 @@ function init() {
   document.querySelectorAll('.dr-view-tab').forEach((btn) => {
     btn.addEventListener('click', () => setDailyReportView(btn.dataset.view));
   });
-  document.getElementById('sdr-submit').addEventListener('click', doSubmitSupplyDiscrepancy);
   document.getElementById('ed-supply-adjust-submit').addEventListener('click', doAdjustEmployeeSupplyHolding);
   document.getElementById('dr-period-prev').addEventListener('click', () => navigateDailyReportPeriod(-1));
   document.getElementById('dr-period-next').addEventListener('click', () => navigateDailyReportPeriod(1));
@@ -9396,7 +9586,12 @@ function init() {
   SCREEN_ENTER_HOOKS.leave = () => { updateLeaveDaysDisplay(); loadLeaveBalance(); };
   SCREEN_ENTER_HOOKS['leave-history'] = loadLeaveHistory;
   SCREEN_ENTER_HOOKS.history = loadHistory;
-  SCREEN_ENTER_HOOKS['supply-request'] = () => { hideError('supply-req-error'); loadSupplySelectGrid(); };
+  SCREEN_ENTER_HOOKS['supply-request'] = () => { hideError('supply-req-error'); resetSupplyRequestScreen(); };
+  SCREEN_ENTER_HOOKS['supply-initial-holding'] = () => { hideError('supply-ih-error'); resetSupplyInitialHoldingScreen(); };
+  SCREEN_ENTER_HOOKS['supply-request-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadSupplyRequestAdminList();
+  };
   SCREEN_ENTER_HOOKS['my-supply'] = loadMySupply;
   SCREEN_ENTER_HOOKS.myinfo = loadMyInfo;
   SCREEN_ENTER_HOOKS['my-change-requests'] = loadMyChangeRequests;

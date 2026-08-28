@@ -1319,7 +1319,7 @@
   <section id="screen-supply-request" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">支給品申請</div>
-    <div class="hint" style="margin-bottom:12px;">支給品を選んでください。一覧に無い物は「上記以外」を選んで品名を入力できます。</div>
+    <div class="hint" style="margin-bottom:12px;">支給品を選んで「品目を追加」してください。複数品目をまとめて1回で申請できます。一覧に無い物は「上記以外」を選んで品名を入力してください。</div>
     <div class="supply-select-grid" id="supply-select-grid"></div>
 
     <div class="card" id="supply-req-detail" style="display:none;">
@@ -1333,46 +1333,76 @@
       <input type="number" id="supply-req-qty" min="1" value="1">
       <div id="supply-req-size-wrap" style="display:none;">
         <label for="supply-req-size">サイズ</label>
-        <input type="text" id="supply-req-size" placeholder="例: L">
+        <select id="supply-req-size"></select>
       </div>
-      <label>交換／新規</label>
-      <select id="supply-req-kind">
-        <option value="新規">新規</option>
-        <option value="交換">交換</option>
-      </select>
-      <label for="supply-req-reason">申請理由</label>
+      <label for="supply-req-reason">理由(任意)</label>
       <input type="text" id="supply-req-reason" placeholder="例: 破損のため交換希望">
       <div class="error" id="supply-req-error"></div>
-      <button id="supply-req-submit">申請する</button>
+      <button type="button" id="supply-req-add-btn">+ 品目を追加</button>
     </div>
+
+    <div class="section-title">申請する品目</div>
+    <div id="supply-req-cart"><div class="hint">まだ品目が追加されていません。</div></div>
+    <div class="error" id="supply-req-submit-error"></div>
+    <button id="supply-req-submit" disabled>まとめて申請する</button>
+  </section>
+
+  <!-- 現在保有している支給品の初期登録(既存社員、導入前から所持している分) -->
+  <section id="screen-supply-initial-holding" class="screen">
+    <button type="button" class="back-link" data-nav="my-supply">支給品に戻る</button>
+    <div class="form-title">現在保有している支給品の登録</div>
+    <div class="hint" style="margin-bottom:12px;">ポータル導入前から既に持っている支給品を登録してください。支給日が正確に分からない場合は「おおよその時期」や「不明」でも登録できます。複数品目をまとめて登録できます。</div>
+    <div class="supply-select-grid" id="supply-ih-select-grid"></div>
+
+    <div class="card" id="supply-ih-detail" style="display:none;">
+      <div class="form-title" id="supply-ih-selected-title" style="font-size:16px;"></div>
+      <input type="hidden" id="supply-ih-master-id">
+      <div id="supply-ih-other-wrap" style="display:none;">
+        <label for="supply-ih-other-name">上記以外の支給品名<span class="required-mark">(必須)</span></label>
+        <input type="text" id="supply-ih-other-name" placeholder="例: 雨具">
+      </div>
+      <label for="supply-ih-qty">数量</label>
+      <input type="number" id="supply-ih-qty" min="1" value="1">
+      <div id="supply-ih-size-wrap" style="display:none;">
+        <label for="supply-ih-size">サイズ</label>
+        <select id="supply-ih-size"></select>
+      </div>
+      <label>支給時期</label>
+      <select id="supply-ih-precision">
+        <option value="exact">正確な日付が分かる</option>
+        <option value="year_month">年月だけ分かる</option>
+        <option value="approximate">おおよその時期(例: 約2年前)</option>
+        <option value="unknown">分からない</option>
+      </select>
+      <div id="supply-ih-date-wrap">
+        <label for="supply-ih-date">支給日</label>
+        <input type="date" id="supply-ih-date">
+      </div>
+      <div id="supply-ih-approx-wrap" style="display:none;">
+        <label for="supply-ih-approx-note">おおよその時期</label>
+        <input type="text" id="supply-ih-approx-note" placeholder="例: 約2年前">
+      </div>
+      <label for="supply-ih-note">備考(任意)</label>
+      <input type="text" id="supply-ih-note">
+      <div class="error" id="supply-ih-error"></div>
+      <button type="button" id="supply-ih-add-btn">+ 品目を追加</button>
+    </div>
+
+    <div class="section-title">登録する品目</div>
+    <div id="supply-ih-cart"><div class="hint">まだ品目が追加されていません。</div></div>
+    <div class="error" id="supply-ih-submit-error"></div>
+    <button id="supply-ih-submit" disabled>まとめて登録する</button>
   </section>
 
   <!-- 自分の支給品履歴・現在保有数 -->
   <section id="screen-my-supply" class="screen">
     <button type="button" class="back-link" data-nav="myinfo">自分の情報に戻る</button>
     <div class="form-title">支給品</div>
-    <div class="section-title">現在の支給品</div>
+    <button type="button" class="secondary" id="my-supply-initial-holding-btn" style="margin-bottom:14px;">現在保有している支給品を登録する</button>
+    <div class="section-title">現在の保有数</div>
     <div id="my-supply-holdings"></div>
     <div class="section-title">支給履歴</div>
     <div id="my-supply-list"></div>
-    <div class="section-title">差異報告</div>
-    <div class="hint" style="margin-bottom:8px;">実際に持っている数が上と違う場合は、品目を選んで報告してください。自動で数量が書き換わることはなく、管理者確認のうえで確定します。</div>
-    <div id="my-supply-discrepancies"></div>
-  </section>
-
-  <!-- 支給品 差異報告フォーム -->
-  <section id="screen-supply-discrepancy-report" class="screen">
-    <button type="button" class="back-link" data-nav="my-supply">支給品に戻る</button>
-    <div class="form-title">差異を報告する</div>
-    <label for="sdr-item">品目</label>
-    <select id="sdr-item"></select>
-    <div class="hint-inline" id="sdr-system-quantity"></div>
-    <label for="sdr-quantity">実際に持っている数</label>
-    <input type="number" id="sdr-quantity" min="0" step="1">
-    <label for="sdr-note">メモ(任意)</label>
-    <input type="text" id="sdr-note">
-    <div class="error" id="sdr-error"></div>
-    <button id="sdr-submit">報告する</button>
   </section>
 
   <!-- 管理者画面 -->
@@ -1393,6 +1423,15 @@
     <div class="card">
       <label for="admin-issue-employee">対象社員</label>
       <select id="admin-issue-employee"></select>
+      <label for="admin-issue-source-type">区分</label>
+      <select id="admin-issue-source-type">
+        <option value="issuance">通常支給</option>
+        <option value="exchange">交換</option>
+        <option value="return">返却</option>
+        <option value="loss">紛失</option>
+        <option value="additional">追加支給</option>
+        <option value="initial_holding">初期保有登録(代行)</option>
+      </select>
       <label for="admin-issue-date">支給日</label>
       <input type="date" id="admin-issue-date">
       <label for="admin-issue-master">支給品</label>
@@ -1521,6 +1560,11 @@
       <button type="button" class="menu-item" data-nav="admin">
         <span class="icon-slot" data-icon="package"></span>
         <div class="menu-item-body">支給品の記録・検索<span class="desc">実際に渡した支給品を記録</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="supply-request-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとにまとめて承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="supply-master-admin">
@@ -1702,7 +1746,11 @@
       <input type="text" id="supply-master-name" placeholder="例: 雨具">
       <div class="checkbox-row">
         <input type="checkbox" id="supply-master-requires-size">
-        <label for="supply-master-requires-size">サイズ入力欄を表示する</label>
+        <label for="supply-master-requires-size">サイズ選択を表示する</label>
+      </div>
+      <div id="supply-master-size-options-wrap" style="display:none;">
+        <label for="supply-master-size-options">サイズ候補(カンマ区切り)</label>
+        <input type="text" id="supply-master-size-options" placeholder="例: S,M,L,LL,3L">
       </div>
       <label for="supply-master-sort">表示順(小さいほど上に表示)</label>
       <input type="number" id="supply-master-sort" value="100">
@@ -1711,6 +1759,14 @@
     </div>
     <div class="section-title">登録済みの品目</div>
     <div id="supply-master-list"></div>
+  </section>
+
+  <!-- 支給品申請(まとめて確認・承認、管理者) -->
+  <section id="screen-supply-request-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">支給品申請の確認</div>
+    <div class="hint" style="margin-bottom:10px;">申請単位でまとめて表示されます。品目ごとに数量・サイズを修正のうえ承認、または却下できます。</div>
+    <div id="supply-request-admin-list"><div class="hint">読み込み中...</div></div>
   </section>
 
   <!-- 免許種別マスター管理(管理者) -->
