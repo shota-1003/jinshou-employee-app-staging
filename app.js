@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v69-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T02:10:44.944Z';
+const BUILD_DEPLOYED_AT = '2026-08-28T03:17:25.161Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -5953,12 +5953,13 @@ async function loadAllSitesList() {
   try {
     const rows = await rpc('admin_list_sites', { p_admin_employee_code: session.employeeCode, p_include_inactive: true, p_query: siteListQuery || null });
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する現場はありません。</div>'; return; }
-    const statusLabel = { active: '有効', pending: '承認待ち', inactive: '無効' };
+    const statusLabel = { active: '有効', pending: '承認待ち', inactive: '無効', merged: '統合済み' };
     listEl.innerHTML = rows.map((s) => `
       <div class="qual-item" data-id="${s.id}">
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"><span class="mini-tag ${s.status === 'active' ? 'info' : (s.status === 'pending' ? 'danger' : '')}">${statusLabel[s.status] || s.status}</span></div>
         <div class="qual-verify-btns">
           <button type="button" class="site-save-btn">名前を保存</button>
+          ${s.status === 'active' || s.status === 'inactive' ? `<button type="button" class="reject-btn toggle-site-active-btn" data-active="${s.status === 'active'}">${s.status === 'active' ? '無効化する(アーカイブ)' : '有効化する'}</button>` : ''}
         </div>
       </div>
     `).join('');
@@ -5971,6 +5972,17 @@ async function loadAllSitesList() {
           await rpc('admin_update_site_name', { p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id), p_site_name: newName });
           await loadAllSitesList();
         } catch (e2) { window.alert(e2.message || '保存に失敗しました。'); }
+      });
+    });
+    listEl.querySelectorAll('.toggle-site-active-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const item = e.target.closest('.qual-item');
+        const willActivate = btn.dataset.active !== 'true';
+        if (!willActivate && !window.confirm('この現場を無効化します。過去の日報・経費等のデータはそのまま残り、日報の現場選択肢にだけ表示されなくなります。よろしいですか？')) return;
+        try {
+          await rpc('admin_set_site_active', { p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id), p_is_active: willActivate });
+          await loadAllSitesList();
+        } catch (e2) { window.alert(e2.message || '切り替えに失敗しました。'); }
       });
     });
   } catch (e) {
