@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T19:30:02.305Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T19:34:47.871Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4185,6 +4185,18 @@ async function loadEmployeeDetailPortalAccess() {
   } catch (e) { /* 読み込み失敗時は静かに諦める(端末一覧は別途表示されるため) */ }
 }
 
+// User-Agent文字列をそのまま表示せず、一般の管理者にも分かる端末種別へ短縮する
+// (mail-secretary/app.jsの同名ヘルパーと同じロジックを再利用、重複実装しない)。
+function shortenDeviceLabel(ua) {
+  if (!ua) return '不明な端末';
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua)) return 'iPad';
+  if (/Android/i.test(ua)) return 'Android端末';
+  if (/Macintosh/i.test(ua)) return 'Mac';
+  if (/Windows/i.test(ua)) return 'Windows PC';
+  return ua.length > 40 ? ua.slice(0, 40) + '…' : ua;
+}
+
 async function loadEmployeeDetailDevices() {
   const session = getSession();
   const code = currentEmployeeDetailCode;
@@ -4196,7 +4208,7 @@ async function loadEmployeeDetailDevices() {
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">この社員はまだどの端末からもログインしていません。</div>'; return; }
     listEl.innerHTML = rows.map((d) => `
       <div class="admin-result-item">
-        <div class="row1"><span>${d.device_label || '不明な端末'}</span><span class="status-badge ${d.approval_status === 'pending' ? 'warn' : (d.is_active && d.employee_status === 'active' ? 'done' : 'rejected')}">${d.approval_status === 'pending' ? '承認待ち' : (d.approval_status === 'rejected' ? '却下済み' : (!d.is_active ? '無効化済み' : (d.employee_status !== 'active' ? '本人が利用停止中' : '有効')))}</span></div>
+        <div class="row1"><span>${shortenDeviceLabel(d.device_label)}</span><span class="status-badge ${d.approval_status === 'pending' ? 'warn' : (d.is_active && d.employee_status === 'active' ? 'done' : 'rejected')}">${d.approval_status === 'pending' ? '承認待ち' : (d.approval_status === 'rejected' ? '却下済み' : (!d.is_active ? '無効化済み' : (d.employee_status !== 'active' ? '本人が利用停止中' : '有効')))}</span></div>
         <div class="row2">初回ログイン: ${new Date(d.created_at).toLocaleString('ja-JP')}</div>
         <div class="row2">最終利用: ${new Date(d.last_seen_at).toLocaleString('ja-JP')}${d.last_seen_ip ? `・${d.last_seen_ip}` : ''}</div>
         ${!d.is_active && d.approval_status !== 'pending' ? `<div class="row2">無効化: ${d.revoked_at ? new Date(d.revoked_at).toLocaleString('ja-JP') : ''}(${d.revoked_by === 'self' ? '本人がログアウト' : (d.revoked_by === 'system:employee_inactive' ? '退職・利用停止による自動遮断' : `管理者(${d.revoked_by})が無効化`)})</div>` : ''}
@@ -7128,11 +7140,13 @@ function onDailyReportCalDayClick(dateStr, info) {
   detailEl.querySelector('[data-add-event]').addEventListener('click', () => openPersonalEventForm(null, dateStr));
 }
 
+// 「会社都合休み」は社員本人が申請する区分から削除した(ユーザー指示、2026-08-30)。
+// 会社都合休みが必要な場合は管理側で設定する仕組みとして別途分離する方針のため、
+// このoptions配列(社員自身の休暇申請・簡易登録の両方で共有)からは除外する。
 const LEAVE_CATEGORY_OPTIONS = [
   { value: 'paid_leave', label: '有給休暇' },
   { value: 'regular_leave', label: '普通休暇' },
   { value: 'absence', label: '欠勤' },
-  { value: 'company_leave', label: '会社都合休み' },
   { value: 'other_leave', label: 'その他休暇' },
 ];
 
