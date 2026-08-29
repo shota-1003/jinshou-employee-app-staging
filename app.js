@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T19:16:42.039Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T19:23:48.746Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4193,25 +4193,14 @@ async function loadEmployeeDetailLeave() {
   try {
     const summaryRows = await rpc('admin_get_employee_leave_summary', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
     const b = summaryRows && summaryRows[0];
-    // 使用実績(used_this_period/taken_count_this_period)は、管理者による付与登録
-    // (has_active_period)の有無に関わらず、実際のleave_balances(usage)から常に算出される
-    // (付与額が未設定だからといって既に取得済みの実績まで隠さない)。付与/残りは、管理者が
-    // 「有給ポリシー」タブで付与登録するまでは架空の数字を出さず「未設定」のままにする。
-    if (b) {
-      document.getElementById('employee-detail-leave-used').textContent = `${b.used_this_period}日(${b.taken_count_this_period}回)`;
-      document.getElementById('employee-detail-leave-granted').textContent = b.granted_this_period != null ? `${b.granted_this_period}日` : '未設定';
-      document.getElementById('employee-detail-leave-balance').textContent = b.remaining_this_period != null ? `${b.remaining_this_period}日` : '未設定';
-      if (b.period_start) {
-        const periodLabel = `${new Date(b.period_start).toLocaleDateString('ja-JP')}〜${new Date(b.period_end).toLocaleDateString('ja-JP')}`;
-        document.getElementById('employee-detail-leave-period').textContent = b.has_active_period
-          ? `対象期間: ${periodLabel}`
-          : `対象期間(入社日基準の目安、付与未登録): ${periodLabel}`;
-      } else {
-        document.getElementById('employee-detail-leave-period').textContent = '対象期間: 不明(入社日・付与のいずれも未登録のため全期間の実績を表示)';
-      }
+    if (b && b.has_active_period) {
+      document.getElementById('employee-detail-leave-used').textContent = `${b.used_this_period}日`;
+      document.getElementById('employee-detail-leave-granted').textContent = `${b.granted_this_period}日`;
+      document.getElementById('employee-detail-leave-balance').textContent = `${b.remaining_this_period}日`;
+      document.getElementById('employee-detail-leave-period').textContent = `対象期間: ${new Date(b.period_start).toLocaleDateString('ja-JP')}〜${new Date(b.period_end).toLocaleDateString('ja-JP')}`;
     } else {
       document.getElementById('employee-detail-leave-used').textContent = '-';
-      document.getElementById('employee-detail-leave-granted').textContent = '未設定';
+      document.getElementById('employee-detail-leave-granted').textContent = '-';
       document.getElementById('employee-detail-leave-balance').textContent = '未設定';
       document.getElementById('employee-detail-leave-period').textContent = '今年度の付与がまだ登録されていません。';
     }
@@ -4571,7 +4560,7 @@ async function openEmployeeMonthlyDetail(code, name, year, month) {
 
     const other = otherRows.filter((r) => r.source_type !== 'expense_reimbursement' && r.source_type !== 'paid_leave');
     document.getElementById('emd-other-list').innerHTML = other.length === 0 ? '<div class="hint">この月のその他申請はありません。</div>' : other.map((r) => `
-      <div class="history-item"><div class="row1"><span>${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span class="status-badge">${STATUS_GROUP_LABEL[r.status_group] || r.status_group}</span></div>
+      <div class="history-item"><div class="row1"><span>${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span class="status-badge">${r.status_group}</span></div>
       <div class="row2">${r.summary || ''}</div></div>
     `).join('');
 
