@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T23:24:44.541Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T23:27:46.768Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10379,6 +10379,22 @@ function init() {
       bulkExpenseAdminFilter = chip.dataset.status || '';
       loadBulkExpenseAdminList();
     });
+  });
+  document.getElementById('bea-open-ledger-btn').addEventListener('click', async (e) => {
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = '開いています...';
+    try {
+      const session = getSession();
+      const link = await rpc('admin_get_expense_ledger_link', { p_admin_employee_code: session.employeeCode });
+      if (link) window.open(link, '_blank');
+      else alert('台帳はまだ作成されていません(経費が確定されると自動生成されます)。');
+    } catch (err) {
+      alert(err.message || '台帳リンクの取得に失敗しました。');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '経費台帳・月次集計(Spreadsheet)を開く';
+    }
   });
   document.getElementById('bed-select-all').addEventListener('click', () => {
     document.querySelectorAll('.bed-item-check').forEach((cb) => { cb.checked = true; bulkExpenseSelectedItems.add(cb.dataset.id); });
