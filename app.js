@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-28T14:09:32.965Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v75-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T05:30:26.808Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -260,8 +260,16 @@ function showScreen(id, opts) {
     btn.classList.toggle('active', btn.getAttribute('data-nav') === id);
   });
   if (!opts.fromPopstate && !preAuthScreens.includes(id)) {
-    history.pushState({ screen: id }, '', location.pathname + location.search);
-    appNavDepth += 1;
+    if (opts.replace) {
+      // 完了画面(screen-done)への遷移・そこからの離脱に使う。pushStateすると、
+      // 送信フォーム→完了画面→次の画面、と積み上がった履歴を「戻る」で辿るたびに
+      // 完了画面へ戻ってきてしまう(無限ループに見える)・フォーム画面へ戻って
+      // 二重送信を誘発する、という2つの問題が起きるため、履歴を積まずに置き換える。
+      history.replaceState({ screen: id }, '', location.pathname + location.search);
+    } else {
+      history.pushState({ screen: id }, '', location.pathname + location.search);
+      appNavDepth += 1;
+    }
   }
   window.scrollTo(0, 0);
   if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
@@ -300,7 +308,9 @@ function revealReasonBox(boxEl) {
 function showDone(message, returnTo) {
   document.getElementById('done-message').textContent = message;
   document.querySelector('#screen-done [data-nav]').setAttribute('data-nav', returnTo || 'menu');
-  showScreen('done');
+  // 送信元のフォーム画面をそのまま履歴に残さず完了画面へ置き換える(戻るでフォームへ
+  // 戻って二重送信、を防ぐ)。
+  showScreen('done', { replace: true });
 }
 
 function showError(elId, message) {
@@ -556,7 +566,7 @@ function buildHomeGreeting() {
   return { greeting: pick(GREETINGS[band]), sub };
 }
 
-function enterMenu() {
+function enterMenu(replace) {
   const session = getSession();
   const { greeting, sub } = buildHomeGreeting();
   document.getElementById('menu-greeting-hi').textContent = greeting;
@@ -565,7 +575,7 @@ function enterMenu() {
   checkAnonUnreadBadge().then(loadTodayList);
   loadAnnounceBanner();
   loadHomeAnnouncePreview();
-  showScreen('menu');
+  showScreen('menu', { replace: !!replace });
   renderHomeAdminBanner(session);
   renderHomeDailyReportCard(session);
   renderHomeDailyReportStatusBanner(session);
@@ -9572,14 +9582,17 @@ function init() {
     el.addEventListener('click', () => {
       const target = el.getAttribute('data-nav');
       if (el.disabled) return;
+      // 完了画面(screen-done)からの遷移は、完了画面自体を履歴に残さず置き換える
+      // (この後さらに「戻る」を押しても完了画面へ戻ってくる=無限ループに見える、を防ぐ)。
+      const leavingDone = document.getElementById('screen-done').classList.contains('active');
       if (el.classList.contains('back-to-origin')) { goBackToOrigin(target); return; }
-      if (target === 'menu') { enterMenu(); return; }
-      if (target === 'expense') { showScreen('expense-select'); return; }
+      if (target === 'menu') { enterMenu(leavingDone); return; }
+      if (target === 'expense') { showScreen('expense-select', { replace: leavingDone }); return; }
       if (target === 'expense-advance') { enterExpenseScreen('employee_advance'); return; }
       if (target === 'expense-company') { enterExpenseScreen('company_expense'); return; }
       if (target === 'expense-bulk-advance') { enterExpenseBulkScreen('employee_advance'); return; }
       if (target === 'expense-bulk-company') { enterExpenseBulkScreen('company_expense'); return; }
-      showScreen(target);
+      showScreen(target, { replace: leavingDone });
     });
   });
 
