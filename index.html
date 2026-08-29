@@ -1561,11 +1561,12 @@
 
     <div class="dash-card-grid" id="admin-dashboard-grid"></div>
 
-    <div class="section-title">社員管理</div>
-    <div class="menu-list">
-      <button type="button" class="menu-item" data-nav="employee-directory">
+    <div class="section-title">人員・台帳管理</div>
+    <div class="hint" style="margin-bottom:10px;">社員・外注会社・支給品・資格免許・健康診断・常用台帳・経費台帳など、横断確認したい台帳データはここから。</div>
+    <div class="menu-list" style="margin-bottom:20px;">
+      <button type="button" class="menu-item" data-nav="personnel-ledger-hub">
         <span class="icon-slot" data-icon="users"></span>
-        <div class="menu-item-body">社員名簿<span class="desc">在籍状況・資格・支給品・申請履歴をまとめて確認</span></div>
+        <div class="menu-item-body">人員・台帳管理<span class="desc">社員/外注/支給品/資格免許/健康診断/常用台帳/経費台帳の一覧をまとめて確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
     </div>
@@ -1602,34 +1603,14 @@
         <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとにまとめて承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="supply-holdings-admin">
-        <span class="icon-slot" data-icon="package"></span>
-        <div class="menu-item-body">支給品保有一覧<span class="desc">誰が何をいくつ持っているか(全社員)</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
       <button type="button" class="menu-item" data-nav="supply-master-admin">
         <span class="icon-slot" data-icon="filter"></span>
         <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="qual-admin">
-        <span class="icon-slot" data-icon="graduation-cap"></span>
-        <div class="menu-item-body">資格・免許管理<span class="desc">確認待ち・期限が近い資格/免許を確認</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="joyo-denpyo-admin">
-        <span class="icon-slot" data-icon="clipboard-list"></span>
-        <div class="menu-item-body">常用伝票管理<span class="desc">現場伝票の一覧・詳細確認</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
       <button type="button" class="menu-item" data-nav="event-admin">
         <span class="icon-slot" data-icon="users-round"></span>
         <div class="menu-item-body">社内イベント管理<span class="desc">イベント作成・参加回答の確認</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="health-admin">
-        <span class="icon-slot" data-icon="check-circle"></span>
-        <div class="menu-item-body">健康診断管理<span class="desc">未受診・期限間近・再検査を確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="license-admin">
@@ -1657,11 +1638,6 @@
         <div class="menu-item-body">日報管理<span class="desc">日付・社員・現場で検索、本日の未提出を確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="subcontractor-company-admin">
-        <span class="icon-slot" data-icon="users-round"></span>
-        <div class="menu-item-body">外注会社管理<span class="desc">外注会社・所属作業員の追加・停止</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
       <button type="button" class="menu-item" data-nav="category-review">
         <span class="icon-slot" data-icon="receipt"></span>
         <div class="menu-item-body">経費の勘定科目 要確認<span class="desc">AI提案の確信度が低いものを確認</span></div>
@@ -1675,6 +1651,55 @@
       <button type="button" class="menu-item" data-nav="admin-role-management">
         <span class="icon-slot" data-icon="shield"></span>
         <div class="menu-item-body">管理者管理<span class="desc">管理者の追加・解除、変更履歴を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 人員・台帳管理ハブ: 社員/外注/支給品/資格免許/健康診断/常用台帳/経費台帳への一元導線 -->
+  <section id="screen-personnel-ledger-hub" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">人員・台帳管理</div>
+    <div class="hint" style="margin-bottom:12px;">社員・外注作業員・支給品・資格免許・健康診断・常用台帳・経費台帳を横断して確認できます。</div>
+
+    <div class="section-title">人員</div>
+    <div class="menu-list" style="margin-bottom:20px;">
+      <button type="button" class="menu-item" data-nav="employee-directory">
+        <span class="icon-slot" data-icon="users"></span>
+        <div class="menu-item-body">社員一覧<span class="desc">在籍状況・資格・支給品・申請履歴をまとめて確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="subcontractor-company-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">外注会社一覧<span class="desc">外注会社・所属作業員の追加・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+
+    <div class="section-title">保有・資格・健康</div>
+    <div class="menu-list" style="margin-bottom:20px;">
+      <button type="button" class="menu-item" data-nav="supply-holdings-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品保有一覧<span class="desc">誰が何をいくつ持っているか(全社員、品目からも検索可)</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="qual-admin">
+        <span class="icon-slot" data-icon="graduation-cap"></span>
+        <div class="menu-item-body">資格・免許保有者一覧<span class="desc">氏名/資格名で検索、期限切れ・期限間近を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="health-admin">
+        <span class="icon-slot" data-icon="check-circle"></span>
+        <div class="menu-item-body">健康診断一覧<span class="desc">未受診・期限間近・再検査を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+
+    <div class="section-title">常用台帳・経費台帳</div>
+    <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="joyo-denpyo-admin">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">常用伝票一覧<span class="desc">社員/現場/期間で検索、伝票単位で詳細確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
     </div>
