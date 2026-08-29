@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v78-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T06:18:12.076Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v79-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T06:26:41.482Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2255,10 +2255,19 @@ function openImageZoom(url) {
   document.getElementById('image-zoom-overlay').classList.add('open');
 }
 
+let currentMyRequestDetail = null;
+
 async function openMyRequestDetail(requestId, returnTo) {
-  const session = getSession();
   returnTo = MRD_RETURN_LABEL[returnTo] ? returnTo : 'history';
+  currentMyRequestDetail = { requestId: Number(requestId), returnTo };
   showScreen('my-request-detail');
+}
+
+// showScreen('my-request-detail')のたびにSCREEN_ENTER_HOOKSから呼ばれる(戻る/進むを含む)。
+async function loadMyRequestDetailContent() {
+  if (!currentMyRequestDetail) return;
+  const { requestId, returnTo } = currentMyRequestDetail;
+  const session = getSession();
   const backLink = document.getElementById('mrd-back-link');
   backLink.dataset.nav = returnTo;
   backLink.textContent = MRD_RETURN_LABEL[returnTo];
@@ -7585,14 +7594,21 @@ function renderAreqTable(rows) {
 let currentRequestDetail = null;
 
 async function openRequestDetail(sourceType, sourceId) {
-  const session = getSession();
   currentRequestDetail = { sourceType, sourceId: Number(sourceId) };
+  showScreen('request-detail');
+}
+
+// showScreen('request-detail')のたびにSCREEN_ENTER_HOOKSから呼ばれる(通常のクリック遷移でも
+// ブラウザの戻る/進むでも、currentRequestDetailに入っている対象を毎回最新の状態で再取得する)。
+async function loadRequestDetailContent() {
+  if (!currentRequestDetail) return;
+  const { sourceType, sourceId } = currentRequestDetail;
+  const session = getSession();
   document.getElementById('rdetail-title').textContent = REQUEST_TYPE_LABEL[sourceType] || sourceType;
   document.getElementById('rdetail-fields').innerHTML = '<div class="hint">読み込み中...</div>';
   document.getElementById('rdetail-history').innerHTML = '';
   document.getElementById('rdetail-actions').innerHTML = '';
   hideError('rdetail-error');
-  showScreen('request-detail');
 
   try {
     const rows = await rpc('admin_search_requests', {
@@ -10097,6 +10113,8 @@ function init() {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportManagement();
   };
+  SCREEN_ENTER_HOOKS['request-detail'] = () => { loadRequestDetailContent(); };
+  SCREEN_ENTER_HOOKS['my-request-detail'] = () => { loadMyRequestDetailContent(); };
   SCREEN_ENTER_HOOKS['subcontractor-company-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadSubcontractorCompanyAdmin();
