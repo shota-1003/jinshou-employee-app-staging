@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v75-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T05:36:03.931Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v76-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T05:46:24.713Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6018,7 +6018,8 @@ async function loadEntertainmentAdminList() {
         ${r.status === 'rejected' && r.rejection_reason ? `<div class="row2">却下理由: ${r.rejection_reason}</div>` : ''}
         ${r.status === 'pending' ? `
           ${r.requires_special_review ? `
-            <label>例外承認の理由<span class="required-mark">(必須)</span></label>
+            <label>例外承認理由(管理者入力)<span class="required-mark">(必須)</span></label>
+            <div class="hint-inline">申請者本人の説明ではなく、管理者が「なぜ事後でも承認するか」を記録する欄です</div>
             <textarea class="ent-exception-reason" placeholder="例: 先方都合で急遽実施、事前に把握はしていた"></textarea>
           ` : ''}
           <label>却下理由<span class="hint-inline" style="display:inline;">(任意、入力すると申請者に伝わります)</span></label>
@@ -7670,7 +7671,8 @@ function renderRequestDetailActions(sourceType, r) {
     const special = r.status_group === 'special_review';
     box.innerHTML = `
       ${special ? `${icon('alert-triangle')}<div class="preapproval-warning">この接待は事前申請されていません。例外承認の理由を入力してください。</div>
-        <label>例外承認の理由<span class="required-mark">(必須)</span></label>
+        <label>例外承認理由(管理者入力)<span class="required-mark">(必須)</span></label>
+        <div class="hint-inline">申請者本人の説明ではなく、管理者が「なぜ事後でも承認するか」を記録する欄です</div>
         <textarea id="rdetail-ent-reason"></textarea>` : ''}
       <button type="button" id="rdetail-ent-approve">${special ? '例外承認する' : '承認する'}</button>
       <button type="button" class="secondary" id="rdetail-ent-reject">却下する</button>
