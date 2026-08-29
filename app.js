@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v75-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T05:30:26.808Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T05:36:03.931Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8262,6 +8262,7 @@ async function loadSubcontractorCompanyAdmin() {
         <div class="row1"><span>${c.company_name}</span><span>${c.worker_count}名</span></div>
         <div class="row2">${c.notes || ''}</div>
         <div class="qual-verify-btns">
+          <button type="button" class="secondary view-sc-workers-btn" data-name="${c.company_name}">所属作業員を見る(${c.worker_count}名)</button>
           <button type="button" class="edit-sc-company-btn" data-name="${c.company_name}" data-notes="${c.notes || ''}">編集</button>
           <button type="button" class="reject-btn toggle-sc-company-btn" data-active="${c.status === 'active'}">${c.status === 'active' ? '停止する' : '再開する'}</button>
         </div>
@@ -8281,6 +8282,14 @@ async function loadSubcontractorCompanyAdmin() {
         const item = btn.closest('.supply-item');
         await rpc('admin_set_subcontractor_company_active', { p_admin_employee_code: session.employeeCode, p_id: Number(item.dataset.id), p_active: btn.dataset.active !== 'true' });
         loadSubcontractorCompanyAdmin();
+      });
+    });
+    listEl.querySelectorAll('.view-sc-workers-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const item = btn.closest('.supply-item');
+        subcontractorWorkerCompanyFilter = { id: Number(item.dataset.id), name: btn.dataset.name };
+        subcontractorWorkerFilterJustSet = true;
+        showScreen('subcontractor-worker-admin');
       });
     });
   } catch (e) {
@@ -8307,35 +8316,69 @@ async function doSaveSubcontractorCompany() {
   }
 }
 
+let subcontractorWorkerCompanyFilter = null; // {id, name} | null。外注会社一覧の「所属作業員を見る」から絞り込む。
+let subcontractorWorkerFilterJustSet = false; // 直前にドリルダウンから来た場合だけtrue(メニューから直接来た場合はフィルタを解除する)。
+function resetSubcontractorWorkerForm() {
+  document.getElementById('sc-worker-edit-id').value = '';
+  document.getElementById('sc-worker-name').value = '';
+  document.getElementById('sc-worker-birth-date').value = '';
+  document.getElementById('sc-worker-phone').value = '';
+  document.getElementById('sc-worker-address').value = '';
+  document.getElementById('sc-worker-qualifications').value = '';
+  document.getElementById('sc-worker-safety-doc').value = '';
+  document.getElementById('sc-worker-notes').value = '';
+  hideError('sc-worker-error');
+}
+
 async function loadSubcontractorWorkerAdmin() {
   const session = getSession();
   const listEl = document.getElementById('sc-worker-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
-  document.getElementById('sc-worker-edit-id').value = '';
-  document.getElementById('sc-worker-name').value = '';
-  document.getElementById('sc-worker-notes').value = '';
-  hideError('sc-worker-error');
+  resetSubcontractorWorkerForm();
+  const titleEl = document.getElementById('sc-worker-list-title');
+  const clearBtn = document.getElementById('sc-worker-clear-filter-btn');
+  if (subcontractorWorkerCompanyFilter) {
+    titleEl.textContent = `${subcontractorWorkerCompanyFilter.name}の作業員`;
+    clearBtn.style.display = 'block';
+  } else {
+    titleEl.textContent = '登録済みの外注作業員';
+    clearBtn.style.display = 'none';
+  }
   try {
     const companies = await rpc('admin_list_subcontractor_companies', { p_admin_employee_code: session.employeeCode, p_include_inactive: false });
     document.getElementById('sc-worker-company-select').innerHTML = companies.map((c) => `<option value="${c.id}">${c.company_name}</option>`).join('');
-    const rows = await rpc('admin_list_subcontractor_workers', { p_admin_employee_code: session.employeeCode, p_company_id: null, p_include_inactive: true });
+    if (subcontractorWorkerCompanyFilter) document.getElementById('sc-worker-company-select').value = subcontractorWorkerCompanyFilter.id;
+    const rows = await rpc('admin_list_subcontractor_workers', {
+      p_admin_employee_code: session.employeeCode,
+      p_company_id: subcontractorWorkerCompanyFilter ? subcontractorWorkerCompanyFilter.id : null,
+      p_include_inactive: true,
+    });
+    if (rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する作業員はいません。</div>'; return; }
     listEl.innerHTML = rows.map((w) => `
       <div class="supply-item" data-id="${w.id}" style="${w.status === 'active' ? '' : 'opacity:.5;'}">
         <div class="row1"><span>${w.worker_name}</span><span>${w.company_name}</span></div>
-        <div class="row2">${w.notes || ''}</div>
+        <div class="row2">${[w.phone, w.address].filter(Boolean).join('・')}</div>
+        ${w.qualifications ? `<div class="row2">資格: ${w.qualifications}</div>` : ''}
+        ${w.safety_document_status ? `<div class="row2">安全書類: ${w.safety_document_status}</div>` : ''}
+        ${w.notes ? `<div class="row2">${w.notes}</div>` : ''}
         <div class="qual-verify-btns">
-          <button type="button" class="edit-sc-worker-btn" data-name="${w.worker_name}" data-notes="${w.notes || ''}" data-company="${w.subcontractor_company_id}">編集</button>
+          <button type="button" class="edit-sc-worker-btn" data-id="${w.id}">編集</button>
           <button type="button" class="reject-btn toggle-sc-worker-btn" data-active="${w.status === 'active'}">${w.status === 'active' ? '停止する' : '再開する'}</button>
         </div>
       </div>
     `).join('');
     listEl.querySelectorAll('.edit-sc-worker-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const item = btn.closest('.supply-item');
-        document.getElementById('sc-worker-edit-id').value = item.dataset.id;
-        document.getElementById('sc-worker-name').value = btn.dataset.name;
-        document.getElementById('sc-worker-notes').value = btn.dataset.notes;
-        document.getElementById('sc-worker-company-select').value = btn.dataset.company;
+        const w = rows.find((r) => String(r.id) === btn.dataset.id);
+        document.getElementById('sc-worker-edit-id').value = w.id;
+        document.getElementById('sc-worker-name').value = w.worker_name;
+        document.getElementById('sc-worker-birth-date').value = w.birth_date || '';
+        document.getElementById('sc-worker-phone').value = w.phone || '';
+        document.getElementById('sc-worker-address').value = w.address || '';
+        document.getElementById('sc-worker-qualifications').value = w.qualifications || '';
+        document.getElementById('sc-worker-safety-doc').value = w.safety_document_status || '';
+        document.getElementById('sc-worker-notes').value = w.notes || '';
+        document.getElementById('sc-worker-company-select').value = w.subcontractor_company_id;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
@@ -8363,7 +8406,14 @@ async function doSaveSubcontractorWorker() {
   const btn = document.getElementById('sc-worker-submit');
   btn.disabled = true;
   try {
-    await rpc('admin_upsert_subcontractor_worker', { p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_subcontractor_company_id: Number(companyId), p_worker_name: name, p_notes: notes || null });
+    await rpc('admin_upsert_subcontractor_worker', {
+      p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_subcontractor_company_id: Number(companyId), p_worker_name: name, p_notes: notes || null,
+      p_birth_date: document.getElementById('sc-worker-birth-date').value || null,
+      p_phone: document.getElementById('sc-worker-phone').value.trim() || null,
+      p_address: document.getElementById('sc-worker-address').value.trim() || null,
+      p_qualifications: document.getElementById('sc-worker-qualifications').value.trim() || null,
+      p_safety_document_status: document.getElementById('sc-worker-safety-doc').value.trim() || null,
+    });
     await loadSubcontractorWorkerAdmin();
   } catch (e) {
     showError('sc-worker-error', e.message || '保存に失敗しました。');
@@ -9929,8 +9979,14 @@ function init() {
   };
   SCREEN_ENTER_HOOKS['subcontractor-worker-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
+    if (!subcontractorWorkerFilterJustSet) subcontractorWorkerCompanyFilter = null;
+    subcontractorWorkerFilterJustSet = false;
     loadSubcontractorWorkerAdmin();
   };
+  document.getElementById('sc-worker-clear-filter-btn').addEventListener('click', () => {
+    subcontractorWorkerCompanyFilter = null;
+    loadSubcontractorWorkerAdmin();
+  });
   SCREEN_ENTER_HOOKS['daily-report-detail'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
   };

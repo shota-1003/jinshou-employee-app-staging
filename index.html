@@ -700,12 +700,23 @@
       <select id="sc-worker-company-select"></select>
       <label for="sc-worker-name">作業員名</label>
       <input type="text" id="sc-worker-name" placeholder="例: 山田 太郎">
+      <label for="sc-worker-birth-date">生年月日</label>
+      <input type="date" id="sc-worker-birth-date">
+      <label for="sc-worker-phone">連絡先電話番号</label>
+      <input type="tel" id="sc-worker-phone">
+      <label for="sc-worker-address">住所</label>
+      <input type="text" id="sc-worker-address">
+      <label for="sc-worker-qualifications">保有資格</label>
+      <input type="text" id="sc-worker-qualifications" placeholder="例: 玉掛け技能講習、フルハーネス特別教育">
+      <label for="sc-worker-safety-doc">安全書類の提出状況</label>
+      <input type="text" id="sc-worker-safety-doc" placeholder="例: 作業員名簿・施工体制台帳提出済み">
       <label for="sc-worker-notes">備考</label>
       <input type="text" id="sc-worker-notes">
       <div class="error" id="sc-worker-error"></div>
       <button id="sc-worker-submit">保存する</button>
     </div>
-    <div class="section-title">登録済みの外注作業員</div>
+    <div class="section-title" id="sc-worker-list-title">登録済みの外注作業員</div>
+    <button type="button" class="link" id="sc-worker-clear-filter-btn" style="display:none;">すべての会社の作業員を表示</button>
     <div id="sc-worker-list"></div>
   </section>
 
