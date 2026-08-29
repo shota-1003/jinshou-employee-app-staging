@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T22:03:17.419Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T22:31:48.484Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -253,7 +253,7 @@ function showScreen(id, opts) {
   document.getElementById('admin-bottom-nav').style.display = (!preAuthScreens.includes(id) && inAdminMode) ? 'flex' : 'none';
   // ログイン前・管理者モード中は案内AIを表示しない(下部ナビと同じ扱い)。
   document.getElementById('ai-guide-fab-wrap').style.display = (!preAuthScreens.includes(id) && !inAdminMode) ? '' : 'none';
-  if (preAuthScreens.includes(id) || inAdminMode) document.getElementById('ai-guide-panel').classList.remove('open');
+  if (preAuthScreens.includes(id) || inAdminMode) closeAiGuidePanel();
   document.querySelectorAll('.bottom-nav-item').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-nav') === (BOTTOM_NAV_MAP[id] || id));
   });
@@ -9612,7 +9612,7 @@ function renderAiGuideMessages() {
     if (m.role === 'action') {
       return `<button type="button" class="ai-guide-msg-action" data-nav="${m.nav}">${m.label}${icon('chevron-right')}</button>`;
     }
-    return `<div class="ai-guide-msg ${m.role === 'user' ? 'user' : 'bot'}">${m.text}</div>`;
+    return `<div class="ai-guide-msg ${m.role === 'user' ? 'user' : 'bot'}${m.pending ? ' pending' : ''}">${m.text}</div>`;
   }).join('');
   hydrateIcons(el);
   el.querySelectorAll('.ai-guide-msg-action').forEach((btn) => {
@@ -9624,13 +9624,54 @@ function renderAiGuideMessages() {
   el.scrollTop = el.scrollHeight;
 }
 
-function handleAiGuideMessage(text) {
+// 既知の定型パターン(経費・日報・有給等)は従来通り即答(無料・瞬時)。パターンに
+// 一致しない自由な会話だけ、pokkun-chat Edge Function(LLM)へ回す(COST-002の
+// 「不要な課金を避ける」方針に沿って、課金が発生するのは未知の発話だけに絞る)。
+async function handleAiGuideMessage(text) {
   const trimmed = text.trim();
   if (!trimmed) return;
   aiGuideHistory.push({ role: 'user', text: trimmed });
-  const { responses, action } = matchAiGuideIntent(trimmed);
-  aiGuideHistory.push({ role: 'bot', text: pick(responses) });
-  if (action) aiGuideHistory.push({ role: 'action', label: action.label, nav: action.nav });
+  renderAiGuideMessages();
+
+  if (AI_GUIDE_BOUNDARY.patterns.some((p) => p.test(trimmed))) {
+    aiGuideHistory.push({ role: 'bot', text: pick(AI_GUIDE_BOUNDARY.responses) });
+    renderAiGuideMessages();
+    return;
+  }
+  const hit = AI_GUIDE_INTENTS.find((intent) => intent.patterns.some((p) => p.test(trimmed)));
+  if (hit) {
+    aiGuideHistory.push({ role: 'bot', text: pick(hit.responses) });
+    if (hit.action) aiGuideHistory.push({ role: 'action', label: hit.action.label, nav: hit.action.nav });
+    renderAiGuideMessages();
+    return;
+  }
+
+  aiGuideHistory.push({ role: 'bot', text: '…', pending: true });
+  renderAiGuideMessages();
+  try {
+    const session = getSession();
+    const history = aiGuideHistory
+      .filter((m) => (m.role === 'user' || m.role === 'bot') && !m.pending)
+      .slice(-8)
+      .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/pokkun-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, 'x-device-token': currentDeviceToken || '' },
+      body: JSON.stringify({ employee_code: session.employeeCode, message: trimmed, history }),
+    });
+    const data = await res.json().catch(() => ({}));
+    const pendingIdx = aiGuideHistory.findIndex((m) => m.pending);
+    if (pendingIdx !== -1) aiGuideHistory.splice(pendingIdx, 1);
+    if (res.ok && data.reply) {
+      aiGuideHistory.push({ role: 'bot', text: data.reply });
+    } else {
+      aiGuideHistory.push({ role: 'bot', text: (data && data.error) || pick(AI_GUIDE_FALLBACK) });
+    }
+  } catch (e) {
+    const pendingIdx = aiGuideHistory.findIndex((m) => m.pending);
+    if (pendingIdx !== -1) aiGuideHistory.splice(pendingIdx, 1);
+    aiGuideHistory.push({ role: 'bot', text: pick(AI_GUIDE_FALLBACK) });
+  }
   renderAiGuideMessages();
 }
 
@@ -9642,6 +9683,12 @@ function openAiGuidePanel() {
     renderAiGuideMessages();
   }
   document.getElementById('ai-guide-input').focus();
+}
+
+// 会話ウィンドウを閉じたら履歴は残さない(ユーザー指示、個人の会話内容を保持し続けない)。
+function closeAiGuidePanel() {
+  document.getElementById('ai-guide-panel').classList.remove('open');
+  aiGuideHistory = [];
 }
 
 // ---------- 初期化 ----------
@@ -10111,7 +10158,7 @@ function init() {
   document.getElementById('image-zoom-close').addEventListener('click', (e) => { e.stopPropagation(); closeImageZoom(); });
 
   document.getElementById('ai-guide-fab').addEventListener('click', openAiGuidePanel);
-  document.getElementById('ai-guide-close').addEventListener('click', () => document.getElementById('ai-guide-panel').classList.remove('open'));
+  document.getElementById('ai-guide-close').addEventListener('click', closeAiGuidePanel);
   document.getElementById('ai-guide-quick-replies').innerHTML = AI_GUIDE_QUICK_REPLIES.map((q) => `<button type="button">${q}</button>`).join('');
   document.getElementById('ai-guide-quick-replies').querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => handleAiGuideMessage(btn.textContent));
