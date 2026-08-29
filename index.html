@@ -526,7 +526,11 @@
   <section id="screen-admin-role-management" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">管理者管理</div>
-    <div class="hint" style="margin-bottom:12px;">管理者権限の変更は監査ログに記録されます。管理者が0人になる操作はできません。</div>
+    <div class="hint" style="margin-bottom:12px;">管理者権限の変更は監査ログに記録されます。管理者が0人になる操作はできません。1人の社員に複数の権限をまとめて付与できます(下の「権限を追加」で1つずつ追加してください)。</div>
+
+    <div class="section-title">社員別 保有権限一覧</div>
+    <div class="hint" style="margin-bottom:10px;">1人が複数の権限を持てます。例: 田中さん → 日報管理 + 現場管理</div>
+    <div id="arm-by-employee-list"></div>
 
     <div class="section-title">現在の管理者</div>
     <div id="arm-current-list"></div>

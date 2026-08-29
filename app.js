@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T19:34:47.871Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T20:05:16.758Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7852,6 +7852,29 @@ async function loadAdminRoleCurrentList() {
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('admin_list_admin_roles', { p_admin_employee_code: session.employeeCode });
+
+    // 社員別にまとめて表示する(1人が複数の権限を持てることが一目で分かるようにする、
+    // ユーザー指摘への対応: 「1つのselectから1種類だけ選ぶ構造に見える」)。既存の3区分別
+    // 一覧(管理者/日報担当/その他)は個別の解除操作用にそのまま残し、これは追加の要約view。
+    const byEmployeeEl = document.getElementById('arm-by-employee-list');
+    if (byEmployeeEl) {
+      const byEmployee = new Map();
+      rows.forEach((r) => {
+        if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, roles: [] });
+        byEmployee.get(r.employee_code).roles.push(r.role_type);
+      });
+      const entries = [...byEmployee.entries()].sort((a, b) => a[1].name.localeCompare(b[1].name, 'ja'));
+      byEmployeeEl.innerHTML = entries.length === 0 ? '<div class="hint">権限を持つ社員はいません。</div>' : entries.map(([code, info]) => `
+        <div class="employee-row" style="cursor:default;">
+          <span class="employee-avatar">${info.name.slice(0, 1)}</span>
+          <div class="employee-row-body">
+            <div class="employee-row-name">${info.name}(${code})</div>
+            <div class="employee-row-meta">${info.roles.map((rt) => `<span class="mini-tag">${ADMIN_ROLE_LABEL[rt] || rt}</span>`).join(' ')}</div>
+          </div>
+        </div>
+      `).join('');
+    }
+
     const renderRows = (items, roleType) => items.map((r) => `
       <div class="employee-row" data-code="${r.employee_code}" style="cursor:default;">
         <span class="employee-avatar">${r.employee_name.slice(0, 1)}</span>
