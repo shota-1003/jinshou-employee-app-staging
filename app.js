@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T22:31:48.484Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T23:11:30.525Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9081,6 +9081,7 @@ let jdaSelected = new Set();
 let jdsView = 'employee';
 let jdsSiteFilter = '';
 let jdsCompanyFilter = '';
+let jdsPartnerFilter = '';
 let jdsMatrixRequestSeq = 0;
 
 function currentJdsMonth() {
@@ -9118,11 +9119,18 @@ async function loadJdsFilterOptions() {
     const curCompany = companySelect.value;
     companySelect.innerHTML = '<option value="">すべての外注会社</option>' + (opts.subcontractor_companies || []).map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
     companySelect.value = curCompany;
+    const partnerSelect = document.getElementById('jds-partner-filter');
+    const curPartner = partnerSelect.value;
+    partnerSelect.innerHTML = '<option value="">すべての取引先</option>' + (opts.business_partners || []).map((p) => `<option value="${p.id}">${p.name}</option>`).join('');
+    partnerSelect.value = curPartner;
   } catch (e) { /* 無視 */ }
 }
 
 function jdsViewLabel() {
-  return jdsView === 'employee' ? '社員' : (jdsView === 'subcontractor_company' ? '外注会社' : '現場');
+  if (jdsView === 'employee') return '社員';
+  if (jdsView === 'subcontractor_company') return '外注会社';
+  if (jdsView === 'business_partner') return '取引先';
+  return '現場';
 }
 
 async function loadJdsTotals() {
@@ -9159,6 +9167,7 @@ async function loadJdsMatrix() {
       p_site_id: jdsSiteFilter ? Number(jdsSiteFilter) : null,
       p_employee_code: null,
       p_subcontractor_company_id: jdsCompanyFilter ? Number(jdsCompanyFilter) : null,
+      p_business_partner_id: jdsPartnerFilter ? Number(jdsPartnerFilter) : null,
     });
     if (mySeq !== jdsMatrixRequestSeq) return;
     const colCount = daysInMonth(ym.year, ym.month);
@@ -10454,8 +10463,10 @@ function init() {
     document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
     jdsSiteFilter = '';
     jdsCompanyFilter = '';
+    jdsPartnerFilter = '';
     document.getElementById('jds-site-filter').value = '';
     document.getElementById('jds-company-filter').value = '';
+    document.getElementById('jds-partner-filter').value = '';
     document.getElementById('jds-range-result').style.display = 'none';
     updateJdsMonthDisplay();
     loadJoyoDenpyoSummary();
@@ -10469,6 +10480,7 @@ function init() {
   });
   document.getElementById('jds-site-filter').addEventListener('change', (e) => { jdsSiteFilter = e.target.value; loadJdsMatrix(); });
   document.getElementById('jds-company-filter').addEventListener('change', (e) => { jdsCompanyFilter = e.target.value; loadJdsMatrix(); });
+  document.getElementById('jds-partner-filter').addEventListener('change', (e) => { jdsPartnerFilter = e.target.value; loadJdsMatrix(); });
   document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       jdsView = btn.dataset.view;
