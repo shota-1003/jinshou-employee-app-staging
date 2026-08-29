@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T16:12:32.740Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T16:14:13.134Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4939,7 +4939,7 @@ async function loadEmployeeDetailSupplyHoldings() {
   }
 }
 
-const SUPPLY_CORRECTION_SOURCE_LABEL = { initial_holding: '初期登録の追加漏れ', additional: '追加支給(記録漏れ分)', loss: '紛失', return: '返却', exchange: '交換' };
+const SUPPLY_CORRECTION_SOURCE_LABEL = { initial_holding: '初期登録', additional: '追加支給(記録漏れ分)', loss: '紛失', return: '返却', exchange: '交換', issuance: '支給(申請承認)' };
 
 async function doRecordSupplyCorrection() {
   const session = getSession();
@@ -5112,16 +5112,37 @@ async function loadSupplyHoldingsAdmin() {
     listEl.innerHTML = Array.from(byEmployee.values()).map((emp) => `
       <div class="card">
         <div class="form-title" style="font-size:15px;">${emp.name}</div>
-        ${emp.items.map((it) => `
+        ${emp.items.map((it, idx) => `
           <div class="supply-item">
             <div class="row1"><span>${it.item_name}${it.size ? `(${it.size})` : ''}</span><span>${it.current_quantity}${it.current_quantity <= 0 ? '(保有なし)' : '個'}</span></div>
             <div class="row2">最終支給日: ${formatSupplyHoldingsDate(it.last_issued_date)}${it.first_issued_date && it.first_issued_date !== it.last_issued_date ? `(初回: ${formatSupplyHoldingsDate(it.first_issued_date)})` : ''}</div>
             ${it.replacement_due_date ? `<div class="row2">交換目安: ${formatSupplyHoldingsDate(it.replacement_due_date)}${new Date(it.replacement_due_date) < new Date() ? '<span class="mini-tag warn">交換目安を超過</span>' : ''}</div>` : ''}
             ${it.note ? `<div class="row2">備考: ${it.note}</div>` : ''}
+            <button type="button" class="sha-history-toggle" data-employee-code="${it.employee_code}" data-item-name="${it.item_name}" data-size="${it.size || ''}" data-target="sha-history-${emp.name}-${idx}">履歴を見る</button>
+            <div id="sha-history-${emp.name}-${idx}" class="sha-history-box" style="display:none;"></div>
           </div>
         `).join('')}
       </div>
     `).join('');
+    listEl.querySelectorAll('.sha-history-toggle').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const box = document.getElementById(btn.dataset.target);
+        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+        box.style.display = 'block';
+        box.innerHTML = '<div class="hint">読み込み中...</div>';
+        try {
+          const hist = await rpc('admin_get_supply_item_history', {
+            p_admin_employee_code: session.employeeCode, p_target_employee_code: btn.dataset.employeeCode,
+            p_item_name: btn.dataset.itemName, p_size: btn.dataset.size || null,
+          });
+          box.innerHTML = hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
+            <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
+          `).join('');
+        } catch (e) {
+          box.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+        }
+      });
+    });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
