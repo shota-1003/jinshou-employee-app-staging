@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T23:27:46.768Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T23:38:59.028Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -93,6 +93,15 @@ function safeText(val, fallback = '') {
   if (val === null || val === undefined) return fallback;
   if (typeof val === 'number' && Number.isNaN(val)) return fallback;
   return val;
+}
+
+// デプロイ直後、CDN/ブラウザキャッシュの都合でindex.htmlとapp.jsのバージョンが一瞬
+// 食い違うことがある(実機で確認済み)。存在しないid宛のaddEventListenerが例外を投げると
+// init()内の後続の配線処理まで巻き込んで止まってしまうため、要素が無ければ何もせず
+// 続行するこのヘルパーを新規追加箇所から使う。
+function onId(id, event, handler) {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener(event, handler);
 }
 
 function fileToBase64(file) {
@@ -10380,7 +10389,7 @@ function init() {
       loadBulkExpenseAdminList();
     });
   });
-  document.getElementById('bea-open-ledger-btn').addEventListener('click', async (e) => {
+  onId('bea-open-ledger-btn', 'click', async (e) => {
     const btn = e.target;
     btn.disabled = true;
     btn.textContent = '開いています...';
@@ -10496,8 +10505,8 @@ function init() {
   });
   document.getElementById('jds-site-filter').addEventListener('change', (e) => { jdsSiteFilter = e.target.value; loadJdsMatrix(); });
   document.getElementById('jds-company-filter').addEventListener('change', (e) => { jdsCompanyFilter = e.target.value; loadJdsMatrix(); });
-  document.getElementById('jds-partner-filter').addEventListener('change', (e) => { jdsPartnerFilter = e.target.value; loadJdsMatrix(); });
-  document.getElementById('jds-open-ledger-btn').addEventListener('click', async (e) => {
+  onId('jds-partner-filter', 'change', (e) => { jdsPartnerFilter = e.target.value; loadJdsMatrix(); });
+  onId('jds-open-ledger-btn', 'click', async (e) => {
     const btn = e.target;
     btn.disabled = true;
     btn.textContent = '開いています...';
