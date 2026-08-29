@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T06:06:23.818Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v78-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T06:18:12.076Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7764,6 +7764,22 @@ async function loadAdminRoleCurrentList() {
     nippoEl.querySelectorAll('.arm-revoke-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doRevokeAdminRole(e.target.closest('.employee-row').dataset.code, btn.dataset.roleType));
     });
+
+    const otherEl = document.getElementById('arm-other-list');
+    const others = rows.filter((r) => !['general_admin', 'nippo_admin'].includes(r.role_type));
+    otherEl.innerHTML = others.length === 0 ? '<div class="hint">専門権限を持つ社員はいません。</div>' : others.map((r) => `
+      <div class="employee-row" data-code="${r.employee_code}" style="cursor:default;">
+        <span class="employee-avatar">${r.employee_name.slice(0, 1)}</span>
+        <div class="employee-row-body">
+          <div class="employee-row-name">${r.employee_name}(${r.employee_code})</div>
+          <div class="employee-row-meta">${ADMIN_ROLE_LABEL[r.role_type] || r.role_type}・付与: ${r.granted_by}・${new Date(r.granted_at).toLocaleDateString('ja-JP')}</div>
+        </div>
+        <button type="button" class="reject-btn arm-revoke-btn" data-role-type="${r.role_type}" style="width:auto;margin:0;">解除</button>
+      </div>
+    `).join('');
+    otherEl.querySelectorAll('.arm-revoke-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => doRevokeAdminRole(e.target.closest('.employee-row').dataset.code, btn.dataset.roleType));
+    });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -7804,11 +7820,16 @@ function renderAdminRoleCandidates(query) {
   });
 }
 
+const ADMIN_ROLE_LABEL = {
+  general_admin: '全体管理者', nippo_admin: '日報担当', accounting_admin: '経理承認担当',
+  hr_admin: '社員管理担当', subcontractor_admin: '外注管理担当', site_admin: '現場管理担当', device_admin: '端末承認担当',
+};
+
 async function doGrantAdminRole(employeeCode, employeeName) {
   const session = getSession();
   hideError('arm-error');
   const roleType = document.getElementById('arm-role-type-select').value;
-  const roleLabel = roleType === 'nippo_admin' ? '日報担当' : '全体管理者';
+  const roleLabel = ADMIN_ROLE_LABEL[roleType] || roleType;
   if (!window.confirm(`${employeeName}(${employeeCode})を${roleLabel}に追加しますか?`)) return;
   try {
     await rpc('admin_grant_admin_role', { p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode, p_role_type: roleType });
