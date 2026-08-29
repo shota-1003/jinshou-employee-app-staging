@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T06:04:24.271Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T06:06:23.818Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8625,7 +8625,16 @@ async function runJoyoDenpyoOcr(file, statusEl) {
       statusEl.textContent = '常用伝票として読み取れませんでした。手入力で確認してください。';
       return;
     }
-    if (extracted.report_date && extracted.report_date.value) fillJdOcrTextField('jd-date', extracted.report_date);
+    if (extracted.report_date && extracted.report_date.value) {
+      // jd-dateはresetJoyoDenpyoForm()が常に本日日付を初期値として入れているため、
+      // fillJdOcrTextFieldの「空欄なら埋める」判定ではOCRの日付が永久に反映されない。
+      // 本日の初期値のままなら未入力とみなし、OCRの読み取り結果で上書きする。
+      const dateEl = document.getElementById('jd-date');
+      if (dateEl.value === todayJST()) {
+        dateEl.value = extracted.report_date.value;
+        markJdOcrField(dateEl, extracted.report_date.confidence);
+      }
+    }
     fillJdOcrTextField('jd-partner-name', extracted.partner_name);
     fillJdOcrTextField('jd-work-description', extracted.work_description);
     fillJdOcrTextField('jd-vehicle-info', extracted.vehicle_info);
