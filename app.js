@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v80-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T07:47:38.466Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T11:41:31.204Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2379,6 +2379,27 @@ const SUPPLY_ICON_BY_NAME = {
   'フルハーネス': 'shield', '安全靴': 'package', '手袋': 'package', '空調服': 'package', '空調服バッテリー': 'package',
 };
 
+// 数量選択(基本1〜5、「6以上」を選ぶと隣の数値入力を使う)。既存の<input type="number">と
+// 同じidのまま<select>へ差し替えているため、値の読み取り・複数品目一括申請の仕組みは変更不要。
+function resetQtySelect(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  sel.value = '1';
+  custom.value = '';
+  custom.style.display = 'none';
+}
+function readQtySelect(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  if (sel.value === '__custom__') return Number(custom.value) || 1;
+  return Number(sel.value) || 1;
+}
+function wireQtySelectCustomToggle(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  sel.addEventListener('change', () => { custom.style.display = sel.value === '__custom__' ? 'block' : 'none'; });
+}
+
 let selectedSupplyMasterId = null;
 let selectedSupplyMasterItem = null;
 
@@ -2428,7 +2449,7 @@ function selectSupplyMasterCard(el, cards) {
   document.getElementById('supply-req-detail').style.display = 'block';
   document.getElementById('supply-req-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
   document.getElementById('supply-req-other-wrap').style.display = isOther ? 'block' : 'none';
-  document.getElementById('supply-req-qty').value = 1;
+  resetQtySelect('supply-req-qty');
   document.getElementById('supply-req-reason').value = '';
   const requiresSize = el.dataset.requiresSize === 'true';
   document.getElementById('supply-req-size-wrap').style.display = requiresSize ? 'block' : 'none';
@@ -2468,7 +2489,7 @@ function resetSupplyRequestScreen() {
 function doAddSupplyReqItem() {
   const isOther = selectedSupplyMasterId == null;
   const otherName = document.getElementById('supply-req-other-name').value.trim();
-  const qty = Number(document.getElementById('supply-req-qty').value) || 1;
+  const qty = readQtySelect('supply-req-qty');
   const size = document.getElementById('supply-req-size-wrap').style.display !== 'none' ? document.getElementById('supply-req-size').value : '';
   const reason = document.getElementById('supply-req-reason').value.trim();
   hideError('supply-req-error');
@@ -2604,7 +2625,7 @@ function selectSupplyIhMasterCard(el, cards) {
   document.getElementById('supply-ih-detail').style.display = 'block';
   document.getElementById('supply-ih-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
   document.getElementById('supply-ih-other-wrap').style.display = isOther ? 'block' : 'none';
-  document.getElementById('supply-ih-qty').value = 1;
+  resetQtySelect('supply-ih-qty');
   document.getElementById('supply-ih-note').value = '';
   document.getElementById('supply-ih-precision').value = 'unknown';
   toggleSupplyIhPrecisionFields();
@@ -2645,7 +2666,7 @@ function resetSupplyInitialHoldingScreen() {
 function doAddSupplyIhItem() {
   const isOther = selectedSupplyIhMasterId == null;
   const otherName = document.getElementById('supply-ih-other-name').value.trim();
-  const qty = Number(document.getElementById('supply-ih-qty').value) || 1;
+  const qty = readQtySelect('supply-ih-qty');
   const size = document.getElementById('supply-ih-size-wrap').style.display !== 'none' ? document.getElementById('supply-ih-size').value : '';
   const precision = document.getElementById('supply-ih-precision').value;
   const dateVal = document.getElementById('supply-ih-date').value;
@@ -3612,7 +3633,7 @@ async function doSubmitQualification() {
   }
 }
 
-const QUAL_STATUS_LABEL = { pending_verification: '確認待ち', active: '有効', rejected: '却下', expired: '期限切れ' };
+const QUAL_STATUS_LABEL = { pending_verification: '確認待ち', active: '有効', rejected: '却下', expired: '期限切れ', expiring_soon: '期限間近' };
 
 async function loadMyQualifications() {
   const session = getSession();
@@ -3649,19 +3670,26 @@ let qualAdminCategoryFilter = '';
 async function loadQualAdminList() {
   const session = getSession();
   const filter = document.getElementById('qual-admin-filter').value || null;
+  const search = document.getElementById('qual-admin-search').value.trim() || null;
   const listEl = document.getElementById('qual-admin-list');
+  const countEl = document.getElementById('qual-admin-count');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('admin_list_qualifications', { p_admin_employee_code: session.employeeCode, p_filter: filter, p_category: qualAdminCategoryFilter || null });
+    const rows = await rpc('admin_list_qualifications', { p_admin_employee_code: session.employeeCode, p_filter: filter, p_category: qualAdminCategoryFilter || null, p_search: search });
+    countEl.textContent = rows ? `${rows.length}件` : '';
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する資格・免許はありません。</div>'; return; }
     listEl.innerHTML = rows.map((q) => {
-      const expiring = q.status === 'active' && q.days_until_expiry != null && q.days_until_expiry <= 60;
+      const displayStatus = q.display_status || q.status;
+      const expiring = displayStatus === 'expiring_soon';
       const expiryText = q.expiry_date ? `有効期限: ${new Date(q.expiry_date).toLocaleDateString('ja-JP')}${q.days_until_expiry != null ? `(残り${q.days_until_expiry}日)` : ''}` : '期限未登録';
+      const badgeClass = displayStatus === 'active' ? 'done' : (displayStatus === 'rejected' || displayStatus === 'expired' ? 'rejected' : '');
       return `
         <div class="qual-item ${expiring ? 'expiring' : ''}" data-id="${q.id}">
-          <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.employee_name}・${q.qualification_name}</span><span class="status-badge ${q.status === 'active' ? 'done' : (q.status === 'rejected' ? 'rejected' : '')}">${QUAL_STATUS_LABEL[q.status] || q.status}</span></div>
+          <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.employee_name}・${q.qualification_name}</span><span class="status-badge ${badgeClass}">${QUAL_STATUS_LABEL[displayStatus] || displayStatus}</span></div>
+          <div class="row2">取得日: ${q.obtained_date ? new Date(q.obtained_date).toLocaleDateString('ja-JP') : '未登録'}</div>
           <div class="row2">${expiryText}</div>
           <div class="row2">${q.qualification_number ? `番号: ${q.qualification_number}` : ''}</div>
+          ${q.note ? `<div class="row2">備考: ${q.note}</div>` : ''}
           <div style="margin-top:8px;">
             ${q.certificate_photo_url ? `<a class="file-link" href="${q.certificate_photo_url}" target="_blank" rel="noopener">写真を見る</a>` : ''}
             ${q.certificate_pdf_url ? `<a class="file-link" href="${q.certificate_pdf_url}" target="_blank" rel="noopener">PDFを見る</a>` : ''}
@@ -4894,118 +4922,53 @@ async function loadEmployeeDetailQual() {
 async function loadEmployeeDetailSupplyHoldings() {
   const session = getSession();
   const el = document.getElementById('employee-detail-supply-holdings');
-  const sel = document.getElementById('ed-supply-adjust-item');
+  const sel = document.getElementById('ed-supply-correction-item');
   el.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('admin_get_employee_supply_holdings', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode });
-    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">品目が登録されていません。</div>' : rows.map((r) => `
+    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">現在保有している品目はありません。</div>' : rows.map((r) => `
       <div class="supply-item">
-        <div class="row1"><span>${r.item_name}</span><span>${r.current_quantity}個${r.required_quantity != null ? ` / 必要${r.required_quantity}個` : ''}</span></div>
-        <div class="row2">${SUPPLY_STATUS_LABEL[r.status] || ''}</div>
+        <div class="row1"><span>${r.item_name}${r.size ? `(${r.size})` : ''}</span><span>${r.current_quantity}個</span></div>
       </div>
     `).join('');
-    sel.innerHTML = (rows || []).map((r) => `<option value="${r.master_item_id}">${r.item_name}(現在${r.current_quantity}個)</option>`).join('');
+    const masterRows = await rpc('admin_list_supply_master', { p_admin_employee_code: session.employeeCode }).catch(() => []);
+    sel.innerHTML = masterRows.filter((m) => m.active).map((m) => `<option value="${m.id}">${m.item_name}</option>`).join('');
   } catch (e) {
     el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
-async function loadEmployeeDetailSupplyAdjustHistory() {
-  const session = getSession();
-  const el = document.getElementById('employee-detail-supply-adjust-history');
-  el.innerHTML = '<div class="hint">読み込み中...</div>';
-  try {
-    const rows = await rpc('admin_get_supply_holding_history', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode, p_master_item_id: null });
-    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">調整履歴はありません。</div>' : rows.map((r) => `
-      <div class="history-item">
-        <div class="row1"><span>${r.item_name}</span><span style="color:${r.quantity_delta < 0 ? 'var(--danger)' : 'var(--success)'};">${r.quantity_delta > 0 ? '+' : ''}${r.quantity_delta}個</span></div>
-        <div class="row2">${r.reason}</div>
-        <div class="row2">${r.adjusted_by}(${new Date(r.created_at).toLocaleDateString('ja-JP')})</div>
-      </div>
-    `).join('');
-  } catch (e) {
-    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
-}
+const SUPPLY_CORRECTION_SOURCE_LABEL = { initial_holding: '初期登録の追加漏れ', additional: '追加支給(記録漏れ分)', loss: '紛失', return: '返却', exchange: '交換' };
 
-const SDR_ADMIN_STATUS_LABEL = { employee_confirmed: '本人確認済み(管理者確認待ち)', admin_confirmed: '管理者確認済み(確定待ち)', resolved: '確定済み' };
-
-async function loadEmployeeDetailSupplyDiscrepancies() {
+async function doRecordSupplyCorrection() {
   const session = getSession();
-  const el = document.getElementById('employee-detail-supply-discrepancies');
-  el.innerHTML = '<div class="hint">読み込み中...</div>';
+  const masterItemId = Number(document.getElementById('ed-supply-correction-item').value);
+  const sourceType = document.getElementById('ed-supply-correction-type').value;
+  const size = document.getElementById('ed-supply-correction-size').value.trim();
+  const qty = Number(document.getElementById('ed-supply-correction-qty').value);
+  const reason = document.getElementById('ed-supply-correction-reason').value.trim();
+  hideError('ed-supply-correction-error');
+  if (!masterItemId) { showError('ed-supply-correction-error', '品目を選択してください。'); return; }
+  if (!qty || qty <= 0) { showError('ed-supply-correction-error', '数量を1以上で入力してください。'); return; }
+  if (!reason) { showError('ed-supply-correction-error', '理由を入力してください。'); return; }
   try {
-    const rows = await rpc('admin_list_supply_discrepancies', { p_admin_employee_code: session.employeeCode, p_status: null });
-    const mine = (rows || []).filter((r) => r.employee_code === currentEmployeeDetailCode);
-    el.innerHTML = mine.length === 0 ? '<div class="hint">差異報告はありません。</div>' : mine.map((r) => `
-      <div class="supply-item" data-discrepancy-id="${r.id}">
-        <div class="row1"><span>${r.item_name}</span><span class="mini-tag ${r.status === 'resolved' ? 'done' : 'warn'}">${SDR_ADMIN_STATUS_LABEL[r.status] || r.status}</span></div>
-        <div class="row2">システム上${r.system_quantity}個 → 本人申告${r.reported_quantity}個${r.employee_note ? `・${r.employee_note}` : ''}</div>
-        ${r.status === 'employee_confirmed' ? `<button type="button" class="secondary" data-confirm-discrepancy="${r.id}">管理者確認する</button>` : ''}
-        ${r.status === 'admin_confirmed' ? `<button type="button" class="secondary" data-resolve-discrepancy="${r.id}" data-delta="${r.reported_quantity - r.system_quantity}">確定する(差分反映)</button>
-           <button type="button" class="secondary" data-resolve-discrepancy-nochange="${r.id}">確定する(調整なし)</button>` : ''}
-      </div>
-    `).join('');
-    el.querySelectorAll('[data-confirm-discrepancy]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        try {
-          await rpc('admin_confirm_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.confirmDiscrepancy), p_admin_note: null });
-          await loadEmployeeDetailSupplyDiscrepancies();
-        } catch (e) { alert(e.message || '確認に失敗しました。'); }
-      });
+    await rpc('admin_record_supply_correction', {
+      p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode,
+      p_master_item_id: masterItemId, p_source_type: sourceType, p_quantity: qty, p_size: size || null, p_reason: reason,
     });
-    el.querySelectorAll('[data-resolve-discrepancy]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const note = prompt('確定理由を入力してください(本人申告どおりに保有数を調整します)');
-        if (!note) return;
-        try {
-          await rpc('admin_resolve_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.resolveDiscrepancy), p_adjustment_quantity_delta: Number(btn.dataset.delta), p_resolution_note: note });
-          await loadEmployeeDetailSupplyDiscrepancies();
-          await loadEmployeeDetailSupplyHoldings();
-          await loadEmployeeDetailSupplyAdjustHistory();
-        } catch (e) { alert(e.message || '確定に失敗しました。'); }
-      });
-    });
-    el.querySelectorAll('[data-resolve-discrepancy-nochange]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const note = prompt('確定理由を入力してください(確認の結果、システム側の数字のままとする場合)');
-        if (!note) return;
-        try {
-          await rpc('admin_resolve_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.resolveDiscrepancyNochange), p_adjustment_quantity_delta: null, p_resolution_note: note });
-          await loadEmployeeDetailSupplyDiscrepancies();
-        } catch (e) { alert(e.message || '確定に失敗しました。'); }
-      });
-    });
-  } catch (e) {
-    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
-}
-
-async function doAdjustEmployeeSupplyHolding() {
-  const session = getSession();
-  const masterItemId = Number(document.getElementById('ed-supply-adjust-item').value);
-  const delta = document.getElementById('ed-supply-adjust-delta').value;
-  const reason = document.getElementById('ed-supply-adjust-reason').value.trim();
-  hideError('ed-supply-adjust-error');
-  if (!masterItemId) { showError('ed-supply-adjust-error', '品目を選択してください。'); return; }
-  if (delta === '' || Number(delta) === 0) { showError('ed-supply-adjust-error', '増減数を入力してください。'); return; }
-  if (!reason) { showError('ed-supply-adjust-error', '理由を入力してください。'); return; }
-  try {
-    await rpc('admin_adjust_supply_holding', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode, p_master_item_id: masterItemId, p_quantity_delta: Number(delta), p_reason: reason });
-    document.getElementById('ed-supply-adjust-delta').value = '';
-    document.getElementById('ed-supply-adjust-reason').value = '';
+    document.getElementById('ed-supply-correction-qty').value = '';
+    document.getElementById('ed-supply-correction-size').value = '';
+    document.getElementById('ed-supply-correction-reason').value = '';
     await loadEmployeeDetailSupplyHoldings();
-    await loadEmployeeDetailSupplyAdjustHistory();
+    await loadEmployeeDetailSupply();
   } catch (e) {
-    showError('ed-supply-adjust-error', e.message || '調整に失敗しました。');
+    showError('ed-supply-correction-error', e.message || '記録に失敗しました。');
   }
 }
 
 async function loadEmployeeDetailSupply() {
   const session = getSession();
   loadEmployeeDetailSupplyHoldings();
-  loadEmployeeDetailSupplyAdjustHistory();
-  loadEmployeeDetailSupplyDiscrepancies();
   const listEl = document.getElementById('employee-detail-supply-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
@@ -5114,6 +5077,52 @@ async function doSaveEmployeeBasic() {
     showError('employee-edit-error', e.message || '保存に失敗しました。');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ---------- 支給品保有一覧(横断、管理者) ----------
+
+function formatSupplyHoldingsDate(d) {
+  return d ? new Date(d).toLocaleDateString('ja-JP') : '-';
+}
+
+async function loadSupplyHoldingsAdmin() {
+  const session = getSession();
+  const listEl = document.getElementById('sha-list');
+  const countEl = document.getElementById('sha-count');
+  const employeeName = document.getElementById('sha-search-employee').value.trim();
+  const itemName = document.getElementById('sha-search-item').value.trim();
+  const heldOnly = document.getElementById('sha-held-only').checked;
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_all_supply_holdings', {
+      p_admin_employee_code: session.employeeCode,
+      p_item_name: itemName || null, p_employee_name: employeeName || null, p_held_only: heldOnly,
+    });
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する保有データはありません。</div>'; countEl.textContent = ''; return; }
+
+    const byEmployee = new Map();
+    rows.forEach((r) => {
+      if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, items: [] });
+      byEmployee.get(r.employee_code).items.push(r);
+    });
+    countEl.textContent = `${byEmployee.size}名・${rows.length}件`;
+
+    listEl.innerHTML = Array.from(byEmployee.values()).map((emp) => `
+      <div class="card">
+        <div class="form-title" style="font-size:15px;">${emp.name}</div>
+        ${emp.items.map((it) => `
+          <div class="supply-item">
+            <div class="row1"><span>${it.item_name}${it.size ? `(${it.size})` : ''}</span><span>${it.current_quantity}${it.current_quantity <= 0 ? '(保有なし)' : '個'}</span></div>
+            <div class="row2">最終支給日: ${formatSupplyHoldingsDate(it.last_issued_date)}${it.first_issued_date && it.first_issued_date !== it.last_issued_date ? `(初回: ${formatSupplyHoldingsDate(it.first_issued_date)})` : ''}</div>
+            ${it.replacement_due_date ? `<div class="row2">交換目安: ${formatSupplyHoldingsDate(it.replacement_due_date)}${new Date(it.replacement_due_date) < new Date() ? '<span class="mini-tag warn">交換目安を超過</span>' : ''}</div>` : ''}
+            ${it.note ? `<div class="row2">備考: ${it.note}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
@@ -8877,26 +8886,43 @@ function openJoyoDenpyoForm(existing) {
 let jdaStatusFilter = '';
 let jdaRows = [];
 let jdaSelected = new Set();
+let jdaEmployeeFilter = null; // {code, name} | null。社員詳細から「この社員の常用伝票を見る」で遷移した時だけ設定する。
+let jdaEmployeeFilterJustSet = false;
 
 async function loadJoyoDenpyoAdminList() {
   const session = getSession();
   const listEl = document.getElementById('jda-list');
   const countEl = document.getElementById('jda-count');
+  const filterHint = document.getElementById('jda-employee-filter-hint');
+  const clearBtn = document.getElementById('jda-clear-employee-filter-btn');
+  if (jdaEmployeeFilter) {
+    filterHint.style.display = '';
+    filterHint.textContent = `${jdaEmployeeFilter.name}さんの常用伝票を表示中`;
+    clearBtn.style.display = '';
+  } else {
+    filterHint.style.display = 'none';
+    clearBtn.style.display = 'none';
+  }
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   jdaSelected.clear();
   updateJdaBulkBar();
   try {
+    const siteId = document.getElementById('jda-site-select').value || null;
     jdaRows = await rpc('admin_search_joyo_denpyo', {
-      p_admin_employee_code: session.employeeCode, p_date_from: null, p_date_to: null, p_site_id: null,
+      p_admin_employee_code: session.employeeCode,
+      p_date_from: document.getElementById('jda-date-from').value || null,
+      p_date_to: document.getElementById('jda-date-to').value || null,
+      p_site_id: siteId ? Number(siteId) : null,
       p_partner_name: document.getElementById('jda-search-partner').value.trim() || null,
       p_status: jdaStatusFilter || null,
+      p_employee_code: jdaEmployeeFilter ? jdaEmployeeFilter.code : null,
     });
     countEl.textContent = `${jdaRows.length}件`;
     if (jdaRows.length === 0) { listEl.innerHTML = '<div class="hint">該当する常用伝票はありません。</div>'; return; }
     listEl.innerHTML = jdaRows.map((r) => `
       <div class="history-item" data-id="${r.id}">
         <div class="row1"><span>${r.site_name}${r.partner_name ? '・' + r.partner_name : ''}</span><span>${r.report_date}</span></div>
-        <div class="row2">作成者: ${r.created_by_name || '-'}・作業員${r.worker_count}名</div>
+        <div class="row2">作成者: ${r.created_by_name || '-'}・作業員${r.worker_count}名${r.has_photo ? '・写真あり' : '・写真なし'}</div>
         <span class="status-badge ${r.status === 'completed' ? 'done' : ''}">${JD_STATUS_LABEL[r.status] || r.status}</span>
         <div class="checkbox-row"><input type="checkbox" class="jda-row-check" data-id="${r.id}"><label>選択</label></div>
       </div>
@@ -9347,6 +9373,13 @@ function init() {
 
   document.getElementById('meeting-submit').addEventListener('click', doSubmitMeeting);
 
+  wireQtySelectCustomToggle('supply-req-qty');
+  wireQtySelectCustomToggle('supply-ih-qty');
+  let shaSearchTimer = null;
+  const shaDebouncedReload = () => { clearTimeout(shaSearchTimer); shaSearchTimer = setTimeout(() => loadSupplyHoldingsAdmin(), 300); };
+  document.getElementById('sha-search-employee').addEventListener('input', shaDebouncedReload);
+  document.getElementById('sha-search-item').addEventListener('input', shaDebouncedReload);
+  document.getElementById('sha-held-only').addEventListener('change', loadSupplyHoldingsAdmin);
   document.getElementById('supply-req-add-btn').addEventListener('click', doAddSupplyReqItem);
   document.getElementById('supply-req-submit').addEventListener('click', doSubmitSupplyRequestBulk);
   document.getElementById('supply-ih-add-btn').addEventListener('click', doAddSupplyIhItem);
@@ -9388,6 +9421,11 @@ function init() {
   document.getElementById('qual-photo-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'photo'));
   document.getElementById('qual-pdf-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'pdf'));
   document.getElementById('qual-admin-filter').addEventListener('change', loadQualAdminList);
+  let qualSearchTimer = null;
+  document.getElementById('qual-admin-search').addEventListener('input', () => {
+    clearTimeout(qualSearchTimer);
+    qualSearchTimer = setTimeout(() => loadQualAdminList(), 300);
+  });
   document.getElementById('qual-category-qualification').addEventListener('click', () => setQualCategory('qualification'));
   document.getElementById('qual-category-license').addEventListener('click', () => setQualCategory('license'));
   document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((btn) => {
@@ -9564,7 +9602,12 @@ function init() {
   document.querySelectorAll('.dr-view-tab').forEach((btn) => {
     btn.addEventListener('click', () => setDailyReportView(btn.dataset.view));
   });
-  document.getElementById('ed-supply-adjust-submit').addEventListener('click', doAdjustEmployeeSupplyHolding);
+  document.getElementById('ed-supply-correction-submit').addEventListener('click', doRecordSupplyCorrection);
+  document.getElementById('ed-supply-view-joyo-denpyo-btn').addEventListener('click', () => {
+    jdaEmployeeFilter = { code: currentEmployeeDetailCode, name: document.getElementById('employee-detail-name').textContent };
+    jdaEmployeeFilterJustSet = true;
+    showScreen('joyo-denpyo-admin');
+  });
   document.getElementById('dr-period-prev').addEventListener('click', () => navigateDailyReportPeriod(-1));
   document.getElementById('dr-period-next').addEventListener('click', () => navigateDailyReportPeriod(1));
   document.getElementById('dr-period-reset').addEventListener('click', resetDailyReportPeriodToCurrent);
@@ -9847,6 +9890,10 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadSupplyMasterAdmin();
   };
+  SCREEN_ENTER_HOOKS['supply-holdings-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadSupplyHoldingsAdmin();
+  };
   SCREEN_ENTER_HOOKS['health-submit'] = resetHealthForm;
   SCREEN_ENTER_HOOKS['my-qual'] = () => { loadMyQualifications(); loadMyHealthSummary(); };
   SCREEN_ENTER_HOOKS['my-health'] = loadMyHealthList;
@@ -10010,11 +10057,20 @@ function init() {
   SCREEN_ENTER_HOOKS['joyo-denpyo-form'] = () => { if (!document.getElementById('jd-edit-id').value) resetJoyoDenpyoForm(); };
   SCREEN_ENTER_HOOKS['joyo-denpyo-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    if (!jdaEmployeeFilterJustSet) jdaEmployeeFilter = null;
+    jdaEmployeeFilterJustSet = false;
     jdaStatusFilter = '';
     document.querySelectorAll('#jda-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
     document.getElementById('jda-search-partner').value = '';
+    document.getElementById('jda-date-from').value = '';
+    document.getElementById('jda-date-to').value = '';
+    populateSiteSelect(document.getElementById('jda-site-select'), '');
     loadJoyoDenpyoAdminList();
   };
+  document.getElementById('jda-clear-employee-filter-btn').addEventListener('click', () => { jdaEmployeeFilter = null; loadJoyoDenpyoAdminList(); });
+  document.getElementById('jda-date-from').addEventListener('change', loadJoyoDenpyoAdminList);
+  document.getElementById('jda-date-to').addEventListener('change', loadJoyoDenpyoAdminList);
+  document.getElementById('jda-site-select').addEventListener('change', loadJoyoDenpyoAdminList);
   document.getElementById('jd-new-btn').addEventListener('click', () => openJoyoDenpyoForm(null));
   document.getElementById('jd-prefill-btn').addEventListener('click', doPrefillJoyoDenpyoWorkers);
   document.getElementById('jd-photo-input').addEventListener('change', (e) => handleJdPhotoFile(e.target.files[0]));

@@ -844,6 +844,11 @@
   <section id="screen-qual-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">資格・免許管理</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="qual-admin-search" placeholder="資格名・社員名で検索...">
+    </div>
+    <div class="hint-inline">資格名で検索すると「この資格を持っている社員」を絞り込めます。</div>
     <div class="filter-row">
       <button type="button" class="filter-chip active" data-cat="">すべて</button>
       <button type="button" class="filter-chip" data-cat="qualification">資格</button>
@@ -852,8 +857,10 @@
     <select id="qual-admin-filter">
       <option value="">すべて</option>
       <option value="pending">確認待ち</option>
-      <option value="expiring">期限が近い(60日以内)</option>
+      <option value="expiring">期限間近(60日以内)</option>
+      <option value="expired">期限切れ</option>
     </select>
+    <div class="hint" id="qual-admin-count" style="margin:8px 0;"></div>
     <div id="qual-admin-list"></div>
   </section>
 
@@ -1350,7 +1357,11 @@
         <input type="text" id="supply-req-other-name" placeholder="例: 雨具">
       </div>
       <label for="supply-req-qty">数量</label>
-      <input type="number" id="supply-req-qty" min="1" value="1">
+      <select id="supply-req-qty">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        <option value="__custom__">6以上(入力)</option>
+      </select>
+      <input type="number" id="supply-req-qty-custom" min="6" style="display:none;margin-top:8px;" placeholder="数量を入力">
       <div id="supply-req-size-wrap" style="display:none;">
         <label for="supply-req-size">サイズ</label>
         <select id="supply-req-size"></select>
@@ -1382,7 +1393,11 @@
         <input type="text" id="supply-ih-other-name" placeholder="例: 雨具">
       </div>
       <label for="supply-ih-qty">数量</label>
-      <input type="number" id="supply-ih-qty" min="1" value="1">
+      <select id="supply-ih-qty">
+        <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+        <option value="__custom__">6以上(入力)</option>
+      </select>
+      <input type="number" id="supply-ih-qty-custom" min="6" style="display:none;margin-top:8px;" placeholder="数量を入力">
       <div id="supply-ih-size-wrap" style="display:none;">
         <label for="supply-ih-size">サイズ</label>
         <select id="supply-ih-size"></select>
@@ -1587,6 +1602,11 @@
         <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとにまとめて承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="supply-holdings-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品保有一覧<span class="desc">誰が何をいくつ持っているか(全社員)</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="supply-master-admin">
         <span class="icon-slot" data-icon="filter"></span>
         <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
@@ -1756,6 +1776,24 @@
   </section>
 
   <!-- 支給品マスター管理(管理者) -->
+  <!-- 支給品保有一覧(横断): 「今、誰が、何を、いくつ持っているか」を全社員分まとめて確認する -->
+  <section id="screen-supply-holdings-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">支給品保有一覧</div>
+    <div class="hint" style="margin-bottom:10px;">全社員の現在の保有状況です。初期登録・通常支給・追加支給・交換をまとめて集計しています。</div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="sha-search-employee" placeholder="社員名で検索...">
+    </div>
+    <div class="search-bar">
+      <span class="icon-slot" data-icon="search"></span>
+      <input type="text" id="sha-search-item" placeholder="品目名で検索...">
+    </div>
+    <div class="checkbox-row"><input type="checkbox" id="sha-held-only" checked><label for="sha-held-only">現在保有している分だけ表示</label></div>
+    <div class="hint" id="sha-count" style="margin:8px 0;"></div>
+    <div id="sha-list"></div>
+  </section>
+
   <section id="screen-supply-master-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">支給品マスター管理</div>
@@ -2447,22 +2485,29 @@
     <div class="tab-panel" id="employee-detail-panel-supply">
       <div class="section-title">現在の保有数</div>
       <div id="employee-detail-supply-holdings"></div>
-      <div class="section-title">保有数を調整する</div>
-      <div class="hint" style="margin-bottom:8px;">導入前から持っている分の初期登録や、確認の結果判明した訂正はここから行う。理由は履歴に残る。</div>
-      <label for="ed-supply-adjust-item">品目</label>
-      <select id="ed-supply-adjust-item"></select>
-      <label for="ed-supply-adjust-delta">増減数(マイナス可、例: 初期登録+3、訂正-1)</label>
-      <input type="number" id="ed-supply-adjust-delta" step="1">
-      <label for="ed-supply-adjust-reason">理由<span class="required-mark">(必須)</span></label>
-      <input type="text" id="ed-supply-adjust-reason" placeholder="例: 導入前からの保有分の初期登録">
-      <div class="error" id="ed-supply-adjust-error"></div>
-      <button type="button" class="secondary" id="ed-supply-adjust-submit">調整する</button>
-      <div class="section-title">調整履歴</div>
-      <div id="employee-detail-supply-adjust-history"></div>
-      <div class="section-title">差異報告</div>
-      <div id="employee-detail-supply-discrepancies"></div>
+      <div class="section-title">記録を追加する</div>
+      <div class="hint" style="margin-bottom:8px;">通常の申請フローを経ない支給(初期登録の追加漏れ・追加支給・紛失・返却・交換)をここから記録する。理由は履歴に残る。</div>
+      <label for="ed-supply-correction-item">品目</label>
+      <select id="ed-supply-correction-item"></select>
+      <label for="ed-supply-correction-type">区分</label>
+      <select id="ed-supply-correction-type">
+        <option value="additional">追加支給(記録漏れ分)</option>
+        <option value="initial_holding">初期登録の追加漏れ</option>
+        <option value="loss">紛失</option>
+        <option value="return">返却</option>
+        <option value="exchange">交換</option>
+      </select>
+      <label for="ed-supply-correction-size">サイズ(任意)</label>
+      <input type="text" id="ed-supply-correction-size" placeholder="例: L">
+      <label for="ed-supply-correction-qty">数量</label>
+      <input type="number" id="ed-supply-correction-qty" min="1" step="1" value="1">
+      <label for="ed-supply-correction-reason">理由<span class="required-mark">(必須)</span></label>
+      <input type="text" id="ed-supply-correction-reason" placeholder="例: 導入前からの保有分の記録漏れ">
+      <div class="error" id="ed-supply-correction-error"></div>
+      <button type="button" class="secondary" id="ed-supply-correction-submit">記録する</button>
       <div class="section-title">支給履歴</div>
       <div id="employee-detail-supply-list"></div>
+      <button type="button" class="link" id="ed-supply-view-joyo-denpyo-btn" style="margin-top:10px;">この社員の常用伝票を見る</button>
     </div>
     <div class="tab-panel" id="employee-detail-panel-requests">
       <div id="employee-detail-requests-list"></div>
@@ -2819,9 +2864,18 @@
   <section id="screen-joyo-denpyo-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">常用伝票管理</div>
+    <div class="hint" id="jda-employee-filter-hint" style="display:none;"></div>
+    <button type="button" class="link" id="jda-clear-employee-filter-btn" style="display:none;">すべての社員の伝票を表示</button>
     <div class="search-bar">
       <span class="icon-slot" data-icon="search"></span>
       <input type="text" id="jda-search-partner" placeholder="取引先名で検索...">
+    </div>
+    <label for="jda-site-select">現場</label>
+    <select id="jda-site-select"><option value="">すべての現場</option></select>
+    <label for="jda-date-from" style="margin-top:6px;">期間</label>
+    <div style="display:flex;gap:8px;">
+      <input type="date" id="jda-date-from">
+      <input type="date" id="jda-date-to">
     </div>
     <div class="filter-row" id="jda-status-filter">
       <button type="button" class="filter-chip active" data-status="">すべての状態</button>
