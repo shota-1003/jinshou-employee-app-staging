@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T20:26:29.406Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T20:30:05.405Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -232,7 +232,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
-  'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub',
+  'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -4111,6 +4111,45 @@ async function loadEmployeeDirectory() {
     });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function resetEmployeeCreateForm() {
+  ['ec-name', 'ec-furigana', 'ec-department', 'ec-hire-date', 'ec-phone', 'ec-address',
+    'ec-emergency-name', 'ec-emergency-relation', 'ec-emergency-phone'].forEach((id) => { document.getElementById(id).value = ''; });
+  document.getElementById('ec-gender').value = '';
+  document.getElementById('ec-foreign-worker').checked = false;
+  hideError('ec-error');
+}
+
+async function doCreateEmployee() {
+  const session = getSession();
+  const name = document.getElementById('ec-name').value.trim();
+  hideError('ec-error');
+  if (!name) { showError('ec-error', '氏名を入力してください。'); return; }
+  const btn = document.getElementById('ec-submit');
+  btn.disabled = true;
+  try {
+    const rows = await rpc('admin_create_employee', {
+      p_admin_employee_code: session.employeeCode, p_employee_name: name,
+      p_department: document.getElementById('ec-department').value.trim() || null,
+      p_hire_date: document.getElementById('ec-hire-date').value || null,
+      p_gender: document.getElementById('ec-gender').value || null,
+      p_is_foreign_worker: document.getElementById('ec-foreign-worker').checked,
+      p_furigana: document.getElementById('ec-furigana').value.trim() || null,
+      p_phone: document.getElementById('ec-phone').value.trim() || null,
+      p_address: document.getElementById('ec-address').value.trim() || null,
+      p_emergency_contact_name: document.getElementById('ec-emergency-name').value.trim() || null,
+      p_emergency_contact_relation: document.getElementById('ec-emergency-relation').value.trim() || null,
+      p_emergency_contact_phone: document.getElementById('ec-emergency-phone').value.trim() || null,
+    });
+    const created = rows && rows[0];
+    alert(`社員番号${created.employee_code}で登録しました。続けて初回ログイン用コードの発行等を行えます。`);
+    openEmployeeDetail(created.employee_code, 'basic');
+  } catch (e) {
+    showError('ec-error', e.message || '登録に失敗しました。');
+  } finally {
+    btn.disabled = false;
   }
 }
 
@@ -10165,6 +10204,11 @@ function init() {
     document.querySelectorAll('#employee-status-filter .filter-chip').forEach((b) => b.classList.toggle('active', b.dataset.status === 'active'));
     loadEmployeeDirectory();
   };
+  SCREEN_ENTER_HOOKS['employee-create'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    resetEmployeeCreateForm();
+  };
+  document.getElementById('ec-submit').addEventListener('click', doCreateEmployee);
   SCREEN_ENTER_HOOKS['info-change-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadInfoChangeAdmin();
