@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T20:11:23.171Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T20:21:20.020Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8849,12 +8849,25 @@ async function runJoyoDenpyoOcr(file, statusEl) {
   }
 }
 
+// 常用伝票の取引先(business_partners)候補をdatalistへ読み込む(経費フローのpopulateVendorList
+// と同じ「検索型選択、入力値が完全一致すればIDを解決、一致しなければ新規取引先名として送信」
+// という既存パターンを再利用する)。
+let jdPartnerNameToId = new Map();
+async function populateJdPartnerList() {
+  try {
+    const rows = await rpc('search_business_partners', { p_query: null });
+    jdPartnerNameToId = new Map(rows.map((v) => [v.partner_name, v.id]));
+    document.getElementById('jd-partner-list').innerHTML = rows.map((v) => `<option value="${v.partner_name}">`).join('');
+  } catch (e) { /* 取引先候補が引けなくても自由入力は継続できる */ }
+}
+
 function resetJoyoDenpyoForm() {
   document.getElementById('jd-edit-id').value = '';
   document.getElementById('jd-form-title').textContent = '常用伝票を作成する';
   document.getElementById('jd-date').value = todayJST();
   document.getElementById('jd-site-search').value = '';
   populateSiteSelect(document.getElementById('jd-site-select'), '');
+  populateJdPartnerList();
   document.getElementById('jd-partner-name').value = '';
   document.getElementById('jd-work-description').value = '';
   document.getElementById('jd-vehicle-info').value = '';
@@ -8894,6 +8907,7 @@ async function doSubmitJoyoDenpyo(isDraft) {
   const payload = {
     p_report_date: date, p_site_id: siteId, p_new_site_name: newSiteName,
     p_partner_name: document.getElementById('jd-partner-name').value.trim() || null,
+    p_business_partner_id: jdPartnerNameToId.get(document.getElementById('jd-partner-name').value.trim()) || null,
     p_work_description: document.getElementById('jd-work-description').value.trim() || null,
     p_vehicle_info: document.getElementById('jd-vehicle-info').value.trim() || null,
     p_materials_info: document.getElementById('jd-materials-info').value.trim() || null,
