@@ -11,7 +11,7 @@
 // ネットワークが使える限り常に最新のファイルを取得し、オフライン時だけキャッシュへ
 // フォールバックする方式にすることで、この種の「古いキャッシュに固定される」問題を
 // 自己修復できるようにした。
-const CACHE_NAME = 'jinshou-employee-app-v81-staging';
+const CACHE_NAME = 'jinshou-employee-app-v73-staging';
 const SHELL_FILES = [
   './', './index.html', './style.css', './app.js', './icons.js', './manifest.json',
   './icons/app-icon-180-v2.png', './icons/icon-192-v2.png', './icons/icon-512-v2.png', './icons/icon-512-maskable-v2.png',
