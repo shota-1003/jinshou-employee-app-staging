@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T23:11:30.525Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T23:24:44.541Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10481,6 +10481,22 @@ function init() {
   document.getElementById('jds-site-filter').addEventListener('change', (e) => { jdsSiteFilter = e.target.value; loadJdsMatrix(); });
   document.getElementById('jds-company-filter').addEventListener('change', (e) => { jdsCompanyFilter = e.target.value; loadJdsMatrix(); });
   document.getElementById('jds-partner-filter').addEventListener('change', (e) => { jdsPartnerFilter = e.target.value; loadJdsMatrix(); });
+  document.getElementById('jds-open-ledger-btn').addEventListener('click', async (e) => {
+    const btn = e.target;
+    btn.disabled = true;
+    btn.textContent = '開いています...';
+    try {
+      const session = getSession();
+      const link = await rpc('admin_get_joyo_denpyo_ledger_link', { p_admin_employee_code: session.employeeCode });
+      if (link) window.open(link, '_blank');
+      else alert('台帳はまだ作成されていません(伝票が確定されると自動生成されます)。');
+    } catch (err) {
+      alert(err.message || '台帳リンクの取得に失敗しました。');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = '月次台帳(Spreadsheet)を開く';
+    }
+  });
   document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       jdsView = btn.dataset.view;
