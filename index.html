@@ -1674,6 +1674,11 @@
         <div class="menu-item-body">外注会社一覧<span class="desc">外注会社・所属作業員の追加・停止</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="subcontractor-worker-admin">
+        <span class="icon-slot" data-icon="users-round"></span>
+        <div class="menu-item-body">外注作業員名簿<span class="desc">全社横断で外注作業員を検索(会社を問わず)</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
 
     <div class="section-title">保有・資格・健康</div>
@@ -1702,7 +1707,53 @@
         <div class="menu-item-body">常用伝票一覧<span class="desc">社員/現場/期間で検索、伝票単位で詳細確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="joyo-denpyo-summary">
+        <span class="icon-slot" data-icon="clipboard-list"></span>
+        <div class="menu-item-body">常用台帳集計<span class="desc">総人工/日別/現場別/社員別/会社別/期間指定集計</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
+  </section>
+
+  <!-- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 -->
+  <section id="screen-joyo-denpyo-summary" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
+    <div class="form-title">常用台帳集計</div>
+
+    <div class="card" id="jds-totals-card" style="margin-bottom:16px;">
+      <div class="hint">読み込み中...</div>
+    </div>
+
+    <div class="month-nav">
+      <button type="button" class="month-nav-arrow" id="jds-month-prev" aria-label="前月"><span class="icon-slot" data-icon="chevron-left"></span></button>
+      <div class="month-nav-display" id="jds-month-display">2026年8月</div>
+      <button type="button" class="month-nav-arrow" id="jds-month-next" aria-label="翌月"><span class="icon-slot" data-icon="chevron-right"></span></button>
+    </div>
+    <button type="button" class="month-nav-today" id="jds-month-today">今月</button>
+    <input type="month" id="jds-month" style="display:none;">
+
+    <div class="filter-row" id="jds-view-filter" style="margin-top:12px;">
+      <button type="button" class="filter-chip active" data-view="employee">社員別</button>
+      <button type="button" class="filter-chip" data-view="subcontractor_company">外注会社別</button>
+      <button type="button" class="filter-chip" data-view="site">現場別</button>
+    </div>
+    <label for="jds-site-filter">現場で絞り込み</label>
+    <div class="hint-inline">任意</div>
+    <select id="jds-site-filter"><option value="">すべての現場</option></select>
+    <label for="jds-company-filter">外注会社で絞り込み</label>
+    <div class="hint-inline">任意</div>
+    <select id="jds-company-filter"><option value="">すべての外注会社</option></select>
+    <div class="hint" id="jds-hint" style="margin:10px 0;">行をタップすると、その対象で常用伝票一覧を絞り込んで確認できます。</div>
+    <div class="attendance-matrix-wrap" id="jds-matrix-wrap"></div>
+
+    <div class="section-title" style="margin-top:24px;">期間指定集計</div>
+    <div class="hint" style="margin-bottom:8px;">上のマトリクスとは別に、任意の開始日〜終了日で総人工を集計します。</div>
+    <label for="jds-range-from">開始日</label>
+    <input type="date" id="jds-range-from">
+    <label for="jds-range-to">終了日</label>
+    <input type="date" id="jds-range-to">
+    <button type="button" id="jds-range-calc-btn" style="margin-top:8px;">この期間で集計</button>
+    <div class="card" id="jds-range-result" style="margin-top:12px; display:none;"></div>
   </section>
 
   <!-- 管理者ダッシュボードのドリルダウン一覧(承認待ち等) -->

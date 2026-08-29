@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T15:58:30.496Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T16:05:15.866Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -232,7 +232,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
-  'supply-holdings-admin', 'supply-request-admin',
+  'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -8887,6 +8887,139 @@ function openJoyoDenpyoForm(existing) {
 let jdaStatusFilter = '';
 let jdaRows = [];
 let jdaSelected = new Set();
+// ---------- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 ----------
+// admin_get_attendance_matrix(出面集計)と同じJSONB matrix構造・UI構成をそのまま踏襲する
+// (SKILL-003: 既存パターンの再利用。データソースはjoyo_denpyoでdaily_reportsとは別)。
+let jdsView = 'employee';
+let jdsSiteFilter = '';
+let jdsCompanyFilter = '';
+let jdsMatrixRequestSeq = 0;
+
+function currentJdsMonth() {
+  const v = document.getElementById('jds-month').value;
+  if (!v) return null;
+  const [year, month] = v.split('-').map(Number);
+  return { year, month };
+}
+function updateJdsMonthDisplay() {
+  const v = document.getElementById('jds-month').value;
+  if (!v) return;
+  const [y, m] = v.split('-').map(Number);
+  document.getElementById('jds-month-display').textContent = `${y}年${m}月`;
+}
+function shiftJdsMonth(delta) {
+  const input = document.getElementById('jds-month');
+  const [y, m] = (input.value || todayJST().slice(0, 7)).split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  input.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  input.dispatchEvent(new Event('change'));
+}
+
+async function loadJdsFilterOptions() {
+  const session = getSession();
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  try {
+    const rows = await rpc('admin_list_joyo_denpyo_matrix_filter_options', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month });
+    const opts = (rows && rows[0]) || { sites: [], subcontractor_companies: [] };
+    const siteSelect = document.getElementById('jds-site-filter');
+    const curSite = siteSelect.value;
+    siteSelect.innerHTML = '<option value="">すべての現場</option>' + (opts.sites || []).map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
+    siteSelect.value = curSite;
+    const companySelect = document.getElementById('jds-company-filter');
+    const curCompany = companySelect.value;
+    companySelect.innerHTML = '<option value="">すべての外注会社</option>' + (opts.subcontractor_companies || []).map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+    companySelect.value = curCompany;
+  } catch (e) { /* 無視 */ }
+}
+
+function jdsViewLabel() {
+  return jdsView === 'employee' ? '社員' : (jdsView === 'subcontractor_company' ? '外注会社' : '現場');
+}
+
+async function loadJdsTotals() {
+  const session = getSession();
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  const cardEl = document.getElementById('jds-totals-card');
+  cardEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const monthStart = `${ym.year}-${String(ym.month).padStart(2, '0')}-01`;
+    const monthEnd = `${ym.year}-${String(ym.month).padStart(2, '0')}-${String(daysInMonth(ym.year, ym.month)).padStart(2, '0')}`;
+    const rows = await rpc('admin_get_joyo_denpyo_totals', { p_admin_employee_code: session.employeeCode, p_date_from: monthStart, p_date_to: monthEnd });
+    const t = (rows && rows[0]) || { total_headcount: 0, denpyo_count: 0, site_count: 0, worker_count: 0 };
+    cardEl.innerHTML = `
+      <div class="section-title" style="margin-top:0;">${ym.year}年${ym.month}月の総人工</div>
+      <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14.5px;"><span>総人工</span><span>${t.total_headcount}人工</span></div>
+      <div class="hint" style="margin-top:5px;">伝票数: ${t.denpyo_count}件・現場数: ${t.site_count}件・実人数: ${t.worker_count}人</div>
+    `;
+  } catch (e) {
+    cardEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+async function loadJdsMatrix() {
+  const session = getSession();
+  const mySeq = ++jdsMatrixRequestSeq;
+  const wrapEl = document.getElementById('jds-matrix-wrap');
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  wrapEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_get_joyo_denpyo_matrix', {
+      p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_view: jdsView,
+      p_site_id: jdsSiteFilter ? Number(jdsSiteFilter) : null,
+      p_employee_code: null,
+      p_subcontractor_company_id: jdsCompanyFilter ? Number(jdsCompanyFilter) : null,
+    });
+    if (mySeq !== jdsMatrixRequestSeq) return;
+    const colCount = daysInMonth(ym.year, ym.month);
+    document.getElementById('jds-hint').textContent = rows.length === 0 ? 'この期間の常用伝票データはありません。' : `${rows.length}件(${ym.year}年${ym.month}月)。行をタップすると、その対象で常用伝票一覧を絞り込んで確認できます。`;
+    if (rows.length === 0) { wrapEl.innerHTML = ''; return; }
+    let headers = '';
+    for (let i = 1; i <= colCount; i++) headers += `<th>${i}</th>`;
+    const bodyRows = rows.map((r) => {
+      let cells = '';
+      for (let i = 1; i <= colCount; i++) {
+        const v = r.daily[String(i)];
+        cells += v ? `<td class="am-cell-value">${v}</td>` : '<td class="am-cell-empty">-</td>';
+      }
+      return `<tr class="am-row-clickable" data-group-id="${r.group_id}" data-group-label="${r.group_label}">
+        <td>${r.group_label}</td>${cells}<td class="am-total-col">${r.month_total}</td>
+      </tr>`;
+    }).join('');
+    const colTotals = [];
+    for (let i = 1; i <= colCount; i++) {
+      colTotals.push(rows.reduce((sum, r) => sum + (Number(r.daily[String(i)]) || 0), 0));
+    }
+    const grandTotal = rows.reduce((sum, r) => sum + Number(r.month_total || 0), 0);
+    const totalRow = `<tr><td>合計</td>${colTotals.map((t) => `<td class="am-total-col">${t || '-'}</td>`).join('')}<td class="am-total-col">${grandTotal}</td></tr>`;
+    wrapEl.innerHTML = `
+      <table class="attendance-matrix-table">
+        <thead><tr><th>${jdsViewLabel()}</th>${headers}<th>月合計</th></tr></thead>
+        <tbody>${bodyRows}${totalRow}</tbody>
+      </table>
+    `;
+    if (jdsView === 'employee') {
+      wrapEl.querySelectorAll('.am-row-clickable').forEach((el) => {
+        el.addEventListener('click', () => {
+          jdaEmployeeFilter = { code: el.dataset.groupId, name: el.dataset.groupLabel };
+          jdaEmployeeFilterJustSet = true;
+          showScreen('joyo-denpyo-admin');
+        });
+      });
+    }
+  } catch (e) {
+    if (mySeq === jdsMatrixRequestSeq) wrapEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function loadJoyoDenpyoSummary() {
+  loadJdsTotals();
+  loadJdsFilterOptions();
+  loadJdsMatrix();
+}
+
 let jdaEmployeeFilter = null; // {code, name} | null。社員詳細から「この社員の常用伝票を見る」で遷移した時だけ設定する。
 let jdaEmployeeFilterJustSet = false;
 
@@ -10072,6 +10205,58 @@ function init() {
   document.getElementById('jda-date-from').addEventListener('change', loadJoyoDenpyoAdminList);
   document.getElementById('jda-date-to').addEventListener('change', loadJoyoDenpyoAdminList);
   document.getElementById('jda-site-select').addEventListener('change', loadJoyoDenpyoAdminList);
+
+  // ---------- 常用台帳集計(Phase C-6) ----------
+  SCREEN_ENTER_HOOKS['joyo-denpyo-summary'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    if (!document.getElementById('jds-month').value) document.getElementById('jds-month').value = todayJST().slice(0, 7);
+    jdsView = 'employee';
+    document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+    jdsSiteFilter = '';
+    jdsCompanyFilter = '';
+    document.getElementById('jds-site-filter').value = '';
+    document.getElementById('jds-company-filter').value = '';
+    document.getElementById('jds-range-result').style.display = 'none';
+    updateJdsMonthDisplay();
+    loadJoyoDenpyoSummary();
+  };
+  document.getElementById('jds-month').addEventListener('change', () => { updateJdsMonthDisplay(); loadJoyoDenpyoSummary(); });
+  document.getElementById('jds-month-prev').addEventListener('click', () => shiftJdsMonth(-1));
+  document.getElementById('jds-month-next').addEventListener('click', () => shiftJdsMonth(1));
+  document.getElementById('jds-month-today').addEventListener('click', () => {
+    document.getElementById('jds-month').value = todayJST().slice(0, 7);
+    document.getElementById('jds-month').dispatchEvent(new Event('change'));
+  });
+  document.getElementById('jds-site-filter').addEventListener('change', (e) => { jdsSiteFilter = e.target.value; loadJdsMatrix(); });
+  document.getElementById('jds-company-filter').addEventListener('change', (e) => { jdsCompanyFilter = e.target.value; loadJdsMatrix(); });
+  document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      jdsView = btn.dataset.view;
+      document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c) => c.classList.toggle('active', c === btn));
+      loadJdsMatrix();
+    });
+  });
+  document.getElementById('jds-range-calc-btn').addEventListener('click', async () => {
+    const session = getSession();
+    const from = document.getElementById('jds-range-from').value;
+    const to = document.getElementById('jds-range-to').value;
+    const resultEl = document.getElementById('jds-range-result');
+    if (!from || !to) { alert('開始日と終了日を指定してください。'); return; }
+    if (from > to) { alert('開始日は終了日より前にしてください。'); return; }
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="hint">集計中...</div>';
+    try {
+      const rows = await rpc('admin_get_joyo_denpyo_totals', { p_admin_employee_code: session.employeeCode, p_date_from: from, p_date_to: to });
+      const t = (rows && rows[0]) || { total_headcount: 0, denpyo_count: 0, site_count: 0, worker_count: 0 };
+      resultEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14.5px;"><span>${from} 〜 ${to}</span><span>${t.total_headcount}人工</span></div>
+        <div class="hint" style="margin-top:5px;">伝票数: ${t.denpyo_count}件・現場数: ${t.site_count}件・実人数: ${t.worker_count}人</div>
+      `;
+    } catch (e) {
+      resultEl.innerHTML = '<div class="hint">集計に失敗しました。</div>';
+    }
+  });
+
   document.getElementById('jd-new-btn').addEventListener('click', () => openJoyoDenpyoForm(null));
   document.getElementById('jd-prefill-btn').addEventListener('click', doPrefillJoyoDenpyoWorkers);
   document.getElementById('jd-photo-input').addEventListener('change', (e) => handleJdPhotoFile(e.target.files[0]));
