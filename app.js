@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v76-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T05:46:24.713Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
+const BUILD_DEPLOYED_AT = '2026-08-29T06:04:24.271Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8584,6 +8584,77 @@ async function handleJdPhotoFile(file) {
     labelEl.textContent = file.name;
   } catch (e) {
     statusEl.textContent = 'アップロードに失敗しました。';
+    return;
+  }
+  runJoyoDenpyoOcr(file, statusEl);
+}
+
+// 常用伝票の原本写真をAIで読み取り、空欄のフィールドだけを自動入力する
+// (本人が既に入力済みの内容を勝手に上書きしない)。confidenceがlowの項目は
+// .ocr-needs-checkで視覚的に強調し、本人へ確認・修正を促す(highの項目は強調しない)。
+function markJdOcrField(el, confidence) {
+  if (!el) return;
+  if (confidence === 'low') el.classList.add('ocr-needs-check');
+  else el.classList.remove('ocr-needs-check');
+}
+
+function fillJdOcrTextField(elId, field) {
+  if (!field || field.value == null || field.value === '') return;
+  const el = document.getElementById(elId);
+  if (!el || el.value.trim() !== '') { markJdOcrField(el, null); return; }
+  el.value = field.value;
+  markJdOcrField(el, field.confidence);
+}
+
+async function runJoyoDenpyoOcr(file, statusEl) {
+  statusEl.textContent = 'AIが内容を読み取っています...';
+  try {
+    const session = getSession();
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch(`${N8N_BASE_URL}/webhook/joyo-denpyo-ocr-proxy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeCode: session.employeeCode, mimeType: file.type || 'image/jpeg', base64: b64 }),
+    });
+    const extracted = await res.json();
+    if (!extracted || !extracted.is_denpyo) {
+      statusEl.textContent = '常用伝票として読み取れませんでした。手入力で確認してください。';
+      return;
+    }
+    if (extracted.report_date && extracted.report_date.value) fillJdOcrTextField('jd-date', extracted.report_date);
+    fillJdOcrTextField('jd-partner-name', extracted.partner_name);
+    fillJdOcrTextField('jd-work-description', extracted.work_description);
+    fillJdOcrTextField('jd-vehicle-info', extracted.vehicle_info);
+    fillJdOcrTextField('jd-materials-info', extracted.materials_info);
+
+    const siteSearchEl = document.getElementById('jd-site-search');
+    if (extracted.site_name && extracted.site_name.value && siteSearchEl.value.trim() === '') {
+      siteSearchEl.value = extracted.site_name.value;
+      await populateSiteSelect(document.getElementById('jd-site-select'), extracted.site_name.value);
+      markJdOcrField(siteSearchEl, extracted.site_name.confidence);
+    }
+
+    const workersList = document.getElementById('jd-workers-list');
+    if (Array.isArray(extracted.workers) && extracted.workers.length > 0 && workersList.children.length === 0) {
+      extracted.workers.forEach((w) => {
+        if (!w.worker_name) return;
+        addJoyoDenpyoWorkerRow({ worker_type: 'employee', worker_name: w.worker_name, headcount: w.headcount });
+        const row = workersList.lastElementChild;
+        markJdOcrField(row.querySelector('.jd-worker-name'), w.confidence);
+      });
+    }
+
+    const lowCount = [extracted.report_date, extracted.site_name, extracted.partner_name, extracted.work_description, extracted.vehicle_info, extracted.materials_info, ...(extracted.workers || [])]
+      .filter((f) => f && f.confidence === 'low').length;
+    statusEl.textContent = lowCount > 0
+      ? `AIが内容を読み取りました。赤枠の項目は読み取り精度が低いため、内容を確認してください(${lowCount}件)。`
+      : 'AIが内容を読み取りました。内容を確認してください(間違っていれば修正できます)。';
+  } catch (e) {
+    statusEl.textContent = 'アップロード完了(自動読み取りは利用できませんでした。手入力してください)。';
   }
 }
 
@@ -8605,6 +8676,7 @@ function resetJoyoDenpyoForm() {
   document.getElementById('jd-photo-status').textContent = '';
   jdPhotoUpload = null;
   hideError('jd-form-error');
+  document.querySelectorAll('#screen-joyo-denpyo-form .ocr-needs-check').forEach((el) => el.classList.remove('ocr-needs-check'));
 }
 
 function collectJoyoDenpyoWorkers() {
@@ -8697,6 +8769,22 @@ async function openJoyoDenpyoDetail(id) {
     }
     html += `<button type="button" class="secondary jd-print-open-btn">PDFで表示・印刷する</button>`;
     actionsEl.innerHTML = html;
+
+    const historyRows = await rpc('get_joyo_denpyo_photo_history', { p_actor_employee_code: session.employeeCode, p_id: Number(id) });
+    const historyWrap = document.getElementById('jd-photo-history-wrap');
+    const historyListEl = document.getElementById('jd-photo-history-list');
+    if (historyRows && historyRows.length > 0) {
+      historyWrap.style.display = '';
+      document.getElementById('jd-photo-history-toggle').textContent = `写真の変更履歴を見る(${historyRows.length}件)`;
+      historyListEl.innerHTML = historyRows.map((h) => `
+        <div class="history-item">
+          <div class="row1"><span>${h.replaced_by_name || '-'}が差し替え</span><span>${new Date(h.replaced_at).toLocaleString('ja-JP')}</span></div>
+          <div class="row2">${h.old_photo_drive_file_url ? `<a class="file-link" href="${h.old_photo_drive_file_url}" target="_blank" rel="noopener">差し替え前の写真</a>` : '(差し替え前の写真なし)'}</div>
+        </div>
+      `).join('');
+    } else {
+      historyWrap.style.display = 'none';
+    }
     const editBtn = actionsEl.querySelector('.jd-edit-btn');
     if (editBtn) editBtn.addEventListener('click', () => openJoyoDenpyoForm(d));
     actionsEl.querySelector('.jd-print-open-btn').addEventListener('click', () => openJoyoDenpyoPrint([id]));
@@ -9885,6 +9973,10 @@ function init() {
   document.getElementById('jd-prefill-btn').addEventListener('click', doPrefillJoyoDenpyoWorkers);
   document.getElementById('jd-photo-input').addEventListener('change', (e) => handleJdPhotoFile(e.target.files[0]));
   document.getElementById('jd-add-worker-btn').addEventListener('click', () => addJoyoDenpyoWorkerRow(null));
+  document.getElementById('jd-photo-history-toggle').addEventListener('click', () => {
+    const el = document.getElementById('jd-photo-history-list');
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+  });
   document.getElementById('jd-workers-list').addEventListener('input', (e) => {
     if (e.target.classList.contains('jd-worker-name') || e.target.classList.contains('jd-worker-headcount')) updateJdWorkersSummary();
   });
