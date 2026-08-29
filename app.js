@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T19:23:48.746Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T19:30:02.305Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -231,7 +231,8 @@ const ADMIN_SCREENS = new Set([
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
-  'subcontractor-company-admin', 'subcontractor-worker-admin',
+  'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
+  'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -260,8 +261,16 @@ function showScreen(id, opts) {
     btn.classList.toggle('active', btn.getAttribute('data-nav') === id);
   });
   if (!opts.fromPopstate && !preAuthScreens.includes(id)) {
-    history.pushState({ screen: id }, '', location.pathname + location.search);
-    appNavDepth += 1;
+    if (opts.replace) {
+      // 完了画面(screen-done)への遷移・そこからの離脱に使う。pushStateすると、
+      // 送信フォーム→完了画面→次の画面、と積み上がった履歴を「戻る」で辿るたびに
+      // 完了画面へ戻ってきてしまう(無限ループに見える)・フォーム画面へ戻って
+      // 二重送信を誘発する、という2つの問題が起きるため、履歴を積まずに置き換える。
+      history.replaceState({ screen: id }, '', location.pathname + location.search);
+    } else {
+      history.pushState({ screen: id }, '', location.pathname + location.search);
+      appNavDepth += 1;
+    }
   }
   window.scrollTo(0, 0);
   if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
@@ -300,7 +309,9 @@ function revealReasonBox(boxEl) {
 function showDone(message, returnTo) {
   document.getElementById('done-message').textContent = message;
   document.querySelector('#screen-done [data-nav]').setAttribute('data-nav', returnTo || 'menu');
-  showScreen('done');
+  // 送信元のフォーム画面をそのまま履歴に残さず完了画面へ置き換える(戻るでフォームへ
+  // 戻って二重送信、を防ぐ)。
+  showScreen('done', { replace: true });
 }
 
 function showError(elId, message) {
@@ -556,7 +567,7 @@ function buildHomeGreeting() {
   return { greeting: pick(GREETINGS[band]), sub };
 }
 
-function enterMenu() {
+function enterMenu(replace) {
   const session = getSession();
   const { greeting, sub } = buildHomeGreeting();
   document.getElementById('menu-greeting-hi').textContent = greeting;
@@ -565,7 +576,7 @@ function enterMenu() {
   checkAnonUnreadBadge().then(loadTodayList);
   loadAnnounceBanner();
   loadHomeAnnouncePreview();
-  showScreen('menu');
+  showScreen('menu', { replace: !!replace });
   renderHomeAdminBanner(session);
   renderHomeDailyReportCard(session);
   renderHomeDailyReportStatusBanner(session);
@@ -574,6 +585,38 @@ function enterMenu() {
   renderHomeStatusSummaryCard(session);
   renderHomeUpcomingEvents(session);
   renderHomeEventsArea(session);
+  renderHomeMyOutingBanner(session);
+}
+
+// 本人が現在「外出・一時離脱」中の場合、ホーム最上部に目立つバナーで表示し、その場で
+// 「戻りました」を押せるようにする(status-submit画面まで行かないと戻れない、という
+// 二度手間を避ける)。status-submit画面の「現在、外出・離脱中です」カードと同じデータ・
+// 同じRPC(get_employee_status_timeline/mark_status_report_returned)を再利用する。
+async function renderHomeMyOutingBanner(session) {
+  const banner = document.getElementById('home-my-outing-banner');
+  try {
+    const rows = await rpc('get_employee_status_timeline', { p_employee_code: session.employeeCode, p_target_employee_code: session.employeeCode, p_work_date: null });
+    const active = (rows || []).filter((r) => r.status === 'active' && r.event_type === 'outing');
+    if (active.length === 0) { banner.style.display = 'none'; banner.innerHTML = ''; return; }
+    banner.style.display = '';
+    banner.innerHTML = active.map((r) => `
+      <div class="row1"><span><strong>現在 ${r.category || '外出'}中です</strong></span></div>
+      <div class="row2">${r.destination ? `行き先: ${r.destination}　` : ''}${r.expected_return_at ? `予定復帰 ${new Date(r.expected_return_at).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })}` : ''}</div>
+      <button type="button" class="danger-submit" style="margin-top:8px;" data-home-return-id="${r.id}">戻りました</button>
+    `).join('');
+    banner.querySelectorAll('[data-home-return-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await rpc('mark_status_report_returned', { p_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.homeReturnId) });
+          await renderHomeMyOutingBanner(session);
+        } catch (e) {
+          btn.disabled = false;
+          alert(e.message || '処理に失敗しました。');
+        }
+      });
+    });
+  } catch (e) { /* 取得できなくてもホーム自体は使えるようにする */ }
 }
 
 // 日報は社員が最も頻繁に使う機能のため、「よく使う機能」の固定最優先カードとする
@@ -2245,10 +2288,19 @@ function openImageZoom(url) {
   document.getElementById('image-zoom-overlay').classList.add('open');
 }
 
+let currentMyRequestDetail = null;
+
 async function openMyRequestDetail(requestId, returnTo) {
-  const session = getSession();
   returnTo = MRD_RETURN_LABEL[returnTo] ? returnTo : 'history';
+  currentMyRequestDetail = { requestId: Number(requestId), returnTo };
   showScreen('my-request-detail');
+}
+
+// showScreen('my-request-detail')のたびにSCREEN_ENTER_HOOKSから呼ばれる(戻る/進むを含む)。
+async function loadMyRequestDetailContent() {
+  if (!currentMyRequestDetail) return;
+  const { requestId, returnTo } = currentMyRequestDetail;
+  const session = getSession();
   const backLink = document.getElementById('mrd-back-link');
   backLink.dataset.nav = returnTo;
   backLink.textContent = MRD_RETURN_LABEL[returnTo];
@@ -2360,6 +2412,27 @@ const SUPPLY_ICON_BY_NAME = {
   'フルハーネス': 'shield', '安全靴': 'package', '手袋': 'package', '空調服': 'package', '空調服バッテリー': 'package',
 };
 
+// 数量選択(基本1〜5、「6以上」を選ぶと隣の数値入力を使う)。既存の<input type="number">と
+// 同じidのまま<select>へ差し替えているため、値の読み取り・複数品目一括申請の仕組みは変更不要。
+function resetQtySelect(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  sel.value = '1';
+  custom.value = '';
+  custom.style.display = 'none';
+}
+function readQtySelect(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  if (sel.value === '__custom__') return Number(custom.value) || 1;
+  return Number(sel.value) || 1;
+}
+function wireQtySelectCustomToggle(baseId) {
+  const sel = document.getElementById(baseId);
+  const custom = document.getElementById(baseId + '-custom');
+  sel.addEventListener('change', () => { custom.style.display = sel.value === '__custom__' ? 'block' : 'none'; });
+}
+
 let selectedSupplyMasterId = null;
 let selectedSupplyMasterItem = null;
 
@@ -2409,7 +2482,7 @@ function selectSupplyMasterCard(el, cards) {
   document.getElementById('supply-req-detail').style.display = 'block';
   document.getElementById('supply-req-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
   document.getElementById('supply-req-other-wrap').style.display = isOther ? 'block' : 'none';
-  document.getElementById('supply-req-qty').value = 1;
+  resetQtySelect('supply-req-qty');
   document.getElementById('supply-req-reason').value = '';
   const requiresSize = el.dataset.requiresSize === 'true';
   document.getElementById('supply-req-size-wrap').style.display = requiresSize ? 'block' : 'none';
@@ -2449,7 +2522,7 @@ function resetSupplyRequestScreen() {
 function doAddSupplyReqItem() {
   const isOther = selectedSupplyMasterId == null;
   const otherName = document.getElementById('supply-req-other-name').value.trim();
-  const qty = Number(document.getElementById('supply-req-qty').value) || 1;
+  const qty = readQtySelect('supply-req-qty');
   const size = document.getElementById('supply-req-size-wrap').style.display !== 'none' ? document.getElementById('supply-req-size').value : '';
   const reason = document.getElementById('supply-req-reason').value.trim();
   hideError('supply-req-error');
@@ -2585,7 +2658,7 @@ function selectSupplyIhMasterCard(el, cards) {
   document.getElementById('supply-ih-detail').style.display = 'block';
   document.getElementById('supply-ih-selected-title').textContent = isOther ? '上記以外の支給品' : el.dataset.name;
   document.getElementById('supply-ih-other-wrap').style.display = isOther ? 'block' : 'none';
-  document.getElementById('supply-ih-qty').value = 1;
+  resetQtySelect('supply-ih-qty');
   document.getElementById('supply-ih-note').value = '';
   document.getElementById('supply-ih-precision').value = 'unknown';
   toggleSupplyIhPrecisionFields();
@@ -2626,7 +2699,7 @@ function resetSupplyInitialHoldingScreen() {
 function doAddSupplyIhItem() {
   const isOther = selectedSupplyIhMasterId == null;
   const otherName = document.getElementById('supply-ih-other-name').value.trim();
-  const qty = Number(document.getElementById('supply-ih-qty').value) || 1;
+  const qty = readQtySelect('supply-ih-qty');
   const size = document.getElementById('supply-ih-size-wrap').style.display !== 'none' ? document.getElementById('supply-ih-size').value : '';
   const precision = document.getElementById('supply-ih-precision').value;
   const dateVal = document.getElementById('supply-ih-date').value;
@@ -3234,7 +3307,7 @@ const DASH_CARDS = [
   { key: 'unanswered_consultations', filter: null, label: '未対応の匿名相談', icon: 'message-circle', nav: 'anon-admin', status: 'pending' },
   { key: 'pending_qualifications', filter: null, label: '資格の確認待ち', icon: 'graduation-cap', nav: 'qual-admin', status: 'pending' },
   { key: 'qualification_expiring_count', filter: null, label: '期限が近い資格', icon: 'clock', nav: 'qual-admin', status: 'pending' },
-  { key: 'category_review_needed_count', filter: null, label: '勘定科目の確認待ち', icon: 'hash', nav: 'category-review', status: 'pending' },
+  { key: 'category_review_needed_count', filter: null, label: '経費の勘定科目 要確認', icon: 'hash', nav: 'category-review', status: 'pending' },
   { key: 'pending_info_change_requests', filter: null, label: '個人情報の変更申請', icon: 'user', nav: 'info-change-admin', status: 'pending' },
   { key: 'pending_sites', filter: null, label: '新規現場の確認待ち', icon: 'map-pin', nav: 'site-admin', status: 'pending' },
   { key: 'pending_entertainment_preapprovals', filter: null, label: '接待事前申請 承認待ち', icon: 'users-round', nav: 'entertainment-admin', status: 'pending' },
@@ -3593,7 +3666,7 @@ async function doSubmitQualification() {
   }
 }
 
-const QUAL_STATUS_LABEL = { pending_verification: '確認待ち', active: '有効', rejected: '却下', expired: '期限切れ' };
+const QUAL_STATUS_LABEL = { pending_verification: '確認待ち', active: '有効', rejected: '却下', expired: '期限切れ', expiring_soon: '期限間近' };
 
 async function loadMyQualifications() {
   const session = getSession();
@@ -3630,19 +3703,26 @@ let qualAdminCategoryFilter = '';
 async function loadQualAdminList() {
   const session = getSession();
   const filter = document.getElementById('qual-admin-filter').value || null;
+  const search = document.getElementById('qual-admin-search').value.trim() || null;
   const listEl = document.getElementById('qual-admin-list');
+  const countEl = document.getElementById('qual-admin-count');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('admin_list_qualifications', { p_admin_employee_code: session.employeeCode, p_filter: filter, p_category: qualAdminCategoryFilter || null });
+    const rows = await rpc('admin_list_qualifications', { p_admin_employee_code: session.employeeCode, p_filter: filter, p_category: qualAdminCategoryFilter || null, p_search: search });
+    countEl.textContent = rows ? `${rows.length}件` : '';
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する資格・免許はありません。</div>'; return; }
     listEl.innerHTML = rows.map((q) => {
-      const expiring = q.status === 'active' && q.days_until_expiry != null && q.days_until_expiry <= 60;
+      const displayStatus = q.display_status || q.status;
+      const expiring = displayStatus === 'expiring_soon';
       const expiryText = q.expiry_date ? `有効期限: ${new Date(q.expiry_date).toLocaleDateString('ja-JP')}${q.days_until_expiry != null ? `(残り${q.days_until_expiry}日)` : ''}` : '期限未登録';
+      const badgeClass = displayStatus === 'active' ? 'done' : (displayStatus === 'rejected' || displayStatus === 'expired' ? 'rejected' : '');
       return `
         <div class="qual-item ${expiring ? 'expiring' : ''}" data-id="${q.id}">
-          <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.employee_name}・${q.qualification_name}</span><span class="status-badge ${q.status === 'active' ? 'done' : (q.status === 'rejected' ? 'rejected' : '')}">${QUAL_STATUS_LABEL[q.status] || q.status}</span></div>
+          <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.employee_name}・${q.qualification_name}</span><span class="status-badge ${badgeClass}">${QUAL_STATUS_LABEL[displayStatus] || displayStatus}</span></div>
+          <div class="row2">取得日: ${q.obtained_date ? new Date(q.obtained_date).toLocaleDateString('ja-JP') : '未登録'}</div>
           <div class="row2">${expiryText}</div>
           <div class="row2">${q.qualification_number ? `番号: ${q.qualification_number}` : ''}</div>
+          ${q.note ? `<div class="row2">備考: ${q.note}</div>` : ''}
           <div style="margin-top:8px;">
             ${q.certificate_photo_url ? `<a class="file-link" href="${q.certificate_photo_url}" target="_blank" rel="noopener">写真を見る</a>` : ''}
             ${q.certificate_pdf_url ? `<a class="file-link" href="${q.certificate_pdf_url}" target="_blank" rel="noopener">PDFを見る</a>` : ''}
@@ -4193,14 +4273,25 @@ async function loadEmployeeDetailLeave() {
   try {
     const summaryRows = await rpc('admin_get_employee_leave_summary', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
     const b = summaryRows && summaryRows[0];
-    if (b && b.has_active_period) {
-      document.getElementById('employee-detail-leave-used').textContent = `${b.used_this_period}日`;
-      document.getElementById('employee-detail-leave-granted').textContent = `${b.granted_this_period}日`;
-      document.getElementById('employee-detail-leave-balance').textContent = `${b.remaining_this_period}日`;
-      document.getElementById('employee-detail-leave-period').textContent = `対象期間: ${new Date(b.period_start).toLocaleDateString('ja-JP')}〜${new Date(b.period_end).toLocaleDateString('ja-JP')}`;
+    // 使用実績(used_this_period/taken_count_this_period)は、管理者による付与登録
+    // (has_active_period)の有無に関わらず、実際のleave_balances(usage)から常に算出される
+    // (付与額が未設定だからといって既に取得済みの実績まで隠さない)。付与/残りは、管理者が
+    // 「有給ポリシー」タブで付与登録するまでは架空の数字を出さず「未設定」のままにする。
+    if (b) {
+      document.getElementById('employee-detail-leave-used').textContent = `${b.used_this_period}日(${b.taken_count_this_period}回)`;
+      document.getElementById('employee-detail-leave-granted').textContent = b.granted_this_period != null ? `${b.granted_this_period}日` : '未設定';
+      document.getElementById('employee-detail-leave-balance').textContent = b.remaining_this_period != null ? `${b.remaining_this_period}日` : '未設定';
+      if (b.period_start) {
+        const periodLabel = `${new Date(b.period_start).toLocaleDateString('ja-JP')}〜${new Date(b.period_end).toLocaleDateString('ja-JP')}`;
+        document.getElementById('employee-detail-leave-period').textContent = b.has_active_period
+          ? `対象期間: ${periodLabel}`
+          : `対象期間(入社日基準の目安、付与未登録): ${periodLabel}`;
+      } else {
+        document.getElementById('employee-detail-leave-period').textContent = '対象期間: 不明(入社日・付与のいずれも未登録のため全期間の実績を表示)';
+      }
     } else {
       document.getElementById('employee-detail-leave-used').textContent = '-';
-      document.getElementById('employee-detail-leave-granted').textContent = '-';
+      document.getElementById('employee-detail-leave-granted').textContent = '未設定';
       document.getElementById('employee-detail-leave-balance').textContent = '未設定';
       document.getElementById('employee-detail-leave-period').textContent = '今年度の付与がまだ登録されていません。';
     }
@@ -4560,7 +4651,7 @@ async function openEmployeeMonthlyDetail(code, name, year, month) {
 
     const other = otherRows.filter((r) => r.source_type !== 'expense_reimbursement' && r.source_type !== 'paid_leave');
     document.getElementById('emd-other-list').innerHTML = other.length === 0 ? '<div class="hint">この月のその他申請はありません。</div>' : other.map((r) => `
-      <div class="history-item"><div class="row1"><span>${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span class="status-badge">${r.status_group}</span></div>
+      <div class="history-item"><div class="row1"><span>${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span class="status-badge">${STATUS_GROUP_LABEL[r.status_group] || r.status_group}</span></div>
       <div class="row2">${r.summary || ''}</div></div>
     `).join('');
 
@@ -4875,118 +4966,53 @@ async function loadEmployeeDetailQual() {
 async function loadEmployeeDetailSupplyHoldings() {
   const session = getSession();
   const el = document.getElementById('employee-detail-supply-holdings');
-  const sel = document.getElementById('ed-supply-adjust-item');
+  const sel = document.getElementById('ed-supply-correction-item');
   el.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('admin_get_employee_supply_holdings', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode });
-    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">品目が登録されていません。</div>' : rows.map((r) => `
+    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">現在保有している品目はありません。</div>' : rows.map((r) => `
       <div class="supply-item">
-        <div class="row1"><span>${r.item_name}</span><span>${r.current_quantity}個${r.required_quantity != null ? ` / 必要${r.required_quantity}個` : ''}</span></div>
-        <div class="row2">${SUPPLY_STATUS_LABEL[r.status] || ''}</div>
+        <div class="row1"><span>${r.item_name}${r.size ? `(${r.size})` : ''}</span><span>${r.current_quantity}個</span></div>
       </div>
     `).join('');
-    sel.innerHTML = (rows || []).map((r) => `<option value="${r.master_item_id}">${r.item_name}(現在${r.current_quantity}個)</option>`).join('');
+    const masterRows = await rpc('admin_list_supply_master', { p_admin_employee_code: session.employeeCode }).catch(() => []);
+    sel.innerHTML = masterRows.filter((m) => m.active).map((m) => `<option value="${m.id}">${m.item_name}</option>`).join('');
   } catch (e) {
     el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
-async function loadEmployeeDetailSupplyAdjustHistory() {
-  const session = getSession();
-  const el = document.getElementById('employee-detail-supply-adjust-history');
-  el.innerHTML = '<div class="hint">読み込み中...</div>';
-  try {
-    const rows = await rpc('admin_get_supply_holding_history', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode, p_master_item_id: null });
-    el.innerHTML = (!rows || rows.length === 0) ? '<div class="hint">調整履歴はありません。</div>' : rows.map((r) => `
-      <div class="history-item">
-        <div class="row1"><span>${r.item_name}</span><span style="color:${r.quantity_delta < 0 ? 'var(--danger)' : 'var(--success)'};">${r.quantity_delta > 0 ? '+' : ''}${r.quantity_delta}個</span></div>
-        <div class="row2">${r.reason}</div>
-        <div class="row2">${r.adjusted_by}(${new Date(r.created_at).toLocaleDateString('ja-JP')})</div>
-      </div>
-    `).join('');
-  } catch (e) {
-    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
-}
+const SUPPLY_CORRECTION_SOURCE_LABEL = { initial_holding: '初期登録', additional: '追加支給(記録漏れ分)', loss: '紛失', return: '返却', exchange: '交換', issuance: '支給(申請承認)' };
 
-const SDR_ADMIN_STATUS_LABEL = { employee_confirmed: '本人確認済み(管理者確認待ち)', admin_confirmed: '管理者確認済み(確定待ち)', resolved: '確定済み' };
-
-async function loadEmployeeDetailSupplyDiscrepancies() {
+async function doRecordSupplyCorrection() {
   const session = getSession();
-  const el = document.getElementById('employee-detail-supply-discrepancies');
-  el.innerHTML = '<div class="hint">読み込み中...</div>';
+  const masterItemId = Number(document.getElementById('ed-supply-correction-item').value);
+  const sourceType = document.getElementById('ed-supply-correction-type').value;
+  const size = document.getElementById('ed-supply-correction-size').value.trim();
+  const qty = Number(document.getElementById('ed-supply-correction-qty').value);
+  const reason = document.getElementById('ed-supply-correction-reason').value.trim();
+  hideError('ed-supply-correction-error');
+  if (!masterItemId) { showError('ed-supply-correction-error', '品目を選択してください。'); return; }
+  if (!qty || qty <= 0) { showError('ed-supply-correction-error', '数量を1以上で入力してください。'); return; }
+  if (!reason) { showError('ed-supply-correction-error', '理由を入力してください。'); return; }
   try {
-    const rows = await rpc('admin_list_supply_discrepancies', { p_admin_employee_code: session.employeeCode, p_status: null });
-    const mine = (rows || []).filter((r) => r.employee_code === currentEmployeeDetailCode);
-    el.innerHTML = mine.length === 0 ? '<div class="hint">差異報告はありません。</div>' : mine.map((r) => `
-      <div class="supply-item" data-discrepancy-id="${r.id}">
-        <div class="row1"><span>${r.item_name}</span><span class="mini-tag ${r.status === 'resolved' ? 'done' : 'warn'}">${SDR_ADMIN_STATUS_LABEL[r.status] || r.status}</span></div>
-        <div class="row2">システム上${r.system_quantity}個 → 本人申告${r.reported_quantity}個${r.employee_note ? `・${r.employee_note}` : ''}</div>
-        ${r.status === 'employee_confirmed' ? `<button type="button" class="secondary" data-confirm-discrepancy="${r.id}">管理者確認する</button>` : ''}
-        ${r.status === 'admin_confirmed' ? `<button type="button" class="secondary" data-resolve-discrepancy="${r.id}" data-delta="${r.reported_quantity - r.system_quantity}">確定する(差分反映)</button>
-           <button type="button" class="secondary" data-resolve-discrepancy-nochange="${r.id}">確定する(調整なし)</button>` : ''}
-      </div>
-    `).join('');
-    el.querySelectorAll('[data-confirm-discrepancy]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        try {
-          await rpc('admin_confirm_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.confirmDiscrepancy), p_admin_note: null });
-          await loadEmployeeDetailSupplyDiscrepancies();
-        } catch (e) { alert(e.message || '確認に失敗しました。'); }
-      });
+    await rpc('admin_record_supply_correction', {
+      p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode,
+      p_master_item_id: masterItemId, p_source_type: sourceType, p_quantity: qty, p_size: size || null, p_reason: reason,
     });
-    el.querySelectorAll('[data-resolve-discrepancy]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const note = prompt('確定理由を入力してください(本人申告どおりに保有数を調整します)');
-        if (!note) return;
-        try {
-          await rpc('admin_resolve_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.resolveDiscrepancy), p_adjustment_quantity_delta: Number(btn.dataset.delta), p_resolution_note: note });
-          await loadEmployeeDetailSupplyDiscrepancies();
-          await loadEmployeeDetailSupplyHoldings();
-          await loadEmployeeDetailSupplyAdjustHistory();
-        } catch (e) { alert(e.message || '確定に失敗しました。'); }
-      });
-    });
-    el.querySelectorAll('[data-resolve-discrepancy-nochange]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const note = prompt('確定理由を入力してください(確認の結果、システム側の数字のままとする場合)');
-        if (!note) return;
-        try {
-          await rpc('admin_resolve_supply_discrepancy', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.resolveDiscrepancyNochange), p_adjustment_quantity_delta: null, p_resolution_note: note });
-          await loadEmployeeDetailSupplyDiscrepancies();
-        } catch (e) { alert(e.message || '確定に失敗しました。'); }
-      });
-    });
-  } catch (e) {
-    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
-}
-
-async function doAdjustEmployeeSupplyHolding() {
-  const session = getSession();
-  const masterItemId = Number(document.getElementById('ed-supply-adjust-item').value);
-  const delta = document.getElementById('ed-supply-adjust-delta').value;
-  const reason = document.getElementById('ed-supply-adjust-reason').value.trim();
-  hideError('ed-supply-adjust-error');
-  if (!masterItemId) { showError('ed-supply-adjust-error', '品目を選択してください。'); return; }
-  if (delta === '' || Number(delta) === 0) { showError('ed-supply-adjust-error', '増減数を入力してください。'); return; }
-  if (!reason) { showError('ed-supply-adjust-error', '理由を入力してください。'); return; }
-  try {
-    await rpc('admin_adjust_supply_holding', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode, p_master_item_id: masterItemId, p_quantity_delta: Number(delta), p_reason: reason });
-    document.getElementById('ed-supply-adjust-delta').value = '';
-    document.getElementById('ed-supply-adjust-reason').value = '';
+    document.getElementById('ed-supply-correction-qty').value = '';
+    document.getElementById('ed-supply-correction-size').value = '';
+    document.getElementById('ed-supply-correction-reason').value = '';
     await loadEmployeeDetailSupplyHoldings();
-    await loadEmployeeDetailSupplyAdjustHistory();
+    await loadEmployeeDetailSupply();
   } catch (e) {
-    showError('ed-supply-adjust-error', e.message || '調整に失敗しました。');
+    showError('ed-supply-correction-error', e.message || '記録に失敗しました。');
   }
 }
 
 async function loadEmployeeDetailSupply() {
   const session = getSession();
   loadEmployeeDetailSupplyHoldings();
-  loadEmployeeDetailSupplyAdjustHistory();
-  loadEmployeeDetailSupplyDiscrepancies();
   const listEl = document.getElementById('employee-detail-supply-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
@@ -5095,6 +5121,73 @@ async function doSaveEmployeeBasic() {
     showError('employee-edit-error', e.message || '保存に失敗しました。');
   } finally {
     btn.disabled = false;
+  }
+}
+
+// ---------- 支給品保有一覧(横断、管理者) ----------
+
+function formatSupplyHoldingsDate(d) {
+  return d ? new Date(d).toLocaleDateString('ja-JP') : '-';
+}
+
+async function loadSupplyHoldingsAdmin() {
+  const session = getSession();
+  const listEl = document.getElementById('sha-list');
+  const countEl = document.getElementById('sha-count');
+  const employeeName = document.getElementById('sha-search-employee').value.trim();
+  const itemName = document.getElementById('sha-search-item').value.trim();
+  const heldOnly = document.getElementById('sha-held-only').checked;
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_all_supply_holdings', {
+      p_admin_employee_code: session.employeeCode,
+      p_item_name: itemName || null, p_employee_name: employeeName || null, p_held_only: heldOnly,
+    });
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する保有データはありません。</div>'; countEl.textContent = ''; return; }
+
+    const byEmployee = new Map();
+    rows.forEach((r) => {
+      if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, items: [] });
+      byEmployee.get(r.employee_code).items.push(r);
+    });
+    countEl.textContent = `${byEmployee.size}名・${rows.length}件`;
+
+    listEl.innerHTML = Array.from(byEmployee.values()).map((emp) => `
+      <div class="card">
+        <div class="form-title" style="font-size:15px;">${emp.name}</div>
+        ${emp.items.map((it, idx) => `
+          <div class="supply-item">
+            <div class="row1"><span>${it.item_name}${it.size ? `(${it.size})` : ''}</span><span>${it.current_quantity}${it.current_quantity <= 0 ? '(保有なし)' : '個'}</span></div>
+            <div class="row2">最終支給日: ${formatSupplyHoldingsDate(it.last_issued_date)}${it.first_issued_date && it.first_issued_date !== it.last_issued_date ? `(初回: ${formatSupplyHoldingsDate(it.first_issued_date)})` : ''}</div>
+            ${it.replacement_due_date ? `<div class="row2">交換目安: ${formatSupplyHoldingsDate(it.replacement_due_date)}${new Date(it.replacement_due_date) < new Date() ? '<span class="mini-tag warn">交換目安を超過</span>' : ''}</div>` : ''}
+            ${it.note ? `<div class="row2">備考: ${it.note}</div>` : ''}
+            <button type="button" class="sha-history-toggle" data-employee-code="${it.employee_code}" data-item-name="${it.item_name}" data-size="${it.size || ''}" data-target="sha-history-${emp.name}-${idx}">履歴を見る</button>
+            <div id="sha-history-${emp.name}-${idx}" class="sha-history-box" style="display:none;"></div>
+          </div>
+        `).join('')}
+      </div>
+    `).join('');
+    listEl.querySelectorAll('.sha-history-toggle').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const box = document.getElementById(btn.dataset.target);
+        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+        box.style.display = 'block';
+        box.innerHTML = '<div class="hint">読み込み中...</div>';
+        try {
+          const hist = await rpc('admin_get_supply_item_history', {
+            p_admin_employee_code: session.employeeCode, p_target_employee_code: btn.dataset.employeeCode,
+            p_item_name: btn.dataset.itemName, p_size: btn.dataset.size || null,
+          });
+          box.innerHTML = hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
+            <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
+          `).join('');
+        } catch (e) {
+          box.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+        }
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
@@ -5595,6 +5688,13 @@ async function loadStatusSubmitScreen() {
   } catch (e) { /* 一覧取得に失敗してもフォーム自体は使えるようにする */ }
 }
 
+// 外出/遅刻の予定時刻は「当日の時刻」だけを入力させる(年月日の入力は不要、常に本日扱い)。
+// <input type="time">の値("HH:MM")へtodayJST()の日付を合成してISO文字列化する。
+function todayTimeToISOJST(timeStr) {
+  if (!timeStr) return null;
+  return new Date(`${todayJST()}T${timeStr}:00+09:00`).toISOString();
+}
+
 async function doSubmitStatusOuting() {
   const session = getSession();
   const category = document.getElementById('status-outing-category').value;
@@ -5617,7 +5717,7 @@ async function doSubmitStatusOuting() {
       p_reason: reason,
       p_is_business_use: isBusinessUse,
       p_will_return_today: willReturn,
-      p_expected_return_at: expectedReturn ? new Date(expectedReturn).toISOString() : null,
+      p_expected_return_at: todayTimeToISOJST(expectedReturn),
       p_note: note,
       p_visibility: visibility,
       p_target_employee_code: null,
@@ -5645,7 +5745,7 @@ async function doSubmitStatusLate() {
     await rpc('submit_status_report_late_arrival', {
       p_employee_code: session.employeeCode,
       p_scheduled_start_at: null,
-      p_expected_arrival_at: new Date(expectedArrival).toISOString(),
+      p_expected_arrival_at: todayTimeToISOJST(expectedArrival),
       p_reason: reason,
       p_note: note,
     });
@@ -6008,7 +6108,8 @@ async function loadEntertainmentAdminList() {
         ${r.status === 'rejected' && r.rejection_reason ? `<div class="row2">却下理由: ${r.rejection_reason}</div>` : ''}
         ${r.status === 'pending' ? `
           ${r.requires_special_review ? `
-            <label>例外承認の理由<span class="required-mark">(必須)</span></label>
+            <label>例外承認理由(管理者入力)<span class="required-mark">(必須)</span></label>
+            <div class="hint-inline">申請者本人の説明ではなく、管理者が「なぜ事後でも承認するか」を記録する欄です</div>
             <textarea class="ent-exception-reason" placeholder="例: 先方都合で急遽実施、事前に把握はしていた"></textarea>
           ` : ''}
           <label>却下理由<span class="hint-inline" style="display:inline;">(任意、入力すると申請者に伝わります)</span></label>
@@ -7574,14 +7675,21 @@ function renderAreqTable(rows) {
 let currentRequestDetail = null;
 
 async function openRequestDetail(sourceType, sourceId) {
-  const session = getSession();
   currentRequestDetail = { sourceType, sourceId: Number(sourceId) };
+  showScreen('request-detail');
+}
+
+// showScreen('request-detail')のたびにSCREEN_ENTER_HOOKSから呼ばれる(通常のクリック遷移でも
+// ブラウザの戻る/進むでも、currentRequestDetailに入っている対象を毎回最新の状態で再取得する)。
+async function loadRequestDetailContent() {
+  if (!currentRequestDetail) return;
+  const { sourceType, sourceId } = currentRequestDetail;
+  const session = getSession();
   document.getElementById('rdetail-title').textContent = REQUEST_TYPE_LABEL[sourceType] || sourceType;
   document.getElementById('rdetail-fields').innerHTML = '<div class="hint">読み込み中...</div>';
   document.getElementById('rdetail-history').innerHTML = '';
   document.getElementById('rdetail-actions').innerHTML = '';
   hideError('rdetail-error');
-  showScreen('request-detail');
 
   try {
     const rows = await rpc('admin_search_requests', {
@@ -7660,7 +7768,8 @@ function renderRequestDetailActions(sourceType, r) {
     const special = r.status_group === 'special_review';
     box.innerHTML = `
       ${special ? `${icon('alert-triangle')}<div class="preapproval-warning">この接待は事前申請されていません。例外承認の理由を入力してください。</div>
-        <label>例外承認の理由<span class="required-mark">(必須)</span></label>
+        <label>例外承認理由(管理者入力)<span class="required-mark">(必須)</span></label>
+        <div class="hint-inline">申請者本人の説明ではなく、管理者が「なぜ事後でも承認するか」を記録する欄です</div>
         <textarea id="rdetail-ent-reason"></textarea>` : ''}
       <button type="button" id="rdetail-ent-approve">${special ? '例外承認する' : '承認する'}</button>
       <button type="button" class="secondary" id="rdetail-ent-reject">却下する</button>
@@ -7752,6 +7861,22 @@ async function loadAdminRoleCurrentList() {
     nippoEl.querySelectorAll('.arm-revoke-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doRevokeAdminRole(e.target.closest('.employee-row').dataset.code, btn.dataset.roleType));
     });
+
+    const otherEl = document.getElementById('arm-other-list');
+    const others = rows.filter((r) => !['general_admin', 'nippo_admin'].includes(r.role_type));
+    otherEl.innerHTML = others.length === 0 ? '<div class="hint">専門権限を持つ社員はいません。</div>' : others.map((r) => `
+      <div class="employee-row" data-code="${r.employee_code}" style="cursor:default;">
+        <span class="employee-avatar">${r.employee_name.slice(0, 1)}</span>
+        <div class="employee-row-body">
+          <div class="employee-row-name">${r.employee_name}(${r.employee_code})</div>
+          <div class="employee-row-meta">${ADMIN_ROLE_LABEL[r.role_type] || r.role_type}・付与: ${r.granted_by}・${new Date(r.granted_at).toLocaleDateString('ja-JP')}</div>
+        </div>
+        <button type="button" class="reject-btn arm-revoke-btn" data-role-type="${r.role_type}" style="width:auto;margin:0;">解除</button>
+      </div>
+    `).join('');
+    otherEl.querySelectorAll('.arm-revoke-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => doRevokeAdminRole(e.target.closest('.employee-row').dataset.code, btn.dataset.roleType));
+    });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -7792,11 +7917,16 @@ function renderAdminRoleCandidates(query) {
   });
 }
 
+const ADMIN_ROLE_LABEL = {
+  general_admin: '全体管理者', nippo_admin: '日報担当', accounting_admin: '経理承認担当',
+  hr_admin: '社員管理担当', subcontractor_admin: '外注管理担当', site_admin: '現場管理担当', device_admin: '端末承認担当',
+};
+
 async function doGrantAdminRole(employeeCode, employeeName) {
   const session = getSession();
   hideError('arm-error');
   const roleType = document.getElementById('arm-role-type-select').value;
-  const roleLabel = roleType === 'nippo_admin' ? '日報担当' : '全体管理者';
+  const roleLabel = ADMIN_ROLE_LABEL[roleType] || roleType;
   if (!window.confirm(`${employeeName}(${employeeCode})を${roleLabel}に追加しますか?`)) return;
   try {
     await rpc('admin_grant_admin_role', { p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode, p_role_type: roleType });
@@ -8252,6 +8382,7 @@ async function loadSubcontractorCompanyAdmin() {
         <div class="row1"><span>${c.company_name}</span><span>${c.worker_count}名</span></div>
         <div class="row2">${c.notes || ''}</div>
         <div class="qual-verify-btns">
+          <button type="button" class="secondary view-sc-workers-btn" data-name="${c.company_name}">所属作業員を見る(${c.worker_count}名)</button>
           <button type="button" class="edit-sc-company-btn" data-name="${c.company_name}" data-notes="${c.notes || ''}">編集</button>
           <button type="button" class="reject-btn toggle-sc-company-btn" data-active="${c.status === 'active'}">${c.status === 'active' ? '停止する' : '再開する'}</button>
         </div>
@@ -8271,6 +8402,14 @@ async function loadSubcontractorCompanyAdmin() {
         const item = btn.closest('.supply-item');
         await rpc('admin_set_subcontractor_company_active', { p_admin_employee_code: session.employeeCode, p_id: Number(item.dataset.id), p_active: btn.dataset.active !== 'true' });
         loadSubcontractorCompanyAdmin();
+      });
+    });
+    listEl.querySelectorAll('.view-sc-workers-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const item = btn.closest('.supply-item');
+        subcontractorWorkerCompanyFilter = { id: Number(item.dataset.id), name: btn.dataset.name };
+        subcontractorWorkerFilterJustSet = true;
+        showScreen('subcontractor-worker-admin');
       });
     });
   } catch (e) {
@@ -8297,35 +8436,69 @@ async function doSaveSubcontractorCompany() {
   }
 }
 
+let subcontractorWorkerCompanyFilter = null; // {id, name} | null。外注会社一覧の「所属作業員を見る」から絞り込む。
+let subcontractorWorkerFilterJustSet = false; // 直前にドリルダウンから来た場合だけtrue(メニューから直接来た場合はフィルタを解除する)。
+function resetSubcontractorWorkerForm() {
+  document.getElementById('sc-worker-edit-id').value = '';
+  document.getElementById('sc-worker-name').value = '';
+  document.getElementById('sc-worker-birth-date').value = '';
+  document.getElementById('sc-worker-phone').value = '';
+  document.getElementById('sc-worker-address').value = '';
+  document.getElementById('sc-worker-qualifications').value = '';
+  document.getElementById('sc-worker-safety-doc').value = '';
+  document.getElementById('sc-worker-notes').value = '';
+  hideError('sc-worker-error');
+}
+
 async function loadSubcontractorWorkerAdmin() {
   const session = getSession();
   const listEl = document.getElementById('sc-worker-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
-  document.getElementById('sc-worker-edit-id').value = '';
-  document.getElementById('sc-worker-name').value = '';
-  document.getElementById('sc-worker-notes').value = '';
-  hideError('sc-worker-error');
+  resetSubcontractorWorkerForm();
+  const titleEl = document.getElementById('sc-worker-list-title');
+  const clearBtn = document.getElementById('sc-worker-clear-filter-btn');
+  if (subcontractorWorkerCompanyFilter) {
+    titleEl.textContent = `${subcontractorWorkerCompanyFilter.name}の作業員`;
+    clearBtn.style.display = 'block';
+  } else {
+    titleEl.textContent = '登録済みの外注作業員';
+    clearBtn.style.display = 'none';
+  }
   try {
     const companies = await rpc('admin_list_subcontractor_companies', { p_admin_employee_code: session.employeeCode, p_include_inactive: false });
     document.getElementById('sc-worker-company-select').innerHTML = companies.map((c) => `<option value="${c.id}">${c.company_name}</option>`).join('');
-    const rows = await rpc('admin_list_subcontractor_workers', { p_admin_employee_code: session.employeeCode, p_company_id: null, p_include_inactive: true });
+    if (subcontractorWorkerCompanyFilter) document.getElementById('sc-worker-company-select').value = subcontractorWorkerCompanyFilter.id;
+    const rows = await rpc('admin_list_subcontractor_workers', {
+      p_admin_employee_code: session.employeeCode,
+      p_company_id: subcontractorWorkerCompanyFilter ? subcontractorWorkerCompanyFilter.id : null,
+      p_include_inactive: true,
+    });
+    if (rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する作業員はいません。</div>'; return; }
     listEl.innerHTML = rows.map((w) => `
       <div class="supply-item" data-id="${w.id}" style="${w.status === 'active' ? '' : 'opacity:.5;'}">
         <div class="row1"><span>${w.worker_name}</span><span>${w.company_name}</span></div>
-        <div class="row2">${w.notes || ''}</div>
+        <div class="row2">${[w.phone, w.address].filter(Boolean).join('・')}</div>
+        ${w.qualifications ? `<div class="row2">資格: ${w.qualifications}</div>` : ''}
+        ${w.safety_document_status ? `<div class="row2">安全書類: ${w.safety_document_status}</div>` : ''}
+        ${w.notes ? `<div class="row2">${w.notes}</div>` : ''}
         <div class="qual-verify-btns">
-          <button type="button" class="edit-sc-worker-btn" data-name="${w.worker_name}" data-notes="${w.notes || ''}" data-company="${w.subcontractor_company_id}">編集</button>
+          <button type="button" class="edit-sc-worker-btn" data-id="${w.id}">編集</button>
           <button type="button" class="reject-btn toggle-sc-worker-btn" data-active="${w.status === 'active'}">${w.status === 'active' ? '停止する' : '再開する'}</button>
         </div>
       </div>
     `).join('');
     listEl.querySelectorAll('.edit-sc-worker-btn').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const item = btn.closest('.supply-item');
-        document.getElementById('sc-worker-edit-id').value = item.dataset.id;
-        document.getElementById('sc-worker-name').value = btn.dataset.name;
-        document.getElementById('sc-worker-notes').value = btn.dataset.notes;
-        document.getElementById('sc-worker-company-select').value = btn.dataset.company;
+        const w = rows.find((r) => String(r.id) === btn.dataset.id);
+        document.getElementById('sc-worker-edit-id').value = w.id;
+        document.getElementById('sc-worker-name').value = w.worker_name;
+        document.getElementById('sc-worker-birth-date').value = w.birth_date || '';
+        document.getElementById('sc-worker-phone').value = w.phone || '';
+        document.getElementById('sc-worker-address').value = w.address || '';
+        document.getElementById('sc-worker-qualifications').value = w.qualifications || '';
+        document.getElementById('sc-worker-safety-doc').value = w.safety_document_status || '';
+        document.getElementById('sc-worker-notes').value = w.notes || '';
+        document.getElementById('sc-worker-company-select').value = w.subcontractor_company_id;
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
@@ -8353,7 +8526,14 @@ async function doSaveSubcontractorWorker() {
   const btn = document.getElementById('sc-worker-submit');
   btn.disabled = true;
   try {
-    await rpc('admin_upsert_subcontractor_worker', { p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_subcontractor_company_id: Number(companyId), p_worker_name: name, p_notes: notes || null });
+    await rpc('admin_upsert_subcontractor_worker', {
+      p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_subcontractor_company_id: Number(companyId), p_worker_name: name, p_notes: notes || null,
+      p_birth_date: document.getElementById('sc-worker-birth-date').value || null,
+      p_phone: document.getElementById('sc-worker-phone').value.trim() || null,
+      p_address: document.getElementById('sc-worker-address').value.trim() || null,
+      p_qualifications: document.getElementById('sc-worker-qualifications').value.trim() || null,
+      p_safety_document_status: document.getElementById('sc-worker-safety-doc').value.trim() || null,
+    });
     await loadSubcontractorWorkerAdmin();
   } catch (e) {
     showError('sc-worker-error', e.message || '保存に失敗しました。');
@@ -8522,6 +8702,86 @@ async function handleJdPhotoFile(file) {
     labelEl.textContent = file.name;
   } catch (e) {
     statusEl.textContent = 'アップロードに失敗しました。';
+    return;
+  }
+  runJoyoDenpyoOcr(file, statusEl);
+}
+
+// 常用伝票の原本写真をAIで読み取り、空欄のフィールドだけを自動入力する
+// (本人が既に入力済みの内容を勝手に上書きしない)。confidenceがlowの項目は
+// .ocr-needs-checkで視覚的に強調し、本人へ確認・修正を促す(highの項目は強調しない)。
+function markJdOcrField(el, confidence) {
+  if (!el) return;
+  if (confidence === 'low') el.classList.add('ocr-needs-check');
+  else el.classList.remove('ocr-needs-check');
+}
+
+function fillJdOcrTextField(elId, field) {
+  if (!field || field.value == null || field.value === '') return;
+  const el = document.getElementById(elId);
+  if (!el || el.value.trim() !== '') { markJdOcrField(el, null); return; }
+  el.value = field.value;
+  markJdOcrField(el, field.confidence);
+}
+
+async function runJoyoDenpyoOcr(file, statusEl) {
+  statusEl.textContent = 'AIが内容を読み取っています...';
+  try {
+    const session = getSession();
+    const b64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const res = await fetch(`${N8N_BASE_URL}/webhook/joyo-denpyo-ocr-proxy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeCode: session.employeeCode, mimeType: file.type || 'image/jpeg', base64: b64 }),
+    });
+    const extracted = await res.json();
+    if (!extracted || !extracted.is_denpyo) {
+      statusEl.textContent = '常用伝票として読み取れませんでした。手入力で確認してください。';
+      return;
+    }
+    if (extracted.report_date && extracted.report_date.value) {
+      // jd-dateはresetJoyoDenpyoForm()が常に本日日付を初期値として入れているため、
+      // fillJdOcrTextFieldの「空欄なら埋める」判定ではOCRの日付が永久に反映されない。
+      // 本日の初期値のままなら未入力とみなし、OCRの読み取り結果で上書きする。
+      const dateEl = document.getElementById('jd-date');
+      if (dateEl.value === todayJST()) {
+        dateEl.value = extracted.report_date.value;
+        markJdOcrField(dateEl, extracted.report_date.confidence);
+      }
+    }
+    fillJdOcrTextField('jd-partner-name', extracted.partner_name);
+    fillJdOcrTextField('jd-work-description', extracted.work_description);
+    fillJdOcrTextField('jd-vehicle-info', extracted.vehicle_info);
+    fillJdOcrTextField('jd-materials-info', extracted.materials_info);
+
+    const siteSearchEl = document.getElementById('jd-site-search');
+    if (extracted.site_name && extracted.site_name.value && siteSearchEl.value.trim() === '') {
+      siteSearchEl.value = extracted.site_name.value;
+      await populateSiteSelect(document.getElementById('jd-site-select'), extracted.site_name.value);
+      markJdOcrField(siteSearchEl, extracted.site_name.confidence);
+    }
+
+    const workersList = document.getElementById('jd-workers-list');
+    if (Array.isArray(extracted.workers) && extracted.workers.length > 0 && workersList.children.length === 0) {
+      extracted.workers.forEach((w) => {
+        if (!w.worker_name) return;
+        addJoyoDenpyoWorkerRow({ worker_type: 'employee', worker_name: w.worker_name, headcount: w.headcount });
+        const row = workersList.lastElementChild;
+        markJdOcrField(row.querySelector('.jd-worker-name'), w.confidence);
+      });
+    }
+
+    const lowCount = [extracted.report_date, extracted.site_name, extracted.partner_name, extracted.work_description, extracted.vehicle_info, extracted.materials_info, ...(extracted.workers || [])]
+      .filter((f) => f && f.confidence === 'low').length;
+    statusEl.textContent = lowCount > 0
+      ? `AIが内容を読み取りました。赤枠の項目は読み取り精度が低いため、内容を確認してください(${lowCount}件)。`
+      : 'AIが内容を読み取りました。内容を確認してください(間違っていれば修正できます)。';
+  } catch (e) {
+    statusEl.textContent = 'アップロード完了(自動読み取りは利用できませんでした。手入力してください)。';
   }
 }
 
@@ -8543,6 +8803,7 @@ function resetJoyoDenpyoForm() {
   document.getElementById('jd-photo-status').textContent = '';
   jdPhotoUpload = null;
   hideError('jd-form-error');
+  document.querySelectorAll('#screen-joyo-denpyo-form .ocr-needs-check').forEach((el) => el.classList.remove('ocr-needs-check'));
 }
 
 function collectJoyoDenpyoWorkers() {
@@ -8556,13 +8817,13 @@ function collectJoyoDenpyoWorkers() {
 }
 
 async function doSubmitJoyoDenpyo(isDraft) {
+  hideError('jd-form-error');
   const session = getSession();
   const editId = document.getElementById('jd-edit-id').value;
   const date = document.getElementById('jd-date').value;
   const siteSelect = document.getElementById('jd-site-select');
   const siteId = siteSelect.value && siteSelect.value !== '__new__' ? Number(siteSelect.value) : null;
   const newSiteName = !siteId ? document.getElementById('jd-site-search').value.trim() : null;
-  hideError('jd-form-error');
   if (!date) { showError('jd-form-error', '日付を入力してください。'); return; }
   if (!siteId && !newSiteName) { showError('jd-form-error', '現場を選択または入力してください。'); return; }
 
@@ -8635,6 +8896,22 @@ async function openJoyoDenpyoDetail(id) {
     }
     html += `<button type="button" class="secondary jd-print-open-btn">PDFで表示・印刷する</button>`;
     actionsEl.innerHTML = html;
+
+    const historyRows = await rpc('get_joyo_denpyo_photo_history', { p_actor_employee_code: session.employeeCode, p_id: Number(id) });
+    const historyWrap = document.getElementById('jd-photo-history-wrap');
+    const historyListEl = document.getElementById('jd-photo-history-list');
+    if (historyRows && historyRows.length > 0) {
+      historyWrap.style.display = '';
+      document.getElementById('jd-photo-history-toggle').textContent = `写真の変更履歴を見る(${historyRows.length}件)`;
+      historyListEl.innerHTML = historyRows.map((h) => `
+        <div class="history-item">
+          <div class="row1"><span>${h.replaced_by_name || '-'}が差し替え</span><span>${new Date(h.replaced_at).toLocaleString('ja-JP')}</span></div>
+          <div class="row2">${h.old_photo_drive_file_url ? `<a class="file-link" href="${h.old_photo_drive_file_url}" target="_blank" rel="noopener">差し替え前の写真</a>` : '(差し替え前の写真なし)'}</div>
+        </div>
+      `).join('');
+    } else {
+      historyWrap.style.display = 'none';
+    }
     const editBtn = actionsEl.querySelector('.jd-edit-btn');
     if (editBtn) editBtn.addEventListener('click', () => openJoyoDenpyoForm(d));
     actionsEl.querySelector('.jd-print-open-btn').addEventListener('click', () => openJoyoDenpyoPrint([id]));
@@ -8681,26 +8958,176 @@ function openJoyoDenpyoForm(existing) {
 let jdaStatusFilter = '';
 let jdaRows = [];
 let jdaSelected = new Set();
+// ---------- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 ----------
+// admin_get_attendance_matrix(出面集計)と同じJSONB matrix構造・UI構成をそのまま踏襲する
+// (SKILL-003: 既存パターンの再利用。データソースはjoyo_denpyoでdaily_reportsとは別)。
+let jdsView = 'employee';
+let jdsSiteFilter = '';
+let jdsCompanyFilter = '';
+let jdsMatrixRequestSeq = 0;
+
+function currentJdsMonth() {
+  const v = document.getElementById('jds-month').value;
+  if (!v) return null;
+  const [year, month] = v.split('-').map(Number);
+  return { year, month };
+}
+function updateJdsMonthDisplay() {
+  const v = document.getElementById('jds-month').value;
+  if (!v) return;
+  const [y, m] = v.split('-').map(Number);
+  document.getElementById('jds-month-display').textContent = `${y}年${m}月`;
+}
+function shiftJdsMonth(delta) {
+  const input = document.getElementById('jds-month');
+  const [y, m] = (input.value || todayJST().slice(0, 7)).split('-').map(Number);
+  const d = new Date(y, m - 1 + delta, 1);
+  input.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+  input.dispatchEvent(new Event('change'));
+}
+
+async function loadJdsFilterOptions() {
+  const session = getSession();
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  try {
+    const rows = await rpc('admin_list_joyo_denpyo_matrix_filter_options', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month });
+    const opts = (rows && rows[0]) || { sites: [], subcontractor_companies: [] };
+    const siteSelect = document.getElementById('jds-site-filter');
+    const curSite = siteSelect.value;
+    siteSelect.innerHTML = '<option value="">すべての現場</option>' + (opts.sites || []).map((s) => `<option value="${s.id}">${s.name}</option>`).join('');
+    siteSelect.value = curSite;
+    const companySelect = document.getElementById('jds-company-filter');
+    const curCompany = companySelect.value;
+    companySelect.innerHTML = '<option value="">すべての外注会社</option>' + (opts.subcontractor_companies || []).map((c) => `<option value="${c.id}">${c.name}</option>`).join('');
+    companySelect.value = curCompany;
+  } catch (e) { /* 無視 */ }
+}
+
+function jdsViewLabel() {
+  return jdsView === 'employee' ? '社員' : (jdsView === 'subcontractor_company' ? '外注会社' : '現場');
+}
+
+async function loadJdsTotals() {
+  const session = getSession();
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  const cardEl = document.getElementById('jds-totals-card');
+  cardEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const monthStart = `${ym.year}-${String(ym.month).padStart(2, '0')}-01`;
+    const monthEnd = `${ym.year}-${String(ym.month).padStart(2, '0')}-${String(daysInMonth(ym.year, ym.month)).padStart(2, '0')}`;
+    const rows = await rpc('admin_get_joyo_denpyo_totals', { p_admin_employee_code: session.employeeCode, p_date_from: monthStart, p_date_to: monthEnd });
+    const t = (rows && rows[0]) || { total_headcount: 0, denpyo_count: 0, site_count: 0, worker_count: 0 };
+    cardEl.innerHTML = `
+      <div class="section-title" style="margin-top:0;">${ym.year}年${ym.month}月の総人工</div>
+      <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14.5px;"><span>総人工</span><span>${t.total_headcount}人工</span></div>
+      <div class="hint" style="margin-top:5px;">伝票数: ${t.denpyo_count}件・現場数: ${t.site_count}件・実人数: ${t.worker_count}人</div>
+    `;
+  } catch (e) {
+    cardEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+async function loadJdsMatrix() {
+  const session = getSession();
+  const mySeq = ++jdsMatrixRequestSeq;
+  const wrapEl = document.getElementById('jds-matrix-wrap');
+  const ym = currentJdsMonth();
+  if (!ym) return;
+  wrapEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_get_joyo_denpyo_matrix', {
+      p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_view: jdsView,
+      p_site_id: jdsSiteFilter ? Number(jdsSiteFilter) : null,
+      p_employee_code: null,
+      p_subcontractor_company_id: jdsCompanyFilter ? Number(jdsCompanyFilter) : null,
+    });
+    if (mySeq !== jdsMatrixRequestSeq) return;
+    const colCount = daysInMonth(ym.year, ym.month);
+    document.getElementById('jds-hint').textContent = rows.length === 0 ? 'この期間の常用伝票データはありません。' : `${rows.length}件(${ym.year}年${ym.month}月)。行をタップすると、その対象で常用伝票一覧を絞り込んで確認できます。`;
+    if (rows.length === 0) { wrapEl.innerHTML = ''; return; }
+    let headers = '';
+    for (let i = 1; i <= colCount; i++) headers += `<th>${i}</th>`;
+    const bodyRows = rows.map((r) => {
+      let cells = '';
+      for (let i = 1; i <= colCount; i++) {
+        const v = r.daily[String(i)];
+        cells += v ? `<td class="am-cell-value">${v}</td>` : '<td class="am-cell-empty">-</td>';
+      }
+      return `<tr class="am-row-clickable" data-group-id="${r.group_id}" data-group-label="${r.group_label}">
+        <td>${r.group_label}</td>${cells}<td class="am-total-col">${r.month_total}</td>
+      </tr>`;
+    }).join('');
+    const colTotals = [];
+    for (let i = 1; i <= colCount; i++) {
+      colTotals.push(rows.reduce((sum, r) => sum + (Number(r.daily[String(i)]) || 0), 0));
+    }
+    const grandTotal = rows.reduce((sum, r) => sum + Number(r.month_total || 0), 0);
+    const totalRow = `<tr><td>合計</td>${colTotals.map((t) => `<td class="am-total-col">${t || '-'}</td>`).join('')}<td class="am-total-col">${grandTotal}</td></tr>`;
+    wrapEl.innerHTML = `
+      <table class="attendance-matrix-table">
+        <thead><tr><th>${jdsViewLabel()}</th>${headers}<th>月合計</th></tr></thead>
+        <tbody>${bodyRows}${totalRow}</tbody>
+      </table>
+    `;
+    if (jdsView === 'employee') {
+      wrapEl.querySelectorAll('.am-row-clickable').forEach((el) => {
+        el.addEventListener('click', () => {
+          jdaEmployeeFilter = { code: el.dataset.groupId, name: el.dataset.groupLabel };
+          jdaEmployeeFilterJustSet = true;
+          showScreen('joyo-denpyo-admin');
+        });
+      });
+    }
+  } catch (e) {
+    if (mySeq === jdsMatrixRequestSeq) wrapEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function loadJoyoDenpyoSummary() {
+  loadJdsTotals();
+  loadJdsFilterOptions();
+  loadJdsMatrix();
+}
+
+let jdaEmployeeFilter = null; // {code, name} | null。社員詳細から「この社員の常用伝票を見る」で遷移した時だけ設定する。
+let jdaEmployeeFilterJustSet = false;
 
 async function loadJoyoDenpyoAdminList() {
   const session = getSession();
   const listEl = document.getElementById('jda-list');
   const countEl = document.getElementById('jda-count');
+  const filterHint = document.getElementById('jda-employee-filter-hint');
+  const clearBtn = document.getElementById('jda-clear-employee-filter-btn');
+  if (jdaEmployeeFilter) {
+    filterHint.style.display = '';
+    filterHint.textContent = `${jdaEmployeeFilter.name}さんの常用伝票を表示中`;
+    clearBtn.style.display = '';
+  } else {
+    filterHint.style.display = 'none';
+    clearBtn.style.display = 'none';
+  }
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   jdaSelected.clear();
   updateJdaBulkBar();
   try {
+    const siteId = document.getElementById('jda-site-select').value || null;
     jdaRows = await rpc('admin_search_joyo_denpyo', {
-      p_admin_employee_code: session.employeeCode, p_date_from: null, p_date_to: null, p_site_id: null,
+      p_admin_employee_code: session.employeeCode,
+      p_date_from: document.getElementById('jda-date-from').value || null,
+      p_date_to: document.getElementById('jda-date-to').value || null,
+      p_site_id: siteId ? Number(siteId) : null,
       p_partner_name: document.getElementById('jda-search-partner').value.trim() || null,
       p_status: jdaStatusFilter || null,
+      p_employee_code: jdaEmployeeFilter ? jdaEmployeeFilter.code : null,
     });
     countEl.textContent = `${jdaRows.length}件`;
     if (jdaRows.length === 0) { listEl.innerHTML = '<div class="hint">該当する常用伝票はありません。</div>'; return; }
     listEl.innerHTML = jdaRows.map((r) => `
       <div class="history-item" data-id="${r.id}">
         <div class="row1"><span>${r.site_name}${r.partner_name ? '・' + r.partner_name : ''}</span><span>${r.report_date}</span></div>
-        <div class="row2">作成者: ${r.created_by_name || '-'}・作業員${r.worker_count}名</div>
+        <div class="row2">作成者: ${r.created_by_name || '-'}・作業員${r.worker_count}名${r.has_photo ? '・写真あり' : '・写真なし'}</div>
         <span class="status-badge ${r.status === 'completed' ? 'done' : ''}">${JD_STATUS_LABEL[r.status] || r.status}</span>
         <div class="checkbox-row"><input type="checkbox" class="jda-row-check" data-id="${r.id}"><label>選択</label></div>
       </div>
@@ -9151,6 +9578,13 @@ function init() {
 
   document.getElementById('meeting-submit').addEventListener('click', doSubmitMeeting);
 
+  wireQtySelectCustomToggle('supply-req-qty');
+  wireQtySelectCustomToggle('supply-ih-qty');
+  let shaSearchTimer = null;
+  const shaDebouncedReload = () => { clearTimeout(shaSearchTimer); shaSearchTimer = setTimeout(() => loadSupplyHoldingsAdmin(), 300); };
+  document.getElementById('sha-search-employee').addEventListener('input', shaDebouncedReload);
+  document.getElementById('sha-search-item').addEventListener('input', shaDebouncedReload);
+  document.getElementById('sha-held-only').addEventListener('change', loadSupplyHoldingsAdmin);
   document.getElementById('supply-req-add-btn').addEventListener('click', doAddSupplyReqItem);
   document.getElementById('supply-req-submit').addEventListener('click', doSubmitSupplyRequestBulk);
   document.getElementById('supply-ih-add-btn').addEventListener('click', doAddSupplyIhItem);
@@ -9192,6 +9626,11 @@ function init() {
   document.getElementById('qual-photo-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'photo'));
   document.getElementById('qual-pdf-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'pdf'));
   document.getElementById('qual-admin-filter').addEventListener('change', loadQualAdminList);
+  let qualSearchTimer = null;
+  document.getElementById('qual-admin-search').addEventListener('input', () => {
+    clearTimeout(qualSearchTimer);
+    qualSearchTimer = setTimeout(() => loadQualAdminList(), 300);
+  });
   document.getElementById('qual-category-qualification').addEventListener('click', () => setQualCategory('qualification'));
   document.getElementById('qual-category-license').addEventListener('click', () => setQualCategory('license'));
   document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((btn) => {
@@ -9368,7 +9807,12 @@ function init() {
   document.querySelectorAll('.dr-view-tab').forEach((btn) => {
     btn.addEventListener('click', () => setDailyReportView(btn.dataset.view));
   });
-  document.getElementById('ed-supply-adjust-submit').addEventListener('click', doAdjustEmployeeSupplyHolding);
+  document.getElementById('ed-supply-correction-submit').addEventListener('click', doRecordSupplyCorrection);
+  document.getElementById('ed-supply-view-joyo-denpyo-btn').addEventListener('click', () => {
+    jdaEmployeeFilter = { code: currentEmployeeDetailCode, name: document.getElementById('employee-detail-name').textContent };
+    jdaEmployeeFilterJustSet = true;
+    showScreen('joyo-denpyo-admin');
+  });
   document.getElementById('dr-period-prev').addEventListener('click', () => navigateDailyReportPeriod(-1));
   document.getElementById('dr-period-next').addEventListener('click', () => navigateDailyReportPeriod(1));
   document.getElementById('dr-period-reset').addEventListener('click', resetDailyReportPeriodToCurrent);
@@ -9572,14 +10016,17 @@ function init() {
     el.addEventListener('click', () => {
       const target = el.getAttribute('data-nav');
       if (el.disabled) return;
+      // 完了画面(screen-done)からの遷移は、完了画面自体を履歴に残さず置き換える
+      // (この後さらに「戻る」を押しても完了画面へ戻ってくる=無限ループに見える、を防ぐ)。
+      const leavingDone = document.getElementById('screen-done').classList.contains('active');
       if (el.classList.contains('back-to-origin')) { goBackToOrigin(target); return; }
-      if (target === 'menu') { enterMenu(); return; }
-      if (target === 'expense') { showScreen('expense-select'); return; }
+      if (target === 'menu') { enterMenu(leavingDone); return; }
+      if (target === 'expense') { showScreen('expense-select', { replace: leavingDone }); return; }
       if (target === 'expense-advance') { enterExpenseScreen('employee_advance'); return; }
       if (target === 'expense-company') { enterExpenseScreen('company_expense'); return; }
       if (target === 'expense-bulk-advance') { enterExpenseBulkScreen('employee_advance'); return; }
       if (target === 'expense-bulk-company') { enterExpenseBulkScreen('company_expense'); return; }
-      showScreen(target);
+      showScreen(target, { replace: leavingDone });
     });
   });
 
@@ -9647,6 +10094,10 @@ function init() {
   SCREEN_ENTER_HOOKS['supply-master-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadSupplyMasterAdmin();
+  };
+  SCREEN_ENTER_HOOKS['supply-holdings-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadSupplyHoldingsAdmin();
   };
   SCREEN_ENTER_HOOKS['health-submit'] = resetHealthForm;
   SCREEN_ENTER_HOOKS['my-qual'] = () => { loadMyQualifications(); loadMyHealthSummary(); };
@@ -9811,15 +10262,80 @@ function init() {
   SCREEN_ENTER_HOOKS['joyo-denpyo-form'] = () => { if (!document.getElementById('jd-edit-id').value) resetJoyoDenpyoForm(); };
   SCREEN_ENTER_HOOKS['joyo-denpyo-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    if (!jdaEmployeeFilterJustSet) jdaEmployeeFilter = null;
+    jdaEmployeeFilterJustSet = false;
     jdaStatusFilter = '';
     document.querySelectorAll('#jda-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
     document.getElementById('jda-search-partner').value = '';
+    document.getElementById('jda-date-from').value = '';
+    document.getElementById('jda-date-to').value = '';
+    populateSiteSelect(document.getElementById('jda-site-select'), '');
     loadJoyoDenpyoAdminList();
   };
+  document.getElementById('jda-clear-employee-filter-btn').addEventListener('click', () => { jdaEmployeeFilter = null; loadJoyoDenpyoAdminList(); });
+  document.getElementById('jda-date-from').addEventListener('change', loadJoyoDenpyoAdminList);
+  document.getElementById('jda-date-to').addEventListener('change', loadJoyoDenpyoAdminList);
+  document.getElementById('jda-site-select').addEventListener('change', loadJoyoDenpyoAdminList);
+
+  // ---------- 常用台帳集計(Phase C-6) ----------
+  SCREEN_ENTER_HOOKS['joyo-denpyo-summary'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    if (!document.getElementById('jds-month').value) document.getElementById('jds-month').value = todayJST().slice(0, 7);
+    jdsView = 'employee';
+    document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+    jdsSiteFilter = '';
+    jdsCompanyFilter = '';
+    document.getElementById('jds-site-filter').value = '';
+    document.getElementById('jds-company-filter').value = '';
+    document.getElementById('jds-range-result').style.display = 'none';
+    updateJdsMonthDisplay();
+    loadJoyoDenpyoSummary();
+  };
+  document.getElementById('jds-month').addEventListener('change', () => { updateJdsMonthDisplay(); loadJoyoDenpyoSummary(); });
+  document.getElementById('jds-month-prev').addEventListener('click', () => shiftJdsMonth(-1));
+  document.getElementById('jds-month-next').addEventListener('click', () => shiftJdsMonth(1));
+  document.getElementById('jds-month-today').addEventListener('click', () => {
+    document.getElementById('jds-month').value = todayJST().slice(0, 7);
+    document.getElementById('jds-month').dispatchEvent(new Event('change'));
+  });
+  document.getElementById('jds-site-filter').addEventListener('change', (e) => { jdsSiteFilter = e.target.value; loadJdsMatrix(); });
+  document.getElementById('jds-company-filter').addEventListener('change', (e) => { jdsCompanyFilter = e.target.value; loadJdsMatrix(); });
+  document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      jdsView = btn.dataset.view;
+      document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c) => c.classList.toggle('active', c === btn));
+      loadJdsMatrix();
+    });
+  });
+  document.getElementById('jds-range-calc-btn').addEventListener('click', async () => {
+    const session = getSession();
+    const from = document.getElementById('jds-range-from').value;
+    const to = document.getElementById('jds-range-to').value;
+    const resultEl = document.getElementById('jds-range-result');
+    if (!from || !to) { alert('開始日と終了日を指定してください。'); return; }
+    if (from > to) { alert('開始日は終了日より前にしてください。'); return; }
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<div class="hint">集計中...</div>';
+    try {
+      const rows = await rpc('admin_get_joyo_denpyo_totals', { p_admin_employee_code: session.employeeCode, p_date_from: from, p_date_to: to });
+      const t = (rows && rows[0]) || { total_headcount: 0, denpyo_count: 0, site_count: 0, worker_count: 0 };
+      resultEl.innerHTML = `
+        <div style="display:flex; justify-content:space-between; font-weight:700; font-size:14.5px;"><span>${from} 〜 ${to}</span><span>${t.total_headcount}人工</span></div>
+        <div class="hint" style="margin-top:5px;">伝票数: ${t.denpyo_count}件・現場数: ${t.site_count}件・実人数: ${t.worker_count}人</div>
+      `;
+    } catch (e) {
+      resultEl.innerHTML = '<div class="hint">集計に失敗しました。</div>';
+    }
+  });
+
   document.getElementById('jd-new-btn').addEventListener('click', () => openJoyoDenpyoForm(null));
   document.getElementById('jd-prefill-btn').addEventListener('click', doPrefillJoyoDenpyoWorkers);
   document.getElementById('jd-photo-input').addEventListener('change', (e) => handleJdPhotoFile(e.target.files[0]));
   document.getElementById('jd-add-worker-btn').addEventListener('click', () => addJoyoDenpyoWorkerRow(null));
+  document.getElementById('jd-photo-history-toggle').addEventListener('click', () => {
+    const el = document.getElementById('jd-photo-history-list');
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+  });
   document.getElementById('jd-workers-list').addEventListener('input', (e) => {
     if (e.target.classList.contains('jd-worker-name') || e.target.classList.contains('jd-worker-headcount')) updateJdWorkersSummary();
   });
@@ -9910,14 +10426,22 @@ function init() {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportManagement();
   };
+  SCREEN_ENTER_HOOKS['request-detail'] = () => { loadRequestDetailContent(); };
+  SCREEN_ENTER_HOOKS['my-request-detail'] = () => { loadMyRequestDetailContent(); };
   SCREEN_ENTER_HOOKS['subcontractor-company-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadSubcontractorCompanyAdmin();
   };
   SCREEN_ENTER_HOOKS['subcontractor-worker-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
+    if (!subcontractorWorkerFilterJustSet) subcontractorWorkerCompanyFilter = null;
+    subcontractorWorkerFilterJustSet = false;
     loadSubcontractorWorkerAdmin();
   };
+  document.getElementById('sc-worker-clear-filter-btn').addEventListener('click', () => {
+    subcontractorWorkerCompanyFilter = null;
+    loadSubcontractorWorkerAdmin();
+  });
   SCREEN_ENTER_HOOKS['daily-report-detail'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
   };
