@@ -1601,6 +1601,11 @@
         <div class="menu-item-body">人員・台帳管理<span class="desc">社員/外注/支給品/資格免許/健康診断/常用台帳/経費台帳の一覧をまとめて確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="master-management-hub">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">マスター管理<span class="desc">支給品/免許種別/使用目的など、申請時に選ぶ選択肢の追加・編集</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
 
     <div class="section-title">管理メニュー</div>
@@ -1635,24 +1640,9 @@
         <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとにまとめて承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="supply-master-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
       <button type="button" class="menu-item" data-nav="event-admin">
         <span class="icon-slot" data-icon="users-round"></span>
         <div class="menu-item-body">社内イベント管理<span class="desc">イベント作成・参加回答の確認</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="license-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">免許種別マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="purpose-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">使用目的マスター管理<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="site-admin">
@@ -1747,6 +1737,31 @@
       <button type="button" class="menu-item" data-nav="employee-summary">
         <span class="icon-slot" data-icon="receipt"></span>
         <div class="menu-item-body">経費台帳(社員別集計)<span class="desc">月別・社員別の経費集計と明細。税理士提出用の原簿は連携済みGoogleスプレッドシートに記帳されます</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+  </section>
+
+  <!-- マスター管理ハブ(Phase D §9): 「マスター」=選択肢・基礎台帳の登録元、「管理」=日々発生する
+       実績・申請・処理・集計、という用語整理に基づき、選択肢設定系の画面をここへ一元化する。 -->
+  <section id="screen-master-management-hub" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">マスター管理</div>
+    <div class="hint" style="margin-bottom:12px;">申請・登録の際に社員が選ぶ「選択肢」を管理者があらかじめ設定しておく画面です。実績データ(誰が何を持っているか等)は「人員・台帳管理」をご覧ください。</div>
+    <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="supply-master-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">支給品マスター<span class="desc">支給品の選択肢を追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="license-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">免許種別マスター<span class="desc">資格・免許の選択肢を追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="purpose-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">使用目的マスター<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
     </div>
