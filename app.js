@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T20:05:16.758Z';
+const BUILD_DEPLOYED_AT = '2026-08-29T20:11:23.171Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8478,11 +8478,19 @@ let subcontractorWorkerFilterJustSet = false; // 直前にドリルダウンか�
 function resetSubcontractorWorkerForm() {
   document.getElementById('sc-worker-edit-id').value = '';
   document.getElementById('sc-worker-name').value = '';
+  document.getElementById('sc-worker-furigana').value = '';
   document.getElementById('sc-worker-birth-date').value = '';
+  document.getElementById('sc-worker-blood-type').value = '';
   document.getElementById('sc-worker-phone').value = '';
   document.getElementById('sc-worker-address').value = '';
+  document.getElementById('sc-worker-emergency-name').value = '';
+  document.getElementById('sc-worker-emergency-relation').value = '';
+  document.getElementById('sc-worker-emergency-phone').value = '';
   document.getElementById('sc-worker-qualifications').value = '';
+  document.getElementById('sc-worker-qualification-expiry').value = '';
   document.getElementById('sc-worker-safety-doc').value = '';
+  document.getElementById('sc-worker-health-checkup-date').value = '';
+  document.getElementById('sc-worker-next-health-checkup').value = '';
   document.getElementById('sc-worker-notes').value = '';
   hideError('sc-worker-error');
 }
@@ -8513,10 +8521,13 @@ async function loadSubcontractorWorkerAdmin() {
     if (rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する作業員はいません。</div>'; return; }
     listEl.innerHTML = rows.map((w) => `
       <div class="supply-item" data-id="${w.id}" style="${w.status === 'active' ? '' : 'opacity:.5;'}">
-        <div class="row1"><span>${w.worker_name}</span><span>${w.company_name}</span></div>
+        <div class="row1"><span>${w.worker_name}${w.furigana ? `(${w.furigana})` : ''}</span><span>${w.company_name}</span></div>
         <div class="row2">${[w.phone, w.address].filter(Boolean).join('・')}</div>
-        ${w.qualifications ? `<div class="row2">資格: ${w.qualifications}</div>` : ''}
+        ${w.emergency_contact_name ? `<div class="row2">緊急連絡先: ${w.emergency_contact_name}${w.emergency_contact_relation ? `(${w.emergency_contact_relation})` : ''}${w.emergency_contact_phone ? `・${w.emergency_contact_phone}` : ''}</div>` : ''}
+        ${w.qualifications ? `<div class="row2">資格: ${w.qualifications}${w.qualification_expiry_date ? `(期限: ${w.qualification_expiry_date})` : ''}</div>` : ''}
         ${w.safety_document_status ? `<div class="row2">安全書類: ${w.safety_document_status}</div>` : ''}
+        ${w.health_checkup_date || w.next_health_checkup_date ? `<div class="row2">健康診断: ${w.health_checkup_date ? `受診日${w.health_checkup_date}` : ''}${w.next_health_checkup_date ? `・次回目安${w.next_health_checkup_date}` : ''}</div>` : ''}
+        ${w.blood_type ? `<div class="row2">血液型: ${w.blood_type}${w.blood_type === '不明' ? '' : '型'}</div>` : ''}
         ${w.notes ? `<div class="row2">${w.notes}</div>` : ''}
         <div class="qual-verify-btns">
           <button type="button" class="edit-sc-worker-btn" data-id="${w.id}">編集</button>
@@ -8529,11 +8540,19 @@ async function loadSubcontractorWorkerAdmin() {
         const w = rows.find((r) => String(r.id) === btn.dataset.id);
         document.getElementById('sc-worker-edit-id').value = w.id;
         document.getElementById('sc-worker-name').value = w.worker_name;
+        document.getElementById('sc-worker-furigana').value = w.furigana || '';
         document.getElementById('sc-worker-birth-date').value = w.birth_date || '';
+        document.getElementById('sc-worker-blood-type').value = w.blood_type || '';
         document.getElementById('sc-worker-phone').value = w.phone || '';
         document.getElementById('sc-worker-address').value = w.address || '';
+        document.getElementById('sc-worker-emergency-name').value = w.emergency_contact_name || '';
+        document.getElementById('sc-worker-emergency-relation').value = w.emergency_contact_relation || '';
+        document.getElementById('sc-worker-emergency-phone').value = w.emergency_contact_phone || '';
         document.getElementById('sc-worker-qualifications').value = w.qualifications || '';
+        document.getElementById('sc-worker-qualification-expiry').value = w.qualification_expiry_date || '';
         document.getElementById('sc-worker-safety-doc').value = w.safety_document_status || '';
+        document.getElementById('sc-worker-health-checkup-date').value = w.health_checkup_date || '';
+        document.getElementById('sc-worker-next-health-checkup').value = w.next_health_checkup_date || '';
         document.getElementById('sc-worker-notes').value = w.notes || '';
         document.getElementById('sc-worker-company-select').value = w.subcontractor_company_id;
         window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -8570,6 +8589,14 @@ async function doSaveSubcontractorWorker() {
       p_address: document.getElementById('sc-worker-address').value.trim() || null,
       p_qualifications: document.getElementById('sc-worker-qualifications').value.trim() || null,
       p_safety_document_status: document.getElementById('sc-worker-safety-doc').value.trim() || null,
+      p_furigana: document.getElementById('sc-worker-furigana').value.trim() || null,
+      p_emergency_contact_name: document.getElementById('sc-worker-emergency-name').value.trim() || null,
+      p_emergency_contact_relation: document.getElementById('sc-worker-emergency-relation').value.trim() || null,
+      p_emergency_contact_phone: document.getElementById('sc-worker-emergency-phone').value.trim() || null,
+      p_blood_type: document.getElementById('sc-worker-blood-type').value || null,
+      p_qualification_expiry_date: document.getElementById('sc-worker-qualification-expiry').value || null,
+      p_health_checkup_date: document.getElementById('sc-worker-health-checkup-date').value || null,
+      p_next_health_checkup_date: document.getElementById('sc-worker-next-health-checkup').value || null,
     });
     await loadSubcontractorWorkerAdmin();
   } catch (e) {

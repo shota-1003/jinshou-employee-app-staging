@@ -718,16 +718,39 @@
       <select id="sc-worker-company-select"></select>
       <label for="sc-worker-name">作業員名</label>
       <input type="text" id="sc-worker-name" placeholder="例: 山田 太郎">
+      <label for="sc-worker-furigana">フリガナ</label>
+      <input type="text" id="sc-worker-furigana" placeholder="例: ヤマダ タロウ">
       <label for="sc-worker-birth-date">生年月日</label>
       <input type="date" id="sc-worker-birth-date">
+      <label for="sc-worker-blood-type">血液型</label>
+      <select id="sc-worker-blood-type">
+        <option value="">未選択</option>
+        <option value="A">A型</option>
+        <option value="B">B型</option>
+        <option value="O">O型</option>
+        <option value="AB">AB型</option>
+        <option value="不明">不明</option>
+      </select>
       <label for="sc-worker-phone">連絡先電話番号</label>
       <input type="tel" id="sc-worker-phone">
       <label for="sc-worker-address">住所</label>
       <input type="text" id="sc-worker-address">
+      <label for="sc-worker-emergency-name">緊急連絡先氏名</label>
+      <input type="text" id="sc-worker-emergency-name">
+      <label for="sc-worker-emergency-relation">続柄</label>
+      <input type="text" id="sc-worker-emergency-relation" placeholder="例: 配偶者・親">
+      <label for="sc-worker-emergency-phone">緊急連絡先電話番号</label>
+      <input type="tel" id="sc-worker-emergency-phone">
       <label for="sc-worker-qualifications">保有資格</label>
       <input type="text" id="sc-worker-qualifications" placeholder="例: 玉掛け技能講習、フルハーネス特別教育">
+      <label for="sc-worker-qualification-expiry">資格の有効期限(最も早いもの)</label>
+      <input type="date" id="sc-worker-qualification-expiry">
       <label for="sc-worker-safety-doc">安全書類の提出状況</label>
       <input type="text" id="sc-worker-safety-doc" placeholder="例: 作業員名簿・施工体制台帳提出済み">
+      <label for="sc-worker-health-checkup-date">健康診断受診日</label>
+      <input type="date" id="sc-worker-health-checkup-date">
+      <label for="sc-worker-next-health-checkup">次回健康診断の目安日</label>
+      <input type="date" id="sc-worker-next-health-checkup">
       <label for="sc-worker-notes">備考</label>
       <input type="text" id="sc-worker-notes">
       <div class="error" id="sc-worker-error"></div>
