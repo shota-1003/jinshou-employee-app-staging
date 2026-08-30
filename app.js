@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-30T05:41:31.638Z';
+const BUILD_DEPLOYED_AT = '2026-08-30T16:58:04.514Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -603,6 +603,7 @@ function enterMenu(replace) {
 // 同じRPC(get_employee_status_timeline/mark_status_report_returned)を再利用する。
 async function renderHomeMyOutingBanner(session) {
   const banner = document.getElementById('home-my-outing-banner');
+  if (!banner) return;
   try {
     const rows = await rpc('get_employee_status_timeline', { p_employee_code: session.employeeCode, p_target_employee_code: session.employeeCode, p_work_date: null });
     const active = (rows || []).filter((r) => r.status === 'active' && r.event_type === 'outing');
@@ -10288,7 +10289,7 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     resetEmployeeCreateForm();
   };
-  document.getElementById('ec-submit').addEventListener('click', doCreateEmployee);
+  onId('ec-submit', 'click', doCreateEmployee);
   SCREEN_ENTER_HOOKS['info-change-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadInfoChangeAdmin();
