@@ -102,12 +102,6 @@
       <div class="greeting-sub" id="menu-greeting-sub"></div>
     </div>
 
-    <!-- 外出・離脱中は本人のホーム最上部に必ず表示する(ユーザー指示:「本人のホーム画面上部に
-         目立つ形で『現在 外出中です』『予定復帰 15:30』［戻りました］を表示する」)。
-         status-submit画面の「現在、外出・離脱中です」カードと同じデータ(get_employee_status_timeline)
-         を使い、二重管理はしない。 -->
-    <div class="card warning-card" id="home-my-outing-banner" style="display:none;"></div>
-
     <!-- 2026-08-28(第3弾): ホーム表示順を「今日やること→重要なお知らせ→会社からのお知らせ→
          在席状況→その他機能」へ変更。独立していた「本日の日報未提出」バナーは廃止し、
          今日やること内の同内容の行に一本化する(同じ情報を複数箇所へ出さない)。 -->
@@ -526,11 +520,7 @@
   <section id="screen-admin-role-management" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">管理者管理</div>
-    <div class="hint" style="margin-bottom:12px;">管理者権限の変更は監査ログに記録されます。管理者が0人になる操作はできません。1人の社員に複数の権限をまとめて付与できます(下の「権限を追加」で1つずつ追加してください)。</div>
-
-    <div class="section-title">社員別 保有権限一覧</div>
-    <div class="hint" style="margin-bottom:10px;">1人が複数の権限を持てます。例: 田中さん → 日報管理 + 現場管理</div>
-    <div id="arm-by-employee-list"></div>
+    <div class="hint" style="margin-bottom:12px;">管理者権限の変更は監査ログに記録されます。管理者が0人になる操作はできません。</div>
 
     <div class="section-title">現在の管理者</div>
     <div id="arm-current-list"></div>
@@ -718,39 +708,16 @@
       <select id="sc-worker-company-select"></select>
       <label for="sc-worker-name">作業員名</label>
       <input type="text" id="sc-worker-name" placeholder="例: 山田 太郎">
-      <label for="sc-worker-furigana">フリガナ</label>
-      <input type="text" id="sc-worker-furigana" placeholder="例: ヤマダ タロウ">
       <label for="sc-worker-birth-date">生年月日</label>
       <input type="date" id="sc-worker-birth-date">
-      <label for="sc-worker-blood-type">血液型</label>
-      <select id="sc-worker-blood-type">
-        <option value="">未選択</option>
-        <option value="A">A型</option>
-        <option value="B">B型</option>
-        <option value="O">O型</option>
-        <option value="AB">AB型</option>
-        <option value="不明">不明</option>
-      </select>
       <label for="sc-worker-phone">連絡先電話番号</label>
       <input type="tel" id="sc-worker-phone">
       <label for="sc-worker-address">住所</label>
       <input type="text" id="sc-worker-address">
-      <label for="sc-worker-emergency-name">緊急連絡先氏名</label>
-      <input type="text" id="sc-worker-emergency-name">
-      <label for="sc-worker-emergency-relation">続柄</label>
-      <input type="text" id="sc-worker-emergency-relation" placeholder="例: 配偶者・親">
-      <label for="sc-worker-emergency-phone">緊急連絡先電話番号</label>
-      <input type="tel" id="sc-worker-emergency-phone">
       <label for="sc-worker-qualifications">保有資格</label>
       <input type="text" id="sc-worker-qualifications" placeholder="例: 玉掛け技能講習、フルハーネス特別教育">
-      <label for="sc-worker-qualification-expiry">資格の有効期限(最も早いもの)</label>
-      <input type="date" id="sc-worker-qualification-expiry">
       <label for="sc-worker-safety-doc">安全書類の提出状況</label>
       <input type="text" id="sc-worker-safety-doc" placeholder="例: 作業員名簿・施工体制台帳提出済み">
-      <label for="sc-worker-health-checkup-date">健康診断受診日</label>
-      <input type="date" id="sc-worker-health-checkup-date">
-      <label for="sc-worker-next-health-checkup">次回健康診断の目安日</label>
-      <input type="date" id="sc-worker-next-health-checkup">
       <label for="sc-worker-notes">備考</label>
       <input type="text" id="sc-worker-notes">
       <div class="error" id="sc-worker-error"></div>
@@ -940,6 +907,7 @@
         <option value="paid_leave">有給休暇</option>
         <option value="regular_leave">普通休暇</option>
         <option value="absence">欠勤</option>
+        <option value="company_leave">会社都合休み</option>
         <option value="other_leave">その他休暇</option>
       </select>
       <label for="leave-start">開始日</label>
@@ -1601,11 +1569,6 @@
         <div class="menu-item-body">人員・台帳管理<span class="desc">社員/外注/支給品/資格免許/健康診断/常用台帳/経費台帳の一覧をまとめて確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="master-management-hub">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">マスター管理<span class="desc">支給品/免許種別/使用目的など、申請時に選ぶ選択肢の追加・編集</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
     </div>
 
     <div class="section-title">管理メニュー</div>
@@ -1640,9 +1603,24 @@
         <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとにまとめて承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="supply-master-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="event-admin">
         <span class="icon-slot" data-icon="users-round"></span>
         <div class="menu-item-body">社内イベント管理<span class="desc">イベント作成・参加回答の確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="license-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">免許種別マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="purpose-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">使用目的マスター管理<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="site-admin">
@@ -1742,31 +1720,6 @@
     </div>
   </section>
 
-  <!-- マスター管理ハブ(Phase D §9): 「マスター」=選択肢・基礎台帳の登録元、「管理」=日々発生する
-       実績・申請・処理・集計、という用語整理に基づき、選択肢設定系の画面をここへ一元化する。 -->
-  <section id="screen-master-management-hub" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
-    <div class="form-title">マスター管理</div>
-    <div class="hint" style="margin-bottom:12px;">申請・登録の際に社員が選ぶ「選択肢」を管理者があらかじめ設定しておく画面です。実績データ(誰が何を持っているか等)は「人員・台帳管理」をご覧ください。</div>
-    <div class="menu-list">
-      <button type="button" class="menu-item" data-nav="supply-master-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">支給品マスター<span class="desc">支給品の選択肢を追加・編集・停止</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="license-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">免許種別マスター<span class="desc">資格・免許の選択肢を追加・編集・停止</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-      <button type="button" class="menu-item" data-nav="purpose-admin">
-        <span class="icon-slot" data-icon="filter"></span>
-        <div class="menu-item-body">使用目的マスター<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
-        <span class="icon-slot arrow" data-icon="chevron-right"></span>
-      </button>
-    </div>
-  </section>
-
   <!-- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 -->
   <section id="screen-joyo-denpyo-summary" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
@@ -1788,7 +1741,6 @@
       <button type="button" class="filter-chip active" data-view="employee">社員別</button>
       <button type="button" class="filter-chip" data-view="subcontractor_company">外注会社別</button>
       <button type="button" class="filter-chip" data-view="site">現場別</button>
-      <button type="button" class="filter-chip" data-view="business_partner">取引先別</button>
     </div>
     <label for="jds-site-filter">現場で絞り込み</label>
     <div class="hint-inline">任意</div>
@@ -1796,13 +1748,8 @@
     <label for="jds-company-filter">外注会社で絞り込み</label>
     <div class="hint-inline">任意</div>
     <select id="jds-company-filter"><option value="">すべての外注会社</option></select>
-    <label for="jds-partner-filter">取引先で絞り込み</label>
-    <div class="hint-inline">任意</div>
-    <select id="jds-partner-filter"><option value="">すべての取引先</option></select>
     <div class="hint" id="jds-hint" style="margin:10px 0;">行をタップすると、その対象で常用伝票一覧を絞り込んで確認できます。</div>
     <div class="attendance-matrix-wrap" id="jds-matrix-wrap"></div>
-    <button type="button" class="link" id="jds-open-ledger-btn" style="margin-top:12px;">月次台帳(Spreadsheet)を開く</button>
-    <button type="button" class="link" id="jds-email-ledger-btn">この台帳をメールで送付する</button>
 
     <div class="section-title" style="margin-top:24px;">期間指定集計</div>
     <div class="hint" style="margin-bottom:8px;">上のマトリクスとは別に、任意の開始日〜終了日で総人工を集計します。</div>
@@ -2154,9 +2101,37 @@
     </div>
 
     <div class="card">
+      <div class="section-title">外出・一時離脱を報告</div>
+      <div class="hint" style="margin-bottom:10px;">銀行・役所・買い物・私用・現場移動・通院等、勤務中に一時的に離れる場合はこちらから。</div>
+      <label for="status-outing-category">区分<span class="required-mark">(必須)</span></label>
+      <select id="status-outing-category">
+        <option value="業務外出">業務外出</option>
+        <option value="私用外出">私用外出</option>
+        <option value="一時離脱">一時離脱</option>
+        <option value="現場移動">現場移動</option>
+        <option value="病院等">病院等(一般表示では詳細を隠します)</option>
+        <option value="その他">その他</option>
+      </select>
+      <label for="status-outing-destination">行き先</label>
+      <input type="text" id="status-outing-destination" placeholder="例: 徳島銀行本店">
+      <label for="status-outing-reason">理由</label>
+      <input type="text" id="status-outing-reason" placeholder="例: 入金のため">
+      <label for="status-outing-expected-return">予定帰着時刻</label>
+      <input type="datetime-local" id="status-outing-expected-return">
+      <div class="checkbox-row">
+        <input type="checkbox" id="status-outing-will-return" checked>
+        <label>本日中に戻る予定がある</label>
+      </div>
+      <label for="status-outing-note">備考</label>
+      <textarea id="status-outing-note"></textarea>
+      <div class="error" id="status-outing-error"></div>
+      <button id="status-outing-submit">外出を報告する</button>
+    </div>
+
+    <div class="card">
       <div class="section-title">遅刻を報告</div>
       <label for="status-late-expected-arrival">到着予定時刻<span class="required-mark">(必須)</span></label>
-      <input type="time" id="status-late-expected-arrival">
+      <input type="datetime-local" id="status-late-expected-arrival">
       <label for="status-late-reason">理由<span class="required-mark">(必須)</span></label>
       <input type="text" id="status-late-reason" placeholder="例: 電車遅延のため">
       <label for="status-late-note">備考</label>
@@ -2174,34 +2149,6 @@
       <textarea id="status-early-note"></textarea>
       <div class="error" id="status-early-error"></div>
       <button id="status-early-submit" class="danger-submit">早退を報告する</button>
-    </div>
-
-    <div class="card">
-      <div class="section-title">外出・一時離脱を報告</div>
-      <div class="hint" style="margin-bottom:10px;">銀行・役所・買い物・私用・現場移動・通院等、勤務中に一時的に離れる場合はこちらから。</div>
-      <label for="status-outing-category">区分<span class="required-mark">(必須)</span></label>
-      <select id="status-outing-category">
-        <option value="業務外出">業務外出</option>
-        <option value="私用外出">私用外出</option>
-        <option value="一時離脱">一時離脱</option>
-        <option value="現場移動">現場移動</option>
-        <option value="病院等">病院等(一般表示では詳細を隠します)</option>
-        <option value="その他">その他</option>
-      </select>
-      <label for="status-outing-destination">行き先</label>
-      <input type="text" id="status-outing-destination" placeholder="例: 徳島銀行本店">
-      <label for="status-outing-reason">理由</label>
-      <input type="text" id="status-outing-reason" placeholder="例: 入金のため">
-      <div class="checkbox-row">
-        <input type="checkbox" id="status-outing-will-return" checked>
-        <label>本日中に戻る予定がある</label>
-      </div>
-      <label for="status-outing-expected-return">予定復帰時刻</label>
-      <input type="time" id="status-outing-expected-return">
-      <label for="status-outing-note">備考</label>
-      <textarea id="status-outing-note"></textarea>
-      <div class="error" id="status-outing-error"></div>
-      <button id="status-outing-submit">外出を報告する</button>
     </div>
   </section>
 
@@ -2409,8 +2356,6 @@
   <section id="screen-bulk-expense-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">まとめ精算管理</div>
-    <button type="button" class="link" id="bea-open-ledger-btn" style="margin-bottom:12px;">経費台帳・月次集計(Spreadsheet)を開く</button>
-    <button type="button" class="link" id="bea-email-ledger-btn" style="margin-bottom:12px;">この台帳をメールで送付する</button>
     <div class="filter-row" id="bea-status-filter">
       <button type="button" class="filter-chip active" data-status="">すべて</button>
       <button type="button" class="filter-chip" data-status="pending">承認待ち</button>
@@ -2528,7 +2473,6 @@
   <section id="screen-employee-directory" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">社員名簿</div>
-    <button type="button" class="secondary" data-nav="employee-create" style="margin-bottom:10px;">+ 新規社員を登録する</button>
     <div class="search-bar">
       <span class="icon-slot" data-icon="search"></span>
       <input type="text" id="employee-search-input" placeholder="氏名・社員番号で検索">
@@ -2539,49 +2483,6 @@
       <button type="button" class="filter-chip" data-status="inactive">退職等</button>
     </div>
     <div id="employee-directory-list"></div>
-  </section>
-
-  <!-- 新規社員登録(Phase D §7): 登録すると正式な社員IDが発行されDBへ保存される。初回ログイン用
-       コード発行・有給付与登録等は登録後に遷移する社員詳細画面の既存機能をそのまま使う
-       (重複実装しない)。Google Spreadsheet社員名簿への同期は対象スプレッドシートの列構成を
-       確認できていないため今回は対象外(docs/employee-portal参照、要フォローアップ)。 -->
-  <section id="screen-employee-create" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="employee-directory">社員名簿に戻る</button>
-    <div class="form-title">新規社員を登録する</div>
-    <div class="hint" style="margin-bottom:12px;">登録すると社員番号が自動発行されます。初回ログイン用コードの発行・有給の付与登録は、登録後に開く社員詳細画面から行ってください。</div>
-    <div class="card">
-      <label for="ec-name">氏名<span class="required-mark">(必須)</span></label>
-      <input type="text" id="ec-name" placeholder="例: 山田 太郎">
-      <label for="ec-furigana">フリガナ</label>
-      <input type="text" id="ec-furigana" placeholder="例: ヤマダ タロウ">
-      <label for="ec-department">部署</label>
-      <input type="text" id="ec-department">
-      <label for="ec-hire-date">入社日</label>
-      <input type="date" id="ec-hire-date">
-      <label for="ec-gender">性別</label>
-      <select id="ec-gender">
-        <option value="">未選択</option>
-        <option value="男性">男性</option>
-        <option value="女性">女性</option>
-        <option value="その他">その他</option>
-      </select>
-      <div class="checkbox-row">
-        <input type="checkbox" id="ec-foreign-worker">
-        <label>技能実習生</label>
-      </div>
-      <label for="ec-phone">連絡先電話番号</label>
-      <input type="tel" id="ec-phone">
-      <label for="ec-address">住所</label>
-      <input type="text" id="ec-address">
-      <label for="ec-emergency-name">緊急連絡先氏名</label>
-      <input type="text" id="ec-emergency-name">
-      <label for="ec-emergency-relation">続柄</label>
-      <input type="text" id="ec-emergency-relation">
-      <label for="ec-emergency-phone">緊急連絡先電話番号</label>
-      <input type="tel" id="ec-emergency-phone">
-      <div class="error" id="ec-error"></div>
-      <button id="ec-submit">登録する</button>
-    </div>
   </section>
 
   <!-- 社員詳細(管理者) -->
@@ -2991,8 +2892,7 @@
     <input type="text" class="dr-site-search" id="jd-site-search" placeholder="現場名で検索...">
     <select id="jd-site-select"></select>
     <label>取引先</label>
-    <input type="text" id="jd-partner-name" placeholder="例: 〇〇株式会社" list="jd-partner-list">
-    <datalist id="jd-partner-list"></datalist>
+    <input type="text" id="jd-partner-name" placeholder="例: 〇〇株式会社">
     <label>作業内容</label>
     <textarea id="jd-work-description" placeholder="実施した作業内容を記入してください"></textarea>
     <label>使用車両(任意)</label>

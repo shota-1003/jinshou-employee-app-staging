@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-30T00:08:46.559Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
+const BUILD_DEPLOYED_AT = '2026-08-30T02:32:53.697Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -102,47 +102,6 @@ function safeText(val, fallback = '') {
 function onId(id, event, handler) {
   const el = document.getElementById(id);
   if (el) el.addEventListener(event, handler);
-}
-
-// GoogleスプレッドシートのwebViewLinkからファイルIDを取り出す
-// (例: https://docs.google.com/spreadsheets/d/XXXX/edit -> XXXX)。
-function extractDriveFileId(link) {
-  const m = String(link || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
-  return m ? m[1] : null;
-}
-
-// 台帳(常用/経費)をメールで送付する共通処理。getLinkRpcNameで台帳リンクを取得し、
-// send-ledger-email Edge Function経由でGoogle Driveの共有通知メールとして送付する。
-async function emailLedger(getLinkRpcName, btn) {
-  const session = getSession();
-  let link;
-  try {
-    link = await rpc(getLinkRpcName, { p_admin_employee_code: session.employeeCode });
-  } catch (err) {
-    alert(err.message || '台帳リンクの取得に失敗しました。');
-    return;
-  }
-  const fileId = extractDriveFileId(link);
-  if (!fileId) { alert('台帳はまだ作成されていません(データが確定されると自動生成されます)。'); return; }
-  const emailAddress = prompt('送付先のメールアドレスを入力してください');
-  if (!emailAddress) return;
-  btn.disabled = true;
-  btn.textContent = '送付しています...';
-  try {
-    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-ledger-email`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, 'x-device-token': currentDeviceToken || '' },
-      body: JSON.stringify({ employee_code: session.employeeCode, file_id: fileId, email_address: emailAddress }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) alert('送付しました。');
-    else alert((data && data.error) || '送付に失敗しました。');
-  } catch (err) {
-    alert('送付に失敗しました。');
-  } finally {
-    btn.disabled = false;
-    btn.textContent = 'この台帳をメールで送付する';
-  }
 }
 
 function fileToBase64(file) {
@@ -2310,9 +2269,13 @@ async function loadHistory() {
       // 却下された申請だけでなく、承認待ち/一部承認/承認済み/支払済み/受取確認済みなど
       // 全ステータスで詳細を開けるようにする(以前はrejectedのみタップ可能だった不具合の修正)。
       const clickable = detailableTypes.includes(r.request_type);
+      const approverLine = r.approver_name
+        ? `<div class="row2">承認者: ${r.approver_name}・${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : ''}</div>`
+        : (['approved', 'rejected'].includes(r.status) ? '<div class="row2">承認者記録なし(旧データ)</div>' : '');
       div.innerHTML = `
         <div class="row1"><span>${REQUEST_TYPE_LABEL[r.request_type] || r.request_type}</span><span>${amountStr}</span></div>
         <div class="row2">${dateStr}　${r.summary || ''}</div>
+        ${approverLine}
         <span class="status-badge ${statusClass}">${STATUS_LABEL[r.status] || r.status}</span>
         ${clickable ? '<div class="hint-inline">タップして詳細を確認</div>' : ''}
       `;
@@ -5141,10 +5104,14 @@ async function loadEmployeeDetailRequests() {
     listEl.innerHTML = rows.map((r) => {
       const amountStr = r.amount != null ? `${Number(r.amount).toLocaleString()}円` : '';
       const statusClass = r.status_group === 'approved' ? 'done' : (r.status_group === 'rejected' ? 'rejected' : '');
+      const approverLine = r.approver_name
+        ? `<div class="row2">承認者: ${r.approver_name}・${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : ''}</div>`
+        : (['approved', 'rejected'].includes(r.status_group) ? '<div class="row2">承認者記録なし(旧データ)</div>' : '');
       return `
         <div class="history-item">
           <div class="row1"><span>${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span>${amountStr}</span></div>
           <div class="row2">${new Date(r.requested_at).toLocaleDateString('ja-JP')}　${r.summary || ''}</div>
+          ${approverLine}
           <span class="status-badge ${statusClass}">${STATUS_LABEL[r.status] || STATUS_GROUP_LABEL[r.status_group] || r.status}</span>
         </div>
       `;
@@ -7807,6 +7774,7 @@ async function loadRequestDetailContent() {
       ['対象日', r.target_date || '-'], ['現在のステータス', STATUS_GROUP_LABEL[r.status_group] || r.status],
       ['現場', r.site_name || '-'], ['取引先', r.partner_name || '-'], ['金額', r.amount != null ? `${Number(r.amount).toLocaleString()}円` : '-'],
       ['内容', r.summary || '-'],
+      ...(r.approver_name ? [['承認者', r.approver_name], ['承認日時', r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : '-']] : []),
     ].map(([label, value]) => `<div class="field-row"><span class="field-label">${label}</span><span class="field-value">${value}</span></div>`).join('');
 
     const targetTable = sourceType === 'entertainment_preapproval' ? 'entertainment_preapprovals'
@@ -7825,6 +7793,12 @@ async function loadRequestDetailContent() {
 
 function renderRequestDetailActions(sourceType, r) {
   const box = document.getElementById('rdetail-actions');
+  // 自己承認防止(バックエンド側でも必ず拒否されるが、UI上でも操作できないことを明示する)。
+  const session = getSession();
+  if (r.employee_code && session && r.employee_code === session.employeeCode) {
+    box.innerHTML = '<div class="hint">自分自身の申請は承認できません。別の管理者による承認が必要です。</div>';
+    return;
+  }
   if (['expense_reimbursement', 'paid_leave', 'meeting'].includes(sourceType)) {
     if (r.status_group !== 'pending') { box.innerHTML = '<div class="hint">この申請は既に処理済みです。</div>'; return; }
     box.innerHTML = `
@@ -10446,7 +10420,6 @@ function init() {
       btn.textContent = '経費台帳・月次集計(Spreadsheet)を開く';
     }
   });
-  onId('bea-email-ledger-btn', 'click', (e) => emailLedger('admin_get_expense_ledger_link', e.target));
   document.getElementById('bed-select-all').addEventListener('click', () => {
     document.querySelectorAll('.bed-item-check').forEach((cb) => { cb.checked = true; bulkExpenseSelectedItems.add(cb.dataset.id); });
     updateBulkExpenseSelectedCount();
@@ -10564,7 +10537,6 @@ function init() {
       btn.textContent = '月次台帳(Spreadsheet)を開く';
     }
   });
-  onId('jds-email-ledger-btn', 'click', (e) => emailLedger('admin_get_joyo_denpyo_ledger_link', e.target));
   document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       jdsView = btn.dataset.view;

@@ -442,7 +442,6 @@ button.link {
 .ai-guide-msg { max-width: 84%; padding: 10px 13px; border-radius: var(--radius-md); font-size: 13.5px; line-height: 1.6; }
 .ai-guide-msg.bot { align-self: flex-start; background: var(--info-bg); color: var(--text); border-bottom-left-radius: 4px; }
 .ai-guide-msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: 4px; }
-.ai-guide-msg.pending { opacity: .55; }
 .ai-guide-msg-action {
   align-self: flex-start; width: auto; margin: -2px 0 0; padding: 8px 14px; font-size: 12.5px;
   background: var(--card-bg); border: 1px solid var(--border); color: var(--primary); box-shadow: none;
