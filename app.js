@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-29T23:38:59.028Z';
+const BUILD_DEPLOYED_AT = '2026-08-30T00:08:46.559Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -102,6 +102,47 @@ function safeText(val, fallback = '') {
 function onId(id, event, handler) {
   const el = document.getElementById(id);
   if (el) el.addEventListener(event, handler);
+}
+
+// GoogleスプレッドシートのwebViewLinkからファイルIDを取り出す
+// (例: https://docs.google.com/spreadsheets/d/XXXX/edit -> XXXX)。
+function extractDriveFileId(link) {
+  const m = String(link || '').match(/\/d\/([a-zA-Z0-9_-]+)/);
+  return m ? m[1] : null;
+}
+
+// 台帳(常用/経費)をメールで送付する共通処理。getLinkRpcNameで台帳リンクを取得し、
+// send-ledger-email Edge Function経由でGoogle Driveの共有通知メールとして送付する。
+async function emailLedger(getLinkRpcName, btn) {
+  const session = getSession();
+  let link;
+  try {
+    link = await rpc(getLinkRpcName, { p_admin_employee_code: session.employeeCode });
+  } catch (err) {
+    alert(err.message || '台帳リンクの取得に失敗しました。');
+    return;
+  }
+  const fileId = extractDriveFileId(link);
+  if (!fileId) { alert('台帳はまだ作成されていません(データが確定されると自動生成されます)。'); return; }
+  const emailAddress = prompt('送付先のメールアドレスを入力してください');
+  if (!emailAddress) return;
+  btn.disabled = true;
+  btn.textContent = '送付しています...';
+  try {
+    const res = await fetch(`${SUPABASE_URL}/functions/v1/send-ledger-email`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, 'x-device-token': currentDeviceToken || '' },
+      body: JSON.stringify({ employee_code: session.employeeCode, file_id: fileId, email_address: emailAddress }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.ok) alert('送付しました。');
+    else alert((data && data.error) || '送付に失敗しました。');
+  } catch (err) {
+    alert('送付に失敗しました。');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'この台帳をメールで送付する';
+  }
 }
 
 function fileToBase64(file) {
@@ -10405,6 +10446,7 @@ function init() {
       btn.textContent = '経費台帳・月次集計(Spreadsheet)を開く';
     }
   });
+  onId('bea-email-ledger-btn', 'click', (e) => emailLedger('admin_get_expense_ledger_link', e.target));
   document.getElementById('bed-select-all').addEventListener('click', () => {
     document.querySelectorAll('.bed-item-check').forEach((cb) => { cb.checked = true; bulkExpenseSelectedItems.add(cb.dataset.id); });
     updateBulkExpenseSelectedCount();
@@ -10522,6 +10564,7 @@ function init() {
       btn.textContent = '月次台帳(Spreadsheet)を開く';
     }
   });
+  onId('jds-email-ledger-btn', 'click', (e) => emailLedger('admin_get_joyo_denpyo_ledger_link', e.target));
   document.querySelectorAll('#jds-view-filter .filter-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
       jdsView = btn.dataset.view;
