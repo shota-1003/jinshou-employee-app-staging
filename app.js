@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T19:50:11.570Z';
+const BUILD_DEPLOYED_AT = '2026-08-31T20:54:08.342Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4467,7 +4467,13 @@ async function doCreateEmployee() {
   try {
     // 空欄・形式・重複・既存衝突チェックはRPC側(admin_create_employee_with_code)でも
     // 二重に行い、重複社員番号はDBのUNIQUE制約が最終防衛線になる。
-    const rows = await rpc('admin_create_employee_with_code', {
+    //
+    // 2026-09-01: admin_create_employee_with_code から admin_create_employee_and_issue_code へ
+    // 変更した。以前は社員を作った後に管理者が社員詳細画面で「初回登録コードを発行する」を
+    // 押す必要があり、押し忘れると本人がいつまでもログインできない状態が残っていた。
+    // 新しい関数は社員の作成とその社員専用コードの発行を1回で行う(中身は同じ2つの関数を
+    // 順に呼んでいるだけで、発行のロジックは重複させていない)。
+    const rows = await rpc('admin_create_employee_and_issue_code', {
       p_admin_employee_code: session.employeeCode,
       p_new_employee_code: code,
       p_employee_name: name,
@@ -4484,7 +4490,19 @@ async function doCreateEmployee() {
     });
     const created = rows && rows[0];
     const createdCode = created.out_employee_code || created.employee_code;
-    alert(`社員番号${createdCode}で登録しました。続けて初回ログイン用コードの発行等を行えます。`);
+    // コードは発行したその1回しか表示できない(DBにはハッシュしか残さないため)。
+    // 控え損ねた場合は社員詳細画面から再発行でき、そのとき古いコードは失効する。
+    if (created.out_first_login_code) {
+      const limit = new Date(created.out_expires_at).toLocaleDateString('ja-JP');
+      alert(`社員番号${createdCode}で登録しました。\n\n`
+        + `この社員の初回登録コード: ${created.out_first_login_code}\n`
+        + `有効期限: ${limit}\n\n`
+        + 'このコードはこの画面を離れると二度と表示できません。今すぐ控えて本人へお伝えください。\n'
+        + '控え損ねた場合は、社員詳細画面から再発行できます(古いコードは使えなくなります)。');
+    } else {
+      alert(`社員番号${createdCode}で登録しました。\n`
+        + '初回登録コードは自動発行できませんでした。社員詳細画面から発行してください。');
+    }
     openEmployeeDetail(createdCode, 'basic');
   } catch (e) {
     showError('ec-error', e.message || '登録に失敗しました。');
