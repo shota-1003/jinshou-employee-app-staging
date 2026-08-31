@@ -101,6 +101,9 @@
             categories: [],
             employees: [],
             isAdmin: false,
+            // 2026-09-01 権限仕様変更: 配置の追加・編集・移動・並び替えは認証済み社員なら
+            // 誰でも行える。isAdmin は「影響範囲の大きい操作」だけの門番として残す。
+            canEdit: false,
             showNames: false,
             maxChipsOverride: null,   // null = 画面の高さから自動計算
             mine: [],
@@ -160,7 +163,7 @@
                 // 一般社員も「あの現場にいつ行ったか」を自分の履歴から探せるようにする
                 // (検索対象はサーバー側で自分が入っている配置だけに絞られる)。
                 elHeader.append(btn('🔍', openSearchSheet, 'ac-icon'));
-                if (state.isAdmin) elHeader.append(btn('配置表', () => { state.view = 'month'; render(); }));
+                if (state.canEdit) elHeader.append(btn('配置表', () => { state.view = 'month'; render(); }));
                 return;
             }
             const ym = el('div', 'ac-ym', `${state.year}年${state.month}月`);
@@ -460,6 +463,8 @@
                     p_employee_code: me, p_year: state.year, p_month: state.month,
                 });
                 state.isAdmin = !!state.month_data.is_admin;
+                // 月データを取得できた時点で認証済み社員であることが確定しているため編集可。
+                state.canEdit = true;
                 state.categories = state.month_data.categories || [];
                 // 月表示は月曜始まりの6週間ぶんを返す(前月末・翌月初を含む)。
                 mergeRange(state.month_data);
@@ -469,7 +474,7 @@
         async function loadDay() {
             try {
                 state.day_data = await rpc('assignment_get_day', { p_employee_code: me, p_date: state.selected });
-                if (state.isAdmin) {
+                if (state.canEdit) {
                     const [issues, conf] = await Promise.all([
                         rpc('assignment_validate_day', { p_employee_code: me, p_date: state.selected }),
                         rpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: state.selected }),
@@ -704,22 +709,27 @@
             }
             head.append(info);
 
-            if (state.isAdmin) {
+            if (state.canEdit) {
                 const bar = el('div', 'ac-daybar');
                 // いちばん使う「配置を追加」を最も大きく、いちばん押しやすい位置に置く
                 const add = el('button', 'ac-actbtn ac-actmain', '＋ 配置を追加');
                 add.addEventListener('click', () => openEntrySheet(null));
-                const conf = el('button', 'ac-actbtn ac-actsub', '確定して通知');
-                conf.addEventListener('click', confirmDay);
                 const more = el('button', 'ac-actbtn ac-actmore', '⋯');
                 more.title = 'その他の操作';
                 more.addEventListener('click', openDayMenuSheet);
-                bar.append(add, conf, more);
+                // 「確定して通知」はその日の全員へ通知が飛ぶため、配置担当・管理者のみ。
+                if (state.isAdmin) {
+                    const conf = el('button', 'ac-actbtn ac-actsub', '確定して通知');
+                    conf.addEventListener('click', confirmDay);
+                    bar.append(add, conf, more);
+                } else {
+                    bar.append(add, more);
+                }
                 head.append(bar);
             }
             wrap.append(head);
 
-            if (state.isAdmin && state.issues && state.issues.issues && state.issues.issues.length) {
+            if (state.canEdit && state.issues && state.issues.issues && state.issues.issues.length) {
                 const box = el('div', 'ac-issues');
                 for (const i of state.issues.issues) {
                     const line = el('div', 'ac-issue ac-' + i.severity, i.message);
@@ -823,7 +833,7 @@
                 const ok = Number(conf.confirmed) === Number(conf.total);
                 top.append(el('span', 'ac-badge' + (ok ? ' ac-ok' : ' ac-warn'), `${conf.confirmed}/${conf.total}確認`));
             }
-            if (state.isAdmin) {
+            if (state.canEdit) {
                 // 並び替えは↑↓を採用している。理由は README ではなくここに書く:
                 // ドラッグ&ドロップは、手袋や片手操作、スクロールとの競合で現場では誤操作が多い。
                 // ↑↓なら押す位置が固定で、連打で一気に上まで運べる。
@@ -912,7 +922,7 @@
             const conf = ((state.confirmation && state.confirmation.sites) || []).find((c) => c.schedule_id === s.id);
 
             const footer = [];
-            if (state.isAdmin) {
+            if (state.canEdit) {
                 footer.push(sheetBtn('編集する', () => { api.close(); openEntrySheet(s); }, 'ac-primary'));
                 footer.push(sheetBtn('翌日へコピー', async () => {
                     api.close();
@@ -965,7 +975,7 @@
                         chip.append(el('span', 'ac-mt', m.time_label || '終日'));
                         // 「1人を別の現場へ移す」操作はここに置く。
                         // 一覧に置くと、現場を見たいのに社員を押してしまう事故が起きた。
-                        if (state.isAdmin) {
+                        if (state.canEdit) {
                             chip.classList.add('ac-movable');
                             chip.addEventListener('click', () => { api.close(); openMoveSheet(m, s); });
                         }
@@ -1055,26 +1065,30 @@
         // -----------------------------------------------------------
         function openDayMenuSheet() {
             sheet(`${labelDate(state.selected)} の操作`, (box, api) => {
+                // 2026-09-01 権限仕様: コピー・履歴・LINE共有は社員誰でも使える。
+                // 一斉通知と予実照合は影響範囲が大きいので管理者のみに残す。
                 const items = [
-                    ['前日・別の日からコピー', '現場を選んでコピーできます（1現場だけ／複数／全部）', () => { api.close(); openCopySheet(); }],
-                    ['未確認の人へ再通知', '通知済みでまだ確認していない人だけに送ります', async () => {
+                    ['前日・別の日からコピー', '現場を選んでコピーできます（1現場だけ／複数）', () => { api.close(); openCopySheet(); }],
+                    ['LINE共有用のテキスト', '全体LINEへ貼り付ける文面を作ります', () => { api.close(); openLineSheet(); }],
+                    ['この日の変更履歴', '誰が・いつ・何を変えたか（社員も見られます）', () => { api.close(); openHistorySheet(); }],
+                ];
+                if (state.isAdmin) {
+                    items.splice(1, 0, ['未確認の人へ再通知', '通知済みでまだ確認していない人だけに送ります', async () => {
                         api.close();
                         try {
                             const r = await rpc('assignment_notify_unconfirmed', { p_employee_code: me, p_date: state.selected });
                             toast(`${r.renotified}名へ再通知しました`);
                         } catch (e) { fail(e); }
-                    }],
-                    ['LINE共有用のテキスト', '全体LINEへ貼り付ける文面を作ります', () => { api.close(); openLineSheet(); }],
-                    ['この日の変更履歴', '誰が・いつ・何を変えたか', () => { api.close(); openHistorySheet(); }],
-                    ['勤怠(日報)と予実照合', '予定と実際の日報を突き合わせます', async () => {
+                    }]);
+                    items.push(['勤怠(日報)と予実照合', '予定と実際の日報を突き合わせます', async () => {
                         api.close();
                         try {
                             const r = await rpc('assignment_reconcile_attendance', { p_employee_code: me, p_date: state.selected });
                             toast(`一致${r.matched} / 現場違い${r.mismatched} / 日報なし${r.absent}`);
                             await loadDay(); render();
                         } catch (e) { fail(e); }
-                    }],
-                ];
+                    }]);
+                }
                 for (const [title, desc, fn] of items) {
                     const it = el('div', 'ac-listitem');
                     it.append(el('div', 'ac-menutitle', title));
@@ -2012,11 +2026,16 @@
 
                 const foot = el('div', 'ac-field');
                 const copySelected = el('button', 'ac-btn ac-primary', '選んだ現場をコピー');
-                const copyAll = el('button', 'ac-btn', 'この日を全部コピー');
                 copySelected.style.width = '100%';
-                copyAll.style.width = '100%';
-                copyAll.style.marginTop = '6px';
-                foot.append(copySelected, copyAll);
+                foot.append(copySelected);
+                // 「その日を全部コピー」は一度に大量の配置を書き換えるため管理者のみ
+                // (2026-09-01 権限仕様 §6。サーバー側でも同じ判定を行う)。
+                const copyAll = el('button', 'ac-btn', 'この日を全部コピー');
+                if (state.isAdmin) {
+                    copyAll.style.width = '100%';
+                    copyAll.style.marginTop = '6px';
+                    foot.append(copyAll);
+                }
                 box.append(foot);
 
                 async function run(ids) {
@@ -2150,22 +2169,69 @@
             });
         }
 
+        // 誰でも配置を編集できる代わりに、「誰が・いつ・何を・どう変えたか」を
+        // 社員自身がこの画面から必ず追えるようにする(2026-09-01 権限仕様 §4)。
+        // 管理者はここから削除前の状態へ戻せる(§5)。戻した操作自体も履歴に残る。
+        const CHANGE_TYPE_LABEL = {
+            create: '追加', update: '変更', delete: '削除', move: '移動',
+            order: '並び替え', copy: 'コピー', confirm: '確定', restore: '復元',
+        };
+
         function openHistorySheet() {
             sheet(`${labelDate(state.selected)} の変更履歴`, async (box) => {
-                box.append(el('div', 'ac-empty', '読み込み中...'));
-                try {
-                    const rows = await rpc('assignment_get_change_log', { p_employee_code: me, p_date: state.selected });
+                async function reload() {
                     box.innerHTML = '';
+                    box.append(el('div', 'ac-empty', '読み込み中...'));
+                    let rows = [];
+                    try { rows = await rpc('assignment_get_change_log', { p_employee_code: me, p_date: state.selected }); }
+                    catch (e) { box.innerHTML = ''; fail(e); return; }
+                    box.innerHTML = '';
+                    box.append(el('div', 'ac-schedmeta',
+                        'この日の配置を誰が変更したかの記録です。削除しても記録は消えません。'));
                     if (!rows.length) { box.append(el('div', 'ac-empty', '変更履歴はありません')); return; }
                     for (const r of rows) {
                         const item = el('div', 'ac-result');
                         const t = new Date(r.created_at);
-                        item.append(el('div', 'ac-rdate', `${pad(t.getHours())}:${pad(t.getMinutes())}　${r.changed_by}`));
+                        const who = r.changed_by_employee_code
+                            ? `${r.changed_by}（${r.changed_by_employee_code}）`
+                            : r.changed_by;
+                        item.append(el('div', 'ac-rdate',
+                            `${pad(t.getHours())}:${pad(t.getMinutes())}　${CHANGE_TYPE_LABEL[r.change_type] || r.change_type}　${who}`));
                         item.append(el('div', 'ac-rmem', r.summary));
-                        if (r.reason) item.append(el('div', 'ac-schedmeta', `理由: ${r.reason}`));
+                        const meta = [];
+                        if (r.site_name) meta.push(`現場: ${r.site_name}`);
+                        if (r.target_employee_name) meta.push(`対象: ${r.target_employee_name}`);
+                        if (r.reason) meta.push(`理由: ${r.reason}`);
+                        if (meta.length) item.append(el('div', 'ac-schedmeta', meta.join('　')));
+                        // 「この状態に戻す」は影響が大きいため管理者のみ。
+                        if (state.isAdmin && r.can_restore) {
+                            const btns = el('div', 'ac-issuebtns');
+                            const b = el('button', 'ac-btn ac-sm ac-primary', 'この状態に戻す');
+                            b.addEventListener('click', async () => {
+                                // 確認はアプリ内の確認シートで行う。window.confirm は
+                                // 画面の見た目が揃わないうえ、実ブラウザでの検証もできない。
+                                const ok = await confirmSheet(
+                                    `${r.summary}\n\nこの削除を取り消して、削除する直前の状態へ戻します。`,
+                                    'この状態に戻す', false);
+                                if (!ok) return;
+                                b.disabled = true;
+                                try {
+                                    await rpc('assignment_restore_schedule',
+                                        { p_employee_code: me, p_change_log_id: r.id, p_reason: '変更履歴から復元' });
+                                    toast('削除する前の状態へ戻しました');
+                                    // 月グリッドにも戻さないと、復元したのに月表示から消えたままになる
+                                    await Promise.all([loadMonth(), loadDay()]);
+                                    render();
+                                    await reload();
+                                } catch (e) { b.disabled = false; fail(e); }
+                            });
+                            btns.append(b);
+                            item.append(btns);
+                        }
                         box.append(item);
                     }
-                } catch (e) { box.innerHTML = ''; fail(e); }
+                }
+                await reload();
             });
         }
 
@@ -2466,7 +2532,7 @@
         // 初期ロード。管理者かどうかはサーバーの判定(is_assignment_admin)を正とする。
         (async function init() {
             await loadMonth();
-            if (!state.isAdmin && !ctx.defaultView) state.view = 'me';
+            if (!state.canEdit && !ctx.defaultView) state.view = 'me';
             if (state.view === 'me') await loadMine(); else await loadDay();
             render();
         })();
