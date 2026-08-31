@@ -2544,6 +2544,7 @@
   <section id="screen-employee-directory" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">社員名簿</div>
+    <button type="button" class="secondary" id="employee-create-open-btn" data-nav="employee-create" style="margin-bottom:12px;">＋ 新入社員を登録する</button>
     <div class="search-bar">
       <span class="icon-slot" data-icon="search"></span>
       <input type="text" id="employee-search-input" placeholder="氏名・社員番号で検索">
@@ -2554,6 +2555,46 @@
       <button type="button" class="filter-chip" data-status="inactive">退職等</button>
     </div>
     <div id="employee-directory-list"></div>
+  </section>
+
+  <!-- 新入社員の登録(管理者): 社員番号を管理者が明示指定して登録する(自動採番しない) -->
+  <section id="screen-employee-create" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="employee-directory">社員名簿に戻る</button>
+    <div class="form-title">新入社員を登録</div>
+    <div class="hint" style="margin-bottom:12px;">既存の社員名簿・給与Spreadsheetで使っている<strong>社員番号</strong>をそのまま指定してください。番号はシステムが自動で採番しません。すでに使われている番号は登録できません。</div>
+    <label for="ec-code">社員番号<span class="required-mark">(必須)</span></label>
+    <input type="text" id="ec-code" inputmode="numeric" placeholder="例: 0044" autocomplete="off">
+    <div class="hint-inline">半角数字のみ。既存社員と重複しない番号を入力してください。</div>
+    <label for="ec-name">氏名<span class="required-mark">(必須)</span></label>
+    <input type="text" id="ec-name" placeholder="例: 山田 太郎" autocomplete="off">
+    <label for="ec-furigana">フリガナ</label>
+    <input type="text" id="ec-furigana" placeholder="例: ヤマダ タロウ" autocomplete="off">
+    <label for="ec-department">部署</label>
+    <input type="text" id="ec-department" placeholder="例: 足場事業部" autocomplete="off">
+    <label for="ec-hire-date">入社日</label>
+    <input type="date" id="ec-hire-date">
+    <label for="ec-gender">性別</label>
+    <select id="ec-gender">
+      <option value="">未設定</option>
+      <option value="male">男性</option>
+      <option value="female">女性</option>
+      <option value="other">その他</option>
+    </select>
+    <label class="checkbox-row" style="margin-top:10px;"><input type="checkbox" id="ec-foreign-worker"><span>外国人労働者</span></label>
+    <label for="ec-phone">電話番号</label>
+    <input type="tel" id="ec-phone" placeholder="例: 090-1234-5678" autocomplete="off">
+    <label for="ec-address">住所</label>
+    <input type="text" id="ec-address" placeholder="例: 東京都〇〇区…" autocomplete="off">
+    <div class="section-title">緊急連絡先</div>
+    <label for="ec-emergency-name">氏名</label>
+    <input type="text" id="ec-emergency-name" placeholder="例: 山田 花子" autocomplete="off">
+    <label for="ec-emergency-relation">続柄</label>
+    <input type="text" id="ec-emergency-relation" placeholder="例: 配偶者" autocomplete="off">
+    <label for="ec-emergency-phone">電話番号</label>
+    <input type="tel" id="ec-emergency-phone" placeholder="例: 090-8765-4321" autocomplete="off">
+    <div class="error" id="ec-error"></div>
+    <button type="button" class="primary" id="ec-submit" style="margin-top:16px;">この社員番号で登録する</button>
+    <div class="hint" style="margin-top:10px;">登録後、社員詳細の「ログイン端末」タブから<strong>初回登録コード</strong>を発行し、本人へお伝えください。本人がそのコードで初めてアクセスし、自分で暗証番号(PIN)を設定します。</div>
   </section>
 
   <!-- 社員詳細(管理者) -->

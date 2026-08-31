@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T14:12:06.289Z';
+const BUILD_DEPLOYED_AT = '2026-08-31T14:14:06.034Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4332,7 +4332,7 @@ async function loadEmployeeDirectory() {
 }
 
 function resetEmployeeCreateForm() {
-  ['ec-name', 'ec-furigana', 'ec-department', 'ec-hire-date', 'ec-phone', 'ec-address',
+  ['ec-code', 'ec-name', 'ec-furigana', 'ec-department', 'ec-hire-date', 'ec-phone', 'ec-address',
     'ec-emergency-name', 'ec-emergency-relation', 'ec-emergency-phone'].forEach((id) => { document.getElementById(id).value = ''; });
   document.getElementById('ec-gender').value = '';
   document.getElementById('ec-foreign-worker').checked = false;
@@ -4341,14 +4341,22 @@ function resetEmployeeCreateForm() {
 
 async function doCreateEmployee() {
   const session = getSession();
+  const code = document.getElementById('ec-code').value.trim();
   const name = document.getElementById('ec-name').value.trim();
   hideError('ec-error');
+  // 社員番号は既存の社員名簿・給与Spreadsheetの番号をそのまま指定する(自動採番しない=項目1/5)。
+  if (!code) { showError('ec-error', '社員番号を入力してください。'); return; }
+  if (!/^[0-9]{1,10}$/.test(code)) { showError('ec-error', '社員番号は数字で入力してください(例: 0044)。'); return; }
   if (!name) { showError('ec-error', '氏名を入力してください。'); return; }
   const btn = document.getElementById('ec-submit');
   btn.disabled = true;
   try {
-    const rows = await rpc('admin_create_employee', {
-      p_admin_employee_code: session.employeeCode, p_employee_name: name,
+    // 空欄・形式・重複・既存衝突チェックはRPC側(admin_create_employee_with_code)でも
+    // 二重に行い、重複社員番号はDBのUNIQUE制約が最終防衛線になる。
+    const rows = await rpc('admin_create_employee_with_code', {
+      p_admin_employee_code: session.employeeCode,
+      p_new_employee_code: code,
+      p_employee_name: name,
       p_department: document.getElementById('ec-department').value.trim() || null,
       p_hire_date: document.getElementById('ec-hire-date').value || null,
       p_gender: document.getElementById('ec-gender').value || null,
@@ -4361,8 +4369,9 @@ async function doCreateEmployee() {
       p_emergency_contact_phone: document.getElementById('ec-emergency-phone').value.trim() || null,
     });
     const created = rows && rows[0];
-    alert(`社員番号${created.employee_code}で登録しました。続けて初回ログイン用コードの発行等を行えます。`);
-    openEmployeeDetail(created.employee_code, 'basic');
+    const createdCode = created.out_employee_code || created.employee_code;
+    alert(`社員番号${createdCode}で登録しました。続けて初回ログイン用コードの発行等を行えます。`);
+    openEmployeeDetail(createdCode, 'basic');
   } catch (e) {
     showError('ec-error', e.message || '登録に失敗しました。');
   } finally {
