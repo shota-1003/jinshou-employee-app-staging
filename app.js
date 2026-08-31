@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T14:14:06.034Z';
+const BUILD_DEPLOYED_AT = '2026-08-31T14:16:48.067Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -530,6 +530,35 @@ async function doPinResetRequest() {
     showError('pin-forgot-request-error', '管理者へ再設定の依頼を送りました。初回登録コードが伝えられるまでお待ちください。');
   } catch (e) {
     showError('pin-forgot-request-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ログイン済みの本人が、現在の暗証番号を思い出せないまま設定し直す (E-15)。
+// 端末トークンが本人確認そのものなので、管理者を介さずに完結する。
+async function doPinChangeReset() {
+  const pin = document.getElementById('pin-change-reset-new').value.trim();
+  const confirmPin = document.getElementById('pin-change-reset-confirm').value.trim();
+  hideError('pin-change-reset-error');
+  if (!/^[0-9]{4,6}$/.test(pin)) {
+    showError('pin-change-reset-error', '暗証番号は4〜6桁の数字で入力してください。');
+    return;
+  }
+  if (pin !== confirmPin) {
+    showError('pin-change-reset-error', '確認用の暗証番号が一致しません。');
+    return;
+  }
+  const btn = document.getElementById('pin-change-reset-submit');
+  btn.disabled = true;
+  try {
+    const session = getSession();
+    await rpc('reset_my_pin_with_device', { p_employee_code: session.employeeCode, p_new_pin: pin });
+    document.getElementById('pin-change-reset-new').value = '';
+    document.getElementById('pin-change-reset-confirm').value = '';
+    showDone('暗証番号を設定しました。次回のログインから新しい暗証番号をお使いください。', 'myinfo');
+  } catch (e) {
+    showError('pin-change-reset-error', e.message);
   } finally {
     btn.disabled = false;
   }
@@ -10008,6 +10037,12 @@ function init() {
   document.getElementById('pin-forgot-request-submit').addEventListener('click', doPinResetRequest);
   // 弱い暗証番号のお願いから変更画面へ (E-13)
   document.getElementById('pin-weak-change-btn').addEventListener('click', () => showScreen('pin-change'));
+  document.getElementById('pin-change-forgot-link').addEventListener('click', () => {
+    const card = document.getElementById('pin-change-forgot-card');
+    card.style.display = card.style.display === 'none' ? '' : 'none';
+    attachPinRevealToggles();
+  });
+  document.getElementById('pin-change-reset-submit').addEventListener('click', doPinChangeReset);
   // 暗証番号欄すべてに表示/非表示を付ける (E-14)
   attachPinRevealToggles();
 

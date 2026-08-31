@@ -1382,6 +1382,19 @@
       <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-confirm" maxlength="6">
       <div class="error" id="pin-change-error"></div>
       <button id="pin-change-submit">暗証番号を変更する</button>
+      <!-- ログイン済み=この端末が本人の端末として承認済みなので、現在の暗証番号を
+           思い出せなくても新しいものを設定できる(E-15)。管理者の手を借りずに済む。 -->
+      <button type="button" class="link" id="pin-change-forgot-link">現在の暗証番号がわからない方</button>
+    </div>
+    <div class="card" id="pin-change-forgot-card" style="display:none;">
+      <div class="form-title">現在の暗証番号を使わずに設定する</div>
+      <div class="hint" style="margin-bottom:12px;">この端末はご本人の端末として登録済みのため、現在の暗証番号を入力せずに新しい暗証番号を設定できます。</div>
+      <label for="pin-change-reset-new">新しい暗証番号(4〜6桁の数字)</label>
+      <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-reset-new" maxlength="6">
+      <label for="pin-change-reset-confirm" style="margin-top:10px;">確認のためもう一度入力</label>
+      <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-reset-confirm" maxlength="6">
+      <div class="error" id="pin-change-reset-error"></div>
+      <button id="pin-change-reset-submit">この暗証番号にする</button>
     </div>
   </section>
 
