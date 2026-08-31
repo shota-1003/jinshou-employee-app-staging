@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v83-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T22:30:24.431Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v84-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T23:09:21.247Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -599,6 +599,19 @@ function mountAssignmentCalendar() {
   }
 }
 
+// ホームの配置カードから、配置カレンダーの「特定の日」を開く。
+// 現場名の文字列一致ではなく、正式な日付(dateStr)で AssignmentCalendar.goToDate を呼ぶ。
+// goToDate は month ビューでその日を選択状態にし、その日の詳細(現場・集合時間・メンバー等)を
+// 読み込み直して描画する。配置が変更・取消されていても、遷移先は常に最新データを再取得する
+// ため、古い配置へ飛ぶことはない。
+function openAssignmentCalendarAt(dateStr) {
+  showScreen('assignment-calendar'); // ここで mountAssignmentCalendar が呼ばれ api がセットされる
+  if (!dateStr) return;
+  const go = () => { try { if (assignmentCalendarApi && assignmentCalendarApi.goToDate) assignmentCalendarApi.goToDate(dateStr); } catch (e) { /* カレンダー未初期化時は月表示のまま */ } };
+  // mount直後の初期ロード(render)と競合しないよう、次のタスクでジャンプする。
+  if (assignmentCalendarApi) setTimeout(go, 0); else setTimeout(go, 60);
+}
+
 function unmountAssignmentCalendar() {
   if (!assignmentCalendarApi) return;
   try { assignmentCalendarApi.destroy(); } catch (e) { /* 既に外れている */ }
@@ -811,11 +824,38 @@ function buildHomeGreeting() {
 // ログインが済んだ時点でそちらへ戻す。認証画面をカレンダー側にも作らず、
 // ログインは常にこの社員ポータル1か所だけで行うための仕組み
 // (calendar/calendar-boot.js の goPortalLogin() と対になっている)。
+//
+// 2026-09-01修正: 以前は location.search だけを見ていたため、
+//   (1) 新しい端末で暗証番号ログインすると「承認待ち」画面へ入り、
+//       承認後に「更新して確認する」を押した時点では戻り先が分からない
+//   (2) 途中で画面を再読み込みするとクエリが消えて戻り先を失う
+// という2つの経路でカレンダーへ戻れず、社員ポータルのホームに留まっていた。
+// 戻り先をsessionStorageへ覚えておき、ホームへ入る時点で必ず消費する。
+const LOGIN_RETURN_KEY = 'jinshou_login_return';
+
+// 戻り先はアプリ内の決まった場所だけを許可する。外部URLを受け取って
+// そこへ飛ばす作り(オープンリダイレクト)にはしない。
+const LOGIN_RETURN_TARGETS = { calendar: 'calendar/' };
+
+// 起動時に ?next=... が付いていたら覚えておく。A(通常版)・B(更新先行版)とも
+// 相対パスで戻すので、開いていた側のカレンダーへそのまま帰る。
+function rememberLoginReturn() {
+  try {
+    const next = new URLSearchParams(location.search).get('next');
+    if (next && LOGIN_RETURN_TARGETS[next]) sessionStorage.setItem(LOGIN_RETURN_KEY, next);
+  } catch (e) { /* sessionStorageが使えない環境では戻り先を覚えないだけ */ }
+}
+
 function consumeLoginRedirect() {
   let next = null;
-  try { next = new URLSearchParams(location.search).get('next'); } catch (e) { return false; }
-  if (next !== 'calendar') return false;
-  location.replace('calendar/');
+  try {
+    next = sessionStorage.getItem(LOGIN_RETURN_KEY)
+      || new URLSearchParams(location.search).get('next');
+  } catch (e) { return false; }
+  const target = next && LOGIN_RETURN_TARGETS[next];
+  if (!target) return false;
+  try { sessionStorage.removeItem(LOGIN_RETURN_KEY); } catch (e) { /* 消せなくても遷移はする */ }
+  location.replace(target);
   return true;
 }
 
@@ -899,15 +939,26 @@ async function renderHomeAssignmentCard(session) {
     const rows = normalizeSchedule(await rpc('assignment_get_my_schedule', { p_employee_code: session.employeeCode, p_date_from: today, p_date_to: tomorrow }));
     const mine = rows.filter((r) => r && r.assignment_kind !== 'off'); // 休み等は除く
     if (mine.length === 0) { card.style.display = 'none'; card.innerHTML = ''; return; }
+    // タップで配置カレンダーの「その日」へ遷移する(現場名の文字列推測ではなく、正式な
+    // 日付(r.date)で AssignmentCalendar.goToDate を呼ぶ。要件: date/schedule_id を使う)。
     const line = (r) => {
       const when = r.date === today ? '今日' : (r.date === tomorrow ? '明日' : r.date);
       const time = r.time_label || (r.is_allday ? '終日' : '');
       const meet = r.meeting_time ? `集合${r.meeting_time}` : '';
       const haul = r.assignment_kind === 'haul' ? '🚚 ' : '';
-      return `<div class="row2">${when}: ${haul}${safeText(r.label, '現場未設定')}${time ? `　${time}` : ''}${meet ? `　${meet}` : ''}</div>`;
+      return `<div class="home-assignment-row" data-date="${r.date}" role="button" tabindex="0"
+        style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 2px;border-top:1px solid var(--line,rgba(128,128,128,0.2));cursor:pointer;">
+        <span class="row2" style="flex:1;min-width:0;">${when}: ${haul}${safeText(r.label, '現場未設定')}${time ? `　${time}` : ''}${meet ? `　${meet}` : ''}</span>
+        <span aria-hidden="true" style="color:var(--muted);font-size:18px;line-height:1;flex:none;">›</span>
+      </div>`;
     };
     card.style.display = '';
-    card.innerHTML = `<div class="row1"><span><strong>📍 配置予定</strong>(配置カレンダーより・変更される場合があります)</span></div>${mine.map(line).join('')}`;
+    card.innerHTML = `<div class="row1"><span><strong>📍 配置予定</strong>(配置カレンダーより・変更される場合があります)</span></div>${mine.map(line).join('')}<div class="hint-inline" style="margin-top:4px;">タップすると配置カレンダーの詳細（集合時間・メンバー等）を確認できます</div>`;
+    card.querySelectorAll('.home-assignment-row').forEach((rowEl) => {
+      const go = () => openAssignmentCalendarAt(rowEl.dataset.date);
+      rowEl.addEventListener('click', go);
+      rowEl.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+    });
   } catch (e) {
     // 配置テーブルがまだ無い環境(Production等)ではRPCが無くエラーになる。カードを隠すだけ。
     card.style.display = 'none'; card.innerHTML = '';
@@ -7405,6 +7456,7 @@ async function doSubmitDailyReport(isDraft) {
 // 「本人または管理者が確認すべき状態」だけを🔴で示し、提出済み・承認済み等の正常状態は
 // 赤くしない(2026-08-26、ユーザー指示)。
 function dailyReportStatusBadgeHtml(r) {
+  if (r.report_status === 'cancelled') return '<span class="mini-tag muted">取消済み</span>';
   if (r.needs_review) return '<span class="mini-tag danger">🔴 要確認</span>';
   if (r.report_status === 'rejected') return `<span class="mini-tag danger">🔴 修正依頼あり${r.rejected_reason ? '：' + r.rejected_reason : ''}</span>`;
   if (r.report_status === 'confirmed') return '<span class="mini-tag done">✅ 承認済み</span>';
@@ -7779,22 +7831,27 @@ async function loadMyDailyReports() {
     if (rows.length === 0) { list.innerHTML = '<div class="empty-state">この期間の日報はありません</div>'; return; }
     list.innerHTML = '';
     rows.forEach((r) => {
+      const isCancelled = r.report_status === 'cancelled';
       const div = document.createElement('div');
-      div.className = 'history-item';
+      div.className = 'history-item' + (isCancelled ? ' is-cancelled' : '');
       div.style.cursor = 'pointer';
+      if (isCancelled) div.style.opacity = '0.6';
       const parts = [];
       if (Number(r.overtime_hours) > 0) parts.push(`残業 ${Number(r.overtime_hours)}h`);
       if (r.is_early_commute) parts.push(`通勤早出 ${Number(r.early_commute_hours)}h`);
       if (r.is_commute_overtime) parts.push(`通勤残業 ${Number(r.commute_overtime_hours)}h`);
       if (r.is_over_100km) parts.push('通勤100km超');
+      const headcountHtml = isCancelled
+        ? '<span style="text-decoration:line-through;">取消</span>'
+        : `${Number(r.total_headcount).toFixed(1)}人工`;
       div.innerHTML = `
-        <div class="row1"><span>${r.report_date}</span><span>${Number(r.total_headcount).toFixed(1)}人工</span></div>
-        <div class="row2">${r.site_names.map((n, i) => `${n}(${r.work_types[i]})`).join('・')}</div>
-        ${parts.length > 0 ? `<div class="hint-inline">${parts.join(' / ')}</div>` : ''}
-        ${r.is_special ? '<span class="mini-tag warn">特殊日報(管理者確認中)</span>' : ''}
-        ${r.reflected ? '<span class="mini-tag muted">シート反映済み</span>' : ''}
+        <div class="row1"><span>${r.report_date}</span><span>${headcountHtml}</span></div>
+        <div class="row2"${isCancelled ? ' style="text-decoration:line-through;"' : ''}>${r.site_names.map((n, i) => `${n}(${r.work_types[i]})`).join('・')}</div>
+        ${!isCancelled && parts.length > 0 ? `<div class="hint-inline">${parts.join(' / ')}</div>` : ''}
+        ${!isCancelled && r.is_special ? '<span class="mini-tag warn">特殊日報(管理者確認中)</span>' : ''}
+        ${!isCancelled && r.reflected ? '<span class="mini-tag muted">シート反映済み</span>' : ''}
         ${dailyReportStatusBadgeHtml(r)}
-        ${r.attention_reasons && r.attention_reasons.length > 0 ? `<ul style="margin:4px 0 0 16px;padding:0;font-size:12px;color:var(--danger);">${r.attention_reasons.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
+        ${!isCancelled && r.attention_reasons && r.attention_reasons.length > 0 ? `<ul style="margin:4px 0 0 16px;padding:0;font-size:12px;color:var(--danger);">${r.attention_reasons.map((m) => `<li>${m}</li>`).join('')}</ul>` : ''}
         <div class="hint-inline">タップして詳細を確認</div>
       `;
       div.addEventListener('click', () => openMyDailyReportDetail(r.report_date));
@@ -7859,8 +7916,24 @@ async function openMyDailyReportDetail(dateStr) {
   try {
     const rows = await rpc('get_my_daily_report_detail', { p_employee_code: session.employeeCode, p_report_date: dateStr });
     if (!rows || rows.length === 0) { body.innerHTML = '<div class="empty-state">この日の日報は見つかりませんでした</div>'; return; }
-    body.innerHTML = `<div class="form-title" style="font-size:15px;">${dateStr}</div>` + rows.map((r) => `
-      <div class="card" style="margin-bottom:10px;">
+    const isCancelled = rows.every((r) => r.report_status === 'cancelled');
+    const cancelledMeta = rows.find((r) => r.cancelled_at) || {};
+    const anyReflected = rows.some((r) => r.reflected);
+    const cancelledBannerHtml = isCancelled ? `
+      <div class="card" style="margin-bottom:10px;border:1px solid var(--muted);background:rgba(128,128,128,0.08);">
+        <div style="font-weight:700;margin-bottom:4px;">この日報は取消済みです</div>
+        <div class="hint-inline">出勤日数・人工・残業・給与・旅費・各種集計の対象から除外されています。</div>
+        ${cancelledMeta.cancel_reason ? `<div class="field-row"><span>取消理由</span><span>${cancelledMeta.cancel_reason}</span></div>` : ''}
+        ${cancelledMeta.cancelled_at ? `<div class="field-row"><span>取消日時</span><span>${new Date(cancelledMeta.cancelled_at).toLocaleString('ja-JP')}</span></div>` : ''}
+        <div class="hint-inline" style="margin-top:6px;">日付を間違えた場合は、正しい日付で日報を登録し直してください。</div>
+      </div>` : '';
+    const cancelButtonHtml = !isCancelled ? `
+      <div style="margin-top:6px;">
+        <button type="button" class="btn-secondary" id="my-daily-report-cancel-btn" style="width:100%;color:var(--danger);border-color:var(--danger);">この日報を取り消す（誤登録として無効にする）</button>
+        <div class="hint-inline" style="margin-top:4px;">取消すると出勤・給与等の集計対象から除外されます。取消しても履歴には「取消済み」として残ります。${anyReflected ? '（この日報は既に集計シートへ反映済みのため、取消は管理者に依頼が必要な場合があります）' : ''}</div>
+      </div>` : '';
+    body.innerHTML = `<div class="form-title" style="font-size:15px;">${dateStr}</div>` + cancelledBannerHtml + rows.map((r) => `
+      <div class="card" style="margin-bottom:10px;${isCancelled ? 'opacity:0.7;' : ''}">
         <div style="margin-bottom:6px;">${dailyReportStatusBadgeHtml(r)}</div>
         ${r.needs_review ? (r.consistency_issues || []).map((iss) => `<div class="hint-inline">・${iss.message}</div>`).join('') : ''}
         <div class="field-row"><span>現場</span><span>${r.site_name || ''}</span></div>
@@ -7881,9 +7954,34 @@ async function openMyDailyReportDetail(dateStr) {
         <div class="field-row"><span>シート反映</span><span>${r.reflected ? '反映済み' : '未反映'}</span></div>
         ${r.report_status === 'rejected' && r.rejected_reason ? `<div class="field-row"><span>差し戻し理由</span><span>${r.rejected_reason}</span></div>` : ''}
       </div>
-    `).join('');
+    `).join('') + cancelButtonHtml;
+    const cancelBtn = document.getElementById('my-daily-report-cancel-btn');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => cancelMyDailyReport(dateStr));
   } catch (e) {
     body.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
+  }
+}
+
+// 日報の取消(soft delete / void)。確認ダイアログ→理由入力→cancel_daily_report RPC。
+// 「人工0」ではなく明確な取消として無効化する(2026-09-01、ユーザー指示)。
+async function cancelMyDailyReport(dateStr) {
+  const session = getSession();
+  if (!window.confirm(`${dateStr} の日報を取り消しますか？\n\n取消すと、出勤・人工・残業・給与・旅費などの集計対象から除外されます。\n履歴には「取消済み」として残ります。\n\n（日付を間違えた場合は、取消したうえで正しい日付で登録し直してください）`)) {
+    return;
+  }
+  const reason = window.prompt('取消理由を入力してください（例: 日付を間違えて登録した / 現場を間違えた など）');
+  if (reason === null) return; // キャンセル
+  if (!reason.trim()) { alert('取消理由を入力してください。'); return; }
+  try {
+    const res = await rpc('cancel_daily_report', { p_employee_code: session.employeeCode, p_report_date: dateStr, p_reason: reason.trim() });
+    const row = Array.isArray(res) ? res[0] : res;
+    const hadReflected = row && (row.out_had_reflected === true || row.out_had_reflected === 'true');
+    let msg = 'この日報を取消しました。集計対象から除外されます。';
+    if (hadReflected) msg += '\n（集計シートへの反映解除は自動処理で行われます）';
+    alert(msg);
+    await openMyDailyReportDetail(dateStr); // 詳細を再描画(取消済みバナー表示)
+  } catch (e) {
+    alert(e.message || '取消に失敗しました。');
   }
 }
 
@@ -11105,6 +11203,11 @@ function init() {
   // (JSのメモリ変数のため)。ここでlocalStorageの端末トークンと突き合わせて一致する
   // 場合だけ、サーバーへ問い合わせずにそのままメニューへ進む(タブ内リロードを軽くする)。
   // 一致しない・存在しない場合はstartLoginFlow()側でトークンの検証からやり直す。
+  // 配置カレンダー専用URLから飛ばされてきた場合の戻り先を、この時点で覚えておく。
+  // 以降どの経路(暗証番号ログイン・初回登録・端末承認待ちからの復帰)で
+  // ホームへ入っても enterMenu() が必ずカレンダーへ帰す。
+  rememberLoginReturn();
+
   const session = getSession();
   const deviceAuth = getDeviceAuth();
   if (session && session.employeeId && deviceAuth && deviceAuth.token && deviceAuth.employeeCode === session.employeeCode) {
