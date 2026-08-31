@@ -103,6 +103,7 @@
     </div>
 
     <div class="card" id="home-my-outing-banner" style="display:none;"></div>
+    <div class="card" id="home-assignment-card" style="display:none;"></div>
 
     <!-- 2026-08-28(第3弾): ホーム表示順を「今日やること→重要なお知らせ→会社からのお知らせ→
          在席状況→その他機能」へ変更。独立していた「本日の日報未提出」バナーは廃止し、
@@ -299,6 +300,11 @@
       <label for="daily-report-date">日付<span class="required-mark">(必須)</span></label>
       <input type="date" id="daily-report-date">
       <div class="hint-inline" id="daily-report-existing-hint" style="display:none;"></div>
+
+      <div id="daily-report-assignment-sites" style="display:none;">
+        <div class="hint-inline">📍 配置カレンダーの予定(タップで現場を入れられます)</div>
+        <div class="filter-row" id="daily-report-assignment-sites-row"></div>
+      </div>
 
       <div id="daily-report-recent-sites" style="display:none;">
         <div class="hint-inline">よく使う現場・昨日の現場</div>

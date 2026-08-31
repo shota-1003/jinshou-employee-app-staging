@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v75-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T04:35:02.742Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v76-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T13:40:16.461Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -595,6 +595,7 @@ function enterMenu(replace) {
   renderHomeUpcomingEvents(session);
   renderHomeEventsArea(session);
   renderHomeMyOutingBanner(session);
+  renderHomeAssignmentCard(session);
 }
 
 // 本人が現在「外出・一時離脱」中の場合、ホーム最上部に目立つバナーで表示し、その場で
@@ -627,6 +628,45 @@ async function renderHomeMyOutingBanner(session) {
       });
     });
   } catch (e) { /* 取得できなくてもホーム自体は使えるようにする */ }
+}
+
+// 配置カレンダー(別プロジェクト)で登録された「本人の今日・明日の配置予定」をホームに表示する
+// (2026-08-31、Shota指示: 配置を本人ポータルへ通知・日報を打ちやすくする)。
+// 配置カレンダー側が既に実装済みの assignment_get_my_schedule をそのまま再利用する
+// (重複実装しない、SKILL-003)。配置テーブルはまだProductionに無いため、RPCが存在しない/
+// 空の場合はカードを隠すだけで、ホーム自体は正常に使えるようにする(graceful degrade)。
+// 「確定ではなく、変更もあるので、とりあえず見える・打ちやすくするため」という位置づけのため
+// 予定として控えめに表示する(強い通知バナーにはしない)。
+function normalizeSchedule(raw) {
+  // assignment_get_my_scheduleはRETURNS jsonb。PostgREST経由では配列がそのまま返るが、
+  // 環境差で {assignment_get_my_schedule:[...]} 形になる場合にも備えて正規化する。
+  if (Array.isArray(raw)) return raw;
+  if (raw && Array.isArray(raw.assignment_get_my_schedule)) return raw.assignment_get_my_schedule;
+  return [];
+}
+
+async function renderHomeAssignmentCard(session) {
+  const card = document.getElementById('home-assignment-card');
+  if (!card) return;
+  const today = todayJST();
+  const tomorrow = (() => { const d = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' })); d.setDate(d.getDate() + 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; })();
+  try {
+    const rows = normalizeSchedule(await rpc('assignment_get_my_schedule', { p_employee_code: session.employeeCode, p_date_from: today, p_date_to: tomorrow }));
+    const mine = rows.filter((r) => r && r.assignment_kind !== 'off'); // 休み等は除く
+    if (mine.length === 0) { card.style.display = 'none'; card.innerHTML = ''; return; }
+    const line = (r) => {
+      const when = r.date === today ? '今日' : (r.date === tomorrow ? '明日' : r.date);
+      const time = r.time_label || (r.is_allday ? '終日' : '');
+      const meet = r.meeting_time ? `集合${r.meeting_time}` : '';
+      const haul = r.assignment_kind === 'haul' ? '🚚 ' : '';
+      return `<div class="row2">${when}: ${haul}${safeText(r.label, '現場未設定')}${time ? `　${time}` : ''}${meet ? `　${meet}` : ''}</div>`;
+    };
+    card.style.display = '';
+    card.innerHTML = `<div class="row1"><span><strong>📍 配置予定</strong>(配置カレンダーより・変更される場合があります)</span></div>${mine.map(line).join('')}`;
+  } catch (e) {
+    // 配置テーブルがまだ無い環境(Production等)ではRPCが無くエラーになる。カードを隠すだけ。
+    card.style.display = 'none'; card.innerHTML = '';
+  }
 }
 
 // 日報は社員が最も頻繁に使う機能のため、「よく使う機能」の固定最優先カードとする
@@ -6786,6 +6826,41 @@ function applyRecentSiteToEntry(siteId, siteName) {
   populateSiteSelect(select, siteName, true).then(() => { select.value = String(siteId); });
 }
 
+// 日報の対象日について、配置カレンダー(別プロジェクト)に登録された本人の配置先を
+// 「タップで現場を入れられるチップ」として提示する(2026-08-31、Shota指示: 打ちやすくするため)。
+// 既存の applyRecentSiteToEntry / チップUI をそのまま再利用する(重複実装しない)。
+// 「昨日の現場」チップ(loadDailyReportRecentSites)と同じ仕組み・見た目で、出典が配置予定なだけ。
+// 配置テーブルが無い環境(Production)や本人以外(外注代理入力)ではエリアを隠すだけ。
+async function loadDailyReportAssignmentChips(dateStr) {
+  const area = document.getElementById('daily-report-assignment-sites');
+  const row = document.getElementById('daily-report-assignment-sites-row');
+  if (!area || !row) return;
+  // 本人・社員の日報のみ対象(外注作業員の代理入力は配置カレンダーの社員配置とは別)。
+  if (dailyReportTarget.type === 'subcontractor') { area.style.display = 'none'; return; }
+  const code = dailyReportTarget.type === 'employee' ? dailyReportTarget.employeeCode : getSession().employeeCode;
+  try {
+    const rows = normalizeSchedule(await rpc('assignment_get_my_schedule', { p_employee_code: code, p_date_from: dateStr, p_date_to: dateStr }));
+    // site_idがある配置だけをチップにする(現場未設定・休み等は日報の現場入力には使えない)。
+    const withSite = rows.filter((r) => r && r.site_id && r.assignment_kind !== 'off');
+    if (withSite.length === 0) { area.style.display = 'none'; row.innerHTML = ''; return; }
+    // 同一現場の重複を除く
+    const seen = new Set();
+    const uniq = withSite.filter((r) => { const k = String(r.site_id); if (seen.has(k)) return false; seen.add(k); return true; });
+    area.style.display = 'block';
+    row.innerHTML = uniq.map((r) => {
+      const haul = r.assignment_kind === 'haul' ? '🚚 ' : '';
+      const name = safeText(r.label, '現場');
+      return `<button type="button" class="filter-chip dr-assignment-site-chip" data-site-id="${r.site_id}" data-site-name="${String(name).replace(/"/g, '&quot;')}">📍 ${name}${haul ? '（運搬）' : ''}</button>`;
+    }).join('');
+    row.querySelectorAll('.dr-assignment-site-chip').forEach((btn) => {
+      btn.addEventListener('click', () => applyRecentSiteToEntry(btn.dataset.siteId, btn.dataset.siteName));
+    });
+  } catch (e) {
+    // 配置テーブルが無い/RPC未デプロイの環境ではエラーになる。エリアを隠すだけで日報入力は通常通り。
+    area.style.display = 'none'; row.innerHTML = '';
+  }
+}
+
 async function loadDailyReportRecentSites() {
   const area = document.getElementById('daily-report-recent-sites');
   const row = document.getElementById('daily-report-recent-sites-row');
@@ -6860,6 +6935,7 @@ async function loadDailyReportForDate(dateStr) {
   document.getElementById('daily-report-qual-file-status').textContent = '';
   dailyReportQualAttachment = null;
   loadDailyReportRecentSites();
+  loadDailyReportAssignmentChips(dateStr);
 
   let existing = [];
   try {
