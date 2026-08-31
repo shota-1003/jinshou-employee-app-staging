@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v84-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T23:09:21.247Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v85-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T23:27:21.045Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7909,7 +7909,14 @@ let dailyReportPrefillDate = null;
 
 async function openMyDailyReportDetail(dateStr) {
   myDailyReportDetailDate = dateStr;
-  showScreen('my-daily-report-detail');
+  showScreen('my-daily-report-detail'); // enter hook(renderMyDailyReportDetailBody)が本文を描画する
+}
+
+// 詳細本文の読み込み・描画のみを行う。showScreenを呼ばないことで、
+// SCREEN_ENTER_HOOKS['my-daily-report-detail'] → openMyDailyReportDetail → showScreen → hook…
+// という再帰(詳細を1回開くだけでopenが数千回呼ばれ、fetchが暴発してERR_INSUFFICIENT_RESOURCES
+// になる既存バグ)を断つ。取消後の再描画・戻る/進むでの再入場は、この本文描画のみを呼ぶ。
+async function renderMyDailyReportDetailBody(dateStr) {
   const session = getSession();
   const body = document.getElementById('my-daily-report-detail-body');
   body.innerHTML = '<div class="hint">読み込み中...</div>';
@@ -7979,7 +7986,7 @@ async function cancelMyDailyReport(dateStr) {
     let msg = 'この日報を取消しました。集計対象から除外されます。';
     if (hadReflected) msg += '\n（集計シートへの反映解除は自動処理で行われます）';
     alert(msg);
-    await openMyDailyReportDetail(dateStr); // 詳細を再描画(取消済みバナー表示)
+    await renderMyDailyReportDetailBody(dateStr); // 本文のみ再描画(取消済みバナー表示、showScreen再帰を避ける)
   } catch (e) {
     alert(e.message || '取消に失敗しました。');
   }
@@ -11155,7 +11162,7 @@ function init() {
   };
   SCREEN_ENTER_HOOKS['daily-report'] = resetDailyReportForm;
   SCREEN_ENTER_HOOKS['my-daily-reports'] = loadMyDailyReports;
-  SCREEN_ENTER_HOOKS['my-daily-report-detail'] = () => { if (myDailyReportDetailDate) openMyDailyReportDetail(myDailyReportDetailDate); };
+  SCREEN_ENTER_HOOKS['my-daily-report-detail'] = () => { if (myDailyReportDetailDate) renderMyDailyReportDetailBody(myDailyReportDetailDate); };
   SCREEN_ENTER_HOOKS['daily-report-needs-review-admin'] = loadDailyReportNeedsReviewAdmin;
   SCREEN_ENTER_HOOKS['daily-report-edit-requests-admin'] = loadDailyReportEditRequestsAdmin;
   SCREEN_ENTER_HOOKS['daily-report-admin'] = async () => {

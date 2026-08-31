@@ -17,7 +17,7 @@
 // キャッシュまで消してしまい、両者が起動のたびに互いのキャッシュを潰し合う。
 // 自分の接頭辞の古い版だけを消すようにする。
 const CACHE_PREFIX = 'jinshou-employee-app';
-const CACHE_NAME = 'jinshou-employee-app-v84-staging';
+const CACHE_NAME = 'jinshou-employee-app-v85-staging';
 const SHELL_FILES = [
   './', './index.html', './style.css', './app.js', './icons.js', './manifest.json',
   './icons/app-icon-180-v2.png', './icons/icon-192-v2.png', './icons/icon-512-v2.png', './icons/icon-512-maskable-v2.png',
