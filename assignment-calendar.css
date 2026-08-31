@@ -61,7 +61,13 @@
 }
 
 .ac-root * { box-sizing: border-box; }
-.ac-root button { font-family: inherit; }
+.ac-root button {
+  font-family: inherit;
+  /* 統合先(社員ポータル)は button に width:100% 等のグローバル指定を持つ。
+     それが効くと年月表示が潰れる等の崩れが出るため、モジュール側で打ち消す。
+     モジュールは「どんなホストへ載せても崩れない」ことを自分で保証する(INT-03)。 */
+  width: auto; min-width: 0; margin: 0; box-shadow: none; letter-spacing: normal;
+}
 /* iOSの二重タップ拡大とタップ時の青いハイライトを抑える */
 .ac-root { touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
 
