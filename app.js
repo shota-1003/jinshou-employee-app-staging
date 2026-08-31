@@ -203,7 +203,7 @@ const BOTTOM_NAV_MAP = {
   announcements: 'announcements',
   history: 'history',
   myinfo: 'myinfo', 'leave-history': 'myinfo', 'my-supply': 'myinfo', 'my-qual': 'myinfo', 'my-health': 'myinfo',
-  'my-change-requests': 'myinfo', 'profile-edit': 'myinfo', 'anon-consult': 'myinfo', 'anon-submit': 'myinfo',
+  'my-change-requests': 'myinfo', 'profile-edit': 'myinfo', 'pin-change': 'myinfo', 'anon-consult': 'myinfo', 'anon-submit': 'myinfo',
   'anon-done': 'myinfo', 'anon-thread': 'myinfo', 'my-entertainment': 'myinfo', 'my-daily-reports': 'myinfo',
   'entertainment-update': 'myinfo', 'entertainment-late-submit': 'myinfo',
 };
@@ -2837,11 +2837,13 @@ async function doAdminResetPin() {
   const targetCode = document.getElementById('admin-employee-select').value;
   const statusEl = document.getElementById('admin-reset-pin-status');
   if (!targetCode) return;
+  if (!confirm(`社員番号${targetCode}の暗証番号をリセットします。現在の暗証番号は使えなくなり、新しい初回登録コードを本人へ伝える必要があります。よろしいですか？`)) return;
   statusEl.textContent = '';
   try {
-    await rpc('admin_reset_employee_pin', { p_admin_employee_code: session.employeeCode, p_target_employee_code: targetCode });
-    statusEl.textContent = 'リセットしました。対象の社員は次回ログイン時に新しい暗証番号を設定できます。';
+    const r = await rpc('admin_reset_employee_pin', { p_admin_employee_code: session.employeeCode, p_target_employee_code: targetCode });
+    const info = r[0];
     statusEl.style.color = 'var(--success)';
+    statusEl.innerHTML = `リセットしました。初回登録コード: <b style="font-size:16px; letter-spacing:1px;">${info.out_code}</b>(このコードはこの画面を離れると二度と表示できません。今すぐ本人へお伝えください。有効期限: ${new Date(info.out_expires_at).toLocaleDateString('ja-JP')})`;
   } catch (e) {
     statusEl.textContent = 'リセットに失敗しました: ' + e.message;
     statusEl.style.color = 'var(--danger)';
@@ -4023,6 +4025,37 @@ async function doSubmitProfileEdit() {
     showDone('変更を申請しました。管理者が確認したうえで反映されます。', 'myinfo');
   } catch (e) {
     showError('profile-edit-error', e.message || '送信に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function resetPinChangeForm() {
+  hideError('pin-change-error');
+  document.getElementById('pin-change-current').value = '';
+  document.getElementById('pin-change-new').value = '';
+  document.getElementById('pin-change-confirm').value = '';
+}
+
+async function doSubmitPinChange() {
+  const session = getSession();
+  const current = document.getElementById('pin-change-current').value.trim();
+  const newPin = document.getElementById('pin-change-new').value.trim();
+  const confirm = document.getElementById('pin-change-confirm').value.trim();
+  hideError('pin-change-error');
+
+  if (!current) { showError('pin-change-error', '現在の暗証番号を入力してください。'); return; }
+  if (!/^[0-9]{4,6}$/.test(newPin)) { showError('pin-change-error', '新しい暗証番号は4〜6桁の数字で入力してください。'); return; }
+  if (newPin !== confirm) { showError('pin-change-error', '新しい暗証番号(確認)が一致しません。'); return; }
+
+  const btn = document.getElementById('pin-change-submit');
+  btn.disabled = true;
+  try {
+    await rpc('change_employee_pin', { p_employee_code: session.employeeCode, p_current_pin: current, p_new_pin: newPin });
+    resetPinChangeForm();
+    showDone('暗証番号を変更しました。', 'myinfo');
+  } catch (e) {
+    showError('pin-change-error', e.message || '変更に失敗しました。');
   } finally {
     btn.disabled = false;
   }
@@ -10153,6 +10186,8 @@ function init() {
   document.getElementById('myinfo-photo-input').addEventListener('change', (e) => handleMyPhotoFile(e.target.files[0]));
   document.getElementById('myinfo-photo-remove-btn').addEventListener('click', handleMyPhotoRemove);
   document.getElementById('profile-edit-submit').addEventListener('click', doSubmitProfileEdit);
+  document.getElementById('pin-change-submit').addEventListener('click', doSubmitPinChange);
+  SCREEN_ENTER_HOOKS['pin-change'] = resetPinChangeForm;
   document.getElementById('info-change-filter').addEventListener('change', loadInfoChangeAdmin);
   document.getElementById('supply-master-submit').addEventListener('click', doSaveSupplyMasterItem);
   document.getElementById('employee-detail-edit-basic-btn').addEventListener('click', openEmployeeEditBasic);

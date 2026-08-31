@@ -1298,6 +1298,11 @@
         <span class="unread-badge" id="home-anon-badge" style="display:none;"></span>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="pin-change">
+        <span class="icon-slot" data-icon="lock"></span>
+        <div class="menu-item-body">暗証番号を変更<span class="desc">ログイン用の暗証番号を変更する</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
     <button class="link" id="logout-btn-2">別の社員番号でログインし直す</button>
   </section>
@@ -1313,6 +1318,23 @@
       <input type="hidden" id="profile-edit-field">
       <div class="error" id="profile-edit-error"></div>
       <button id="profile-edit-submit">変更を申請する</button>
+    </div>
+  </section>
+
+  <!-- 暗証番号(PIN)変更 -->
+  <section id="screen-pin-change" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="card">
+      <div class="form-title">暗証番号を変更</div>
+      <div class="hint" style="margin-bottom:12px;">ログイン時に入力する暗証番号(4〜6桁の数字)を変更します。</div>
+      <label for="pin-change-current">現在の暗証番号</label>
+      <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-current" maxlength="6">
+      <label for="pin-change-new" style="margin-top:10px;">新しい暗証番号(4〜6桁の数字)</label>
+      <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-new" maxlength="6">
+      <label for="pin-change-confirm" style="margin-top:10px;">新しい暗証番号(確認)</label>
+      <input type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="off" id="pin-change-confirm" maxlength="6">
+      <div class="error" id="pin-change-error"></div>
+      <button id="pin-change-submit">暗証番号を変更する</button>
     </div>
   </section>
 
