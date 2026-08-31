@@ -1227,13 +1227,16 @@ body.is-staging::after {
    目のボタンで確認できるようにする。指で押しやすい44px以上を確保する。 */
 .pin-field { position: relative; }
 .pin-field input { padding-right: 56px; }
-.pin-reveal {
-  position: absolute; top: 0; right: 0; height: 100%; min-width: 52px;
-  border: none; background: transparent; cursor: pointer;
-  font-size: 20px; line-height: 1; color: var(--text-faint);
+/* ポータルの共通 button スタイル(width:100%・margin・影)を打ち消す必要があるため、
+   .pin-field を含めた詳細度の高いセレクタで指定する。 */
+.pin-field .pin-reveal {
+  position: absolute; top: 0; right: 0; bottom: 0;
+  width: 52px; min-width: 52px; height: auto; margin: 0; padding: 0;
+  border: none; border-radius: 0; background: transparent; box-shadow: none;
+  cursor: pointer; font-size: 20px; line-height: 1; color: var(--text-faint);
   display: flex; align-items: center; justify-content: center;
 }
-.pin-reveal:active { color: var(--primary); }
+.pin-field .pin-reveal:active { color: var(--primary); background: transparent; }
 /* ラベル直後に入力欄が来る構成のため、ボタンの当たり判定は入力欄の高さいっぱい */
 
 /* ---------------- 弱い暗証番号の変更のお願い (E-13) ---------------- */
