@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T20:59:38.724Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v82-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T21:28:36.175Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -807,7 +807,20 @@ function buildHomeGreeting() {
   return { greeting: pick(GREETINGS[band]), sub };
 }
 
+// 配置カレンダー専用URL(calendar/)から未ログインで飛ばされてきた場合、
+// ログインが済んだ時点でそちらへ戻す。認証画面をカレンダー側にも作らず、
+// ログインは常にこの社員ポータル1か所だけで行うための仕組み
+// (calendar/calendar-boot.js の goPortalLogin() と対になっている)。
+function consumeLoginRedirect() {
+  let next = null;
+  try { next = new URLSearchParams(location.search).get('next'); } catch (e) { return false; }
+  if (next !== 'calendar') return false;
+  location.replace('calendar/');
+  return true;
+}
+
 function enterMenu(replace) {
+  if (consumeLoginRedirect()) return;
   const session = getSession();
   const { greeting, sub } = buildHomeGreeting();
   document.getElementById('menu-greeting-hi').textContent = greeting;

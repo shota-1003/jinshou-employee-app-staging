@@ -11,7 +11,13 @@
 // ネットワークが使える限り常に最新のファイルを取得し、オフライン時だけキャッシュへ
 // フォールバックする方式にすることで、この種の「古いキャッシュに固定される」問題を
 // 自己修復できるようにした。
-const CACHE_NAME = 'jinshou-employee-app-v81-staging';
+// 2026-09-01: 接頭辞を分けた。CacheStorageはオリジン単位で共有されるため、
+// activateで「自分以外のキャッシュを全部消す」ままだと、同じオリジンに増えた
+// 配置カレンダー専用PWA(calendar/sw.js、接頭辞 jinshou-assignment-calendar)の
+// キャッシュまで消してしまい、両者が起動のたびに互いのキャッシュを潰し合う。
+// 自分の接頭辞の古い版だけを消すようにする。
+const CACHE_PREFIX = 'jinshou-employee-app';
+const CACHE_NAME = 'jinshou-employee-app-v82-staging';
 const SHELL_FILES = [
   './', './index.html', './style.css', './app.js', './icons.js', './manifest.json',
   './icons/app-icon-180-v2.png', './icons/icon-192-v2.png', './icons/icon-512-v2.png', './icons/icon-512-maskable-v2.png',
@@ -32,7 +38,9 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))),
+    caches.keys().then((keys) => Promise.all(
+      keys.filter((k) => k.startsWith(CACHE_PREFIX) && k !== CACHE_NAME).map((k) => caches.delete(k)),
+    )),
   );
   self.clients.claim();
 });

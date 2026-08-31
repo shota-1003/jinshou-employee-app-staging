@@ -1,0 +1,38 @@
+{
+  "id": "jinshou-assignment-calendar-staging",
+  "name": "迅翔 配置カレンダー（先行更新版）",
+  "short_name": "配置カレンダー先行",
+  "description": "現場と人員の配置を確認・編集する迅翔興業の配置カレンダー",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0f1c33",
+  "theme_color": "#d99a08",
+  "icons": [
+    {
+      "src": "icons/cal-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/cal-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/cal-icon-512-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/cal-app-icon-180.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

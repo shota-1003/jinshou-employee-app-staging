@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>迅翔 配置カレンダー</title>
+<!-- 社員ポータルとは別のPWAとして扱わせる。manifest・アイコン・アプリ名・テーマ色を
+     すべて専用のものにしているため、ホーム画面には別アプリとして並ぶ。 -->
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/cal-favicon-32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/cal-favicon-16.png">
+<link rel="apple-touch-icon" href="icons/cal-app-icon-180.png">
+<meta name="theme-color" content="#d99a08">
+<!-- iOSはmanifestを見ないため、ホーム画面追加時の名前をここで指定する
+     (これが無いと <title> が使われ、社員ポータルと見分けにくくなる)。 -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="配置カレンダー先行">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- カレンダー本体のCSSは社員ポータルと同じファイルを共有する(2つに分けない)。
+     .ac- 接頭辞で閉じており、必要な変数もすべて自前で定義しているため、
+     ポータルの style.css を読み込まなくても単体で正しく表示される。 -->
+<link rel="stylesheet" href="../assignment-calendar.css">
+<style>
+  /* この画面はカレンダーを1画面まるごと使う前提。上に載せる帯は
+     できるだけ低くする(帯を1px増やすほど月表示の1日あたり表示件数が減るため)。 */
+  :root { --cal-topbar-h: 30px; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body {
+    font-family: 'Noto Sans JP', -apple-system, BlinkMacSystemFont, 'Hiragino Kaku Gothic ProN', sans-serif;
+    background: #0f1c33;
+    color: #16202e;
+  }
+  .cal-topbar {
+    height: calc(var(--cal-topbar-h) + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) 10px 0 10px;
+    background: linear-gradient(180deg, #12213f 0%, #0f1c33 100%);
+    color: #f2c022;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .02em;
+  }
+  .cal-topbar .cal-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cal-topbar .cal-user { color: #cfd6e4; font-weight: 500; font-size: 11px; }
+  .cal-topbar button {
+    appearance: none; border: 1px solid rgba(242, 192, 34, .5); background: transparent;
+    color: #f2c022; font-size: 11px; font-weight: 700; border-radius: 999px;
+    padding: 3px 10px; cursor: pointer; font-family: inherit; white-space: nowrap;
+  }
+  #assignment-calendar-root { background: #fff; }
+
+  /* ログインが必要・承認待ち・エラーのときだけ出る案内。認証操作そのものは
+     社員ポータル側の画面で行うため、ここはボタン1つの案内に留める。 */
+  .cal-notice { padding: 28px 20px; max-width: 460px; margin: 0 auto; text-align: center; color: #e8edf5; }
+  .cal-notice img { width: 92px; height: 92px; border-radius: 20px; margin-bottom: 18px; }
+  .cal-notice h1 { font-size: 19px; margin: 0 0 10px; color: #fff; }
+  .cal-notice p { font-size: 14px; line-height: 1.75; margin: 0 0 20px; color: #c3cddd; }
+  .cal-notice .primary {
+    display: inline-block; background: #f2c022; color: #12213f; border: none;
+    border-radius: 10px; padding: 13px 26px; font-size: 15px; font-weight: 700;
+    cursor: pointer; font-family: inherit;
+  }
+  .cal-notice .secondary {
+    display: block; margin: 14px auto 0; background: none; border: none;
+    color: #9fb0c9; font-size: 13px; text-decoration: underline; cursor: pointer; font-family: inherit;
+  }
+  .staging-badge { display: none; }
+  body.is-staging .staging-badge {
+    display: inline-block; background: #8a5a12; color: #ffe9b0;
+    border-radius: 999px; padding: 2px 8px; font-size: 10px; font-weight: 700;
+  }
+</style>
+</head>
+<body>
+
+<!-- カレンダー本体 -->
+<div id="boot-calendar" data-boot-screen style="display:none;">
+  <div class="cal-topbar">
+    <span class="cal-title">配置カレンダー <span class="staging-badge">先行更新版</span></span>
+    <span class="cal-user" id="cal-user-name"></span>
+    <button type="button" data-go-portal>社員ポータル</button>
+  </div>
+  <div id="assignment-calendar-root"></div>
+</div>
+
+<!-- 未ログイン: 認証は社員ポータル側で行い、終わったらここへ戻す -->
+<div id="boot-login" data-boot-screen style="display:none;">
+  <div class="cal-notice">
+    <img src="icons/cal-icon-192.png" alt="配置カレンダー">
+    <h1>配置カレンダー</h1>
+    <p id="boot-login-message">この端末はまだログインしていません。</p>
+    <p>社員ポータルでログインすると、次からはこの画面がそのまま開きます。</p>
+    <button type="button" class="primary" id="boot-login-btn">社員ポータルでログインする</button>
+  </div>
+</div>
+
+<!-- 端末の承認待ち -->
+<div id="boot-pending" data-boot-screen style="display:none;">
+  <div class="cal-notice">
+    <img src="icons/cal-icon-192.png" alt="配置カレンダー">
+    <h1>承認をお待ちください</h1>
+    <p>この端末は管理者の承認待ちです。承認され次第、配置カレンダーをご利用いただけます。</p>
+    <button type="button" class="primary" data-go-portal>社員ポータルを開く</button>
+  </div>
+</div>
+
+<!-- 読み込み失敗 -->
+<div id="boot-error" data-boot-screen style="display:none;">
+  <div class="cal-notice">
+    <img src="icons/cal-icon-192.png" alt="配置カレンダー">
+    <h1>開けませんでした</h1>
+    <p id="boot-error-message">時間をおいてもう一度お試しください。</p>
+    <button type="button" class="primary" id="boot-retry-btn">もう一度試す</button>
+    <button type="button" class="secondary" data-go-portal>社員ポータルを開く</button>
+  </div>
+</div>
+
+<!-- カレンダー本体は社員ポータルと同じファイルを読み込む(実装を二重に持たない) -->
+<script src="../rokuyou.js"></script>
+<script src="../assignment-calendar.js"></script>
+<script src="calendar-boot.js"></script>
+</body>
+</html>
