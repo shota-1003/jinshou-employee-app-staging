@@ -16,7 +16,7 @@
 // 別の端末では対応するトークンを持たないため暗証番号の再確認が必ず発生し、
 // 管理者は社員詳細画面「ログイン端末」タブから特定の端末だけを個別に無効化できる。
 
-const SUPABASE_URL = 'https://tcxbtanumtuyfrqtjtvo.supabase.co/rest/v1/';
+const SUPABASE_URL = 'https://tcxbtanumtuyfrqtjtvo.supabase.co';
 const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 // Staging/Production取り違え防止用フラグ(2026-08-28)。ソース上は常にfalseで、
 // scripts/deploy-employee-portal-staging.jsがコピー先だけをtrueへ書き換える
@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v80-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T19:32:34.537Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v81-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T19:34:34.868Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
