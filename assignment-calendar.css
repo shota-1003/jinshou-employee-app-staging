@@ -1,0 +1,630 @@
+/* 配置カレンダー(現場・人員配置カレンダー)モジュール
+ *
+ * 社員ポータル本体(webapp/employee-app/style.css)へそのまま同居させても衝突しないよう、
+ * すべてのセレクタを .ac- 接頭辞に閉じ込めている(要素セレクタ・グローバルなリセットは書かない)。
+ *
+ * 設計方針: 見た目の新しさより「1画面に入る情報量」を優先する。実運用のLifeBearでは
+ * 月表示の1日セルに現場が5件+「+9」まで並び、管理者はスクロールせずに1ヶ月を見渡している。
+ * 余白・角丸・影を最小にして、同じ密度をブラウザで再現する。 */
+
+.ac-root {
+  /* iPhoneのノッチ/ホームインジケータ領域。PWAとして全画面表示したときに
+     ヘッダーが時計に隠れたり、最下部のボタンがホームバーに重ならないようにする。 */
+  --ac-safe-top: env(safe-area-inset-top, 0px);
+  --ac-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ac-safe-left: env(safe-area-inset-left, 0px);
+  --ac-safe-right: env(safe-area-inset-right, 0px);
+  /* stickyの吸着位置。ヘッダーの実高さをJS側が測って入れる(Safe Areaや
+     狭幅時のpadding変更で高さが変わっても追従させるため)。 */
+  --ac-header-h: 36px;
+  --ac-datebar-h: 52px;
+  --ac-stick-h: 88px;
+  --ac-bg: #ffffff;
+  --ac-fg: #16202e;
+  --ac-muted: #6b7684;
+  --ac-line: #d7dce3;
+  --ac-line-strong: #aab3bf;
+  --ac-accent: #12213f;
+  --ac-sat: #1565c0;
+  --ac-sun: #c62828;
+  --ac-today: #fff6d5;
+  --ac-selected: #12213f;
+  --ac-chip-h: 12px;
+  font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  color: var(--ac-fg);
+  background: var(--ac-bg);
+  -webkit-text-size-adjust: 100%;
+
+  /* 【重要】上部の日付バーを position:sticky で留めるのをやめ、
+     「スクロールする領域そのものを内側(.ac-bodywrap)に閉じ込める」構造にした。
+     stickyは「最も近いスクロール祖先」を基準に効くため、ページ全体がスクロール
+     する構成では、iOS Safariのツールバー伸縮やPWA表示・祖先のoverflow指定など
+     環境差で外れることがある(実機で日付バーが画面外へ消える不具合が発生した)。
+     ヘッダーと日付バーをスクロール領域の外に出せば、そもそもスクロールできない
+     ので「消えない」ことが構造的に保証される。
+     --ac-host-offset は、この上に別の帯(社員ポータルのヘッダー等)がある場合の
+     その高さ。JS側が実測して入れる。 */
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - var(--ac-host-offset, 0px));
+  height: calc(100dvh - var(--ac-host-offset, 0px));
+  overflow: hidden;
+}
+.ac-header, .ac-weeknav, .ac-offline { flex: 0 0 auto; }
+/* 縦スクロールするのはここだけ。日別を何百件並べても上部は動かない。 */
+.ac-bodywrap {
+  flex: 1 1 auto; min-height: 0;
+  overflow-y: auto; overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+  padding-bottom: var(--ac-safe-bottom);
+}
+
+.ac-root * { box-sizing: border-box; }
+.ac-root button { font-family: inherit; }
+/* iOSの二重タップ拡大とタップ時の青いハイライトを抑える */
+.ac-root { touch-action: manipulation; -webkit-tap-highlight-color: rgba(0,0,0,.06); }
+
+/* 見た目を大きくすると一覧性が落ちるため、当たり判定だけを疑似要素で広げる。
+   Appleの指針(44pt)に届かない小さなボタンにこれを付ける。 */
+.ac-hit { position: relative; }
+.ac-hit::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+
+/* ---------------- ヘッダー ---------------- */
+.ac-header {
+  z-index: 30;
+  display: flex; align-items: center; gap: 6px;
+  padding: calc(6px + var(--ac-safe-top)) calc(8px + var(--ac-safe-right)) 6px calc(8px + var(--ac-safe-left));
+  background: var(--ac-accent); color: #fff;
+}
+.ac-ym { font-size: 17px; font-weight: 700; letter-spacing: .02em; min-width: 108px; }
+.ac-ym small { font-size: 11px; font-weight: 500; opacity: .8; margin-left: 4px; }
+.ac-hbtn {
+  position: relative;
+  background: rgba(255,255,255,.14); color: #fff; border: 0; border-radius: 4px;
+  padding: 7px 9px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.ac-hbtn::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+.ac-hbtn:active { background: rgba(255,255,255,.3); }
+.ac-hbtn.ac-icon { padding: 5px 7px; font-size: 14px; line-height: 1; }
+.ac-spacer { flex: 1; }
+
+/* ---------------- 曜日見出し ---------------- */
+.ac-dow {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  background: #eef1f5; border-bottom: 1px solid var(--ac-line-strong);
+  /* 吸着先は .ac-bodywrap(唯一のスクロール領域)なので top は 0 でよい */
+  position: sticky; top: 0; z-index: 20;
+}
+.ac-dow div {
+  text-align: center; font-size: 10.5px; font-weight: 700; padding: 1px 0; color: var(--ac-muted);
+}
+.ac-dow div:nth-child(6) { color: var(--ac-sat); }
+.ac-dow div:nth-child(7) { color: var(--ac-sun); }
+
+/* ---------------- 日付バー ----------------
+   日別一覧を下までスクロールしても日付を移動できるよう、常に上部へ残す。
+   月全体を固定すると画面を占領しすぎるため1行だけにし、
+   選択日を中心に前後3週間を並べて横スクロールで動かす(週境界を意識させない)。 */
+/* ---------------- 1週間ストリップ(縮んだ月カレンダー) ----------------
+   配置一覧を下へスクロールすると月グリッドが画面外へ出る。そのとき
+   「日付だけの帯」を出しても、その日に何の現場があるかが分からず役に立たない。
+   そこで別のナビゲーションUIを足すのではなく、同じ月カレンダーの
+   セル(現場名・色・+N)を1週間ぶんだけ縮めて上部へ残す。
+   高さはJS側が実測して決める(固定領域が画面の30%を超えないように)。 */
+.ac-weeknav {
+  display: flex; align-items: stretch; z-index: 25;
+  background: #fff; border-bottom: 1px solid var(--ac-line-strong);
+  padding-left: var(--ac-safe-left); padding-right: var(--ac-safe-right);
+}
+.ac-datearrow {
+  flex: 0 0 auto; width: 26px; border: none; background: #fff; cursor: pointer;
+  color: var(--ac-accent); font-size: 17px; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center;
+}
+.ac-datearrow:first-child { border-right: 1px solid var(--ac-line); }
+.ac-datearrow:last-child  { border-left: 1px solid var(--ac-line); }
+.ac-datearrow:active { background: #e7ecf3; }
+
+/* 横スワイプで前後の7日へ連続移動する。週は月では区切らない。 */
+.ac-weektrack {
+  flex: 1 1 auto; min-width: 0;
+  display: flex; overflow-x: auto; overflow-y: hidden;
+  scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.ac-weektrack::-webkit-scrollbar { display: none; }
+.ac-weekpane {
+  flex: 0 0 100%; width: 100%; height: 100%;
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  scroll-snap-align: start;
+}
+.ac-wcell {
+  border-right: 1px solid var(--ac-line); overflow: hidden; cursor: pointer;
+  background: #fff; padding: 1px 1px 0; min-width: 0;
+}
+.ac-wcell:last-child { border-right: none; }
+.ac-wcell.ac-today { background: var(--ac-today); }
+.ac-wcell.ac-holiday { background: #fdf0f0; }
+.ac-wcell.ac-on { box-shadow: inset 0 0 0 2px var(--ac-selected); }
+.ac-wnum {
+  display: flex; align-items: baseline; gap: 2px; font-size: 12px; font-weight: 800;
+  line-height: 1.05; height: 13px;
+}
+.ac-wdow { font-size: 9px; font-weight: 700; color: var(--ac-muted); }
+.ac-wcell.ac-sat .ac-wdow, .ac-wcell.ac-sat .ac-wnum { color: var(--ac-sat); }
+.ac-wcell.ac-sun .ac-wdow, .ac-wcell.ac-sun .ac-wnum,
+.ac-wcell.ac-holiday .ac-wdow, .ac-wcell.ac-holiday .ac-wnum { color: var(--ac-sun); }
+.ac-wcount { margin-left: auto; font-size: 9px; font-weight: 700; color: var(--ac-muted); }
+/* 月表示と同じ色のチップ。現場名が読めることを優先し、余白は最小にする。 */
+.ac-wchip {
+  height: 11px; line-height: 11px; margin-top: 1px; border-radius: 2px;
+  font-size: 9px; font-weight: 700; color: #fff; padding: 0 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: clip;
+}
+.ac-wmore { font-size: 9px; font-weight: 800; color: var(--ac-muted); line-height: 11px; margin-top: 1px; }
+
+/* ---------------- 月グリッド ---------------- */
+/* 曜日行のstickyを月グリッドの範囲に閉じ込めるための入れ物 */
+.ac-monthwrap { position: relative; }
+.ac-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  border-left: 1px solid var(--ac-line);
+}
+.ac-cell {
+  position: relative;
+  border-right: 1px solid var(--ac-line);
+  border-bottom: 1px solid var(--ac-line);
+  padding: 0 1px;
+  overflow: hidden; cursor: pointer; background: #fff;
+  display: flex; flex-direction: column;
+}
+.ac-cell.ac-other { background: #f6f7f9; }
+.ac-cell.ac-today { background: var(--ac-today); }
+.ac-cell.ac-holiday { background: #fff2f2; }
+.ac-cell.ac-holiday.ac-today { background: var(--ac-today); }
+.ac-cell.ac-sel { box-shadow: inset 0 0 0 2px var(--ac-selected); }
+
+.ac-daynum {
+  display: flex; align-items: baseline; gap: 3px;
+  font-size: 11.5px; font-weight: 700; line-height: 14px; height: 14px; padding: 0 2px;
+}
+.ac-cell.ac-sat .ac-daynum { color: var(--ac-sat); }
+.ac-cell.ac-sun .ac-daynum, .ac-cell.ac-holiday .ac-daynum { color: var(--ac-sun); }
+/* 祝日はチップとして予定の先頭に並べる(LifeBearと同じ扱い)。
+   日付行へ押し込むと、その日の人数バッジと幅を取り合って読めなくなる。 */
+.ac-holchip {
+  background: #ffe0e0; color: var(--ac-sun) !important; font-weight: 700;
+}
+
+/* 予定チップ: LifeBearの密度に合わせ、1件あたり15pxに収める */
+.ac-chip {
+  height: var(--ac-chip-h); line-height: var(--ac-chip-h);
+  margin: 1px 0 0; padding: 0 2px; border-radius: 2px;
+  font-size: 9.5px; font-weight: 600; letter-spacing: -.03em; color: #fff;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  position: relative;
+}
+/* 未確定(draft)は右上を三角で欠く。LifeBearの「継続予定」表現と同じ視覚的手がかり。 */
+.ac-chip.ac-draft::after {
+  content: ""; position: absolute; right: 0; top: 0;
+  border-width: 0 7px 7px 0; border-style: solid;
+  border-color: transparent rgba(255,255,255,.85) transparent transparent;
+}
+.ac-chip.ac-light { color: #16202e; }
+.ac-chipnames {
+  font-size: 9px; line-height: 11px; height: 11px; padding: 0 3px;
+  color: var(--ac-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+/* 「+N」は最後のチップの上に重なるため、白いグラデーションで抜くとチップに穴が
+   空いたように見える。どの categoryカラーの上でも読めるよう、独立した濃いバッジにする。 */
+.ac-more {
+  position: absolute; right: 1px; bottom: 1px;
+  font-size: 9px; font-weight: 800; color: #fff;
+  line-height: 11px; padding: 0 3px; border-radius: 5px;
+  background: rgba(22, 32, 46, .82);
+  box-shadow: 0 0 0 1px rgba(255,255,255,.55);
+  pointer-events: none;
+}
+/* 「+N」バッジが最後のチップの文字に重なると読めなくなるため、
+   バッジが出る日だけ最後のチップの右端を空けて、そこで文字を省略させる。 */
+.ac-cell.ac-has-more .ac-chip:last-of-type { padding-right: 24px; }
+
+/* 六曜。情報密度を落とさないよう月表示では1文字。
+   友引だけは葬儀日程の判断で探される頻度が高いので、色を変えて拾いやすくする。 */
+.ac-rokuyou {
+  font-size: 8.5px; font-weight: 600; color: #97a0ac; line-height: 13px; margin-left: 1px;
+}
+.ac-rokuyou.ac-tomobiki { color: #b3521e; font-weight: 800; }
+.ac-rokuyou-full {
+  font-size: 11px; font-weight: 700; color: #6b7684; margin-left: 6px;
+}
+.ac-rokuyou-full.ac-tomobiki { color: #b3521e; }
+
+/* 現場名の右に出す人数。配置データからの自動集計で、人手入力はしない。 */
+.ac-sitecount {
+  font-size: 12px; font-weight: 800; color: #16202e;
+  background: #eef1f5; border-radius: 8px; padding: 0 5px; white-space: nowrap; flex: 0 0 auto;
+}
+.ac-hcbadge { background: #e2ecf7; color: #17457a; }
+
+/* 並び替えの↑↓。手袋・片手でも押せるよう、削除より大きめの当たり判定にする。 */
+/* 一覧性を落とさないため、操作ボタンは1行の高さ(約22px)に収める。
+   それでも指で押せるよう、見た目の外側に余白を持たせて当たり判定を広げる。 */
+.ac-ord {
+  position: relative;
+  border: 1px solid var(--ac-line-strong); background: #fff; color: #38414d;
+  border-radius: 4px; font-size: 13px; line-height: 20px; padding: 0 9px; cursor: pointer;
+  flex: 0 0 auto;
+}
+/* 並び替えは連続して押すため、見た目20pxのままで当たり判定を44pxへ広げる */
+.ac-ord::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+.ac-ord:active { background: #e9edf2; }
+
+.ac-headcount {
+  margin-left: auto; font-size: 9px; font-weight: 700; color: var(--ac-muted);
+  background: #eef1f5; border-radius: 6px; padding: 0 3px; line-height: 12px;
+}
+
+/* ---------------- 日別詳細 ---------------- */
+.ac-day {
+  border-top: 3px solid var(--ac-accent);
+  background: #fff;
+}
+/* 操作バーは「情報行」と「操作行」の2段固定。
+   以前は1行に全ボタンを詰めて横スクロールさせていたため、スクロール位置によって
+   ボタンの位置が毎回変わり、スマホでは狙ったボタンを押しづらかった。 */
+.ac-dayhead {
+  position: sticky; top: 0; z-index: 22;
+  padding: 5px 8px 6px; background: #f2f4f7; border-bottom: 1px solid var(--ac-line);
+}
+/* 情報行は必ず1行に収める。折り返すと固定領域の高さが日によって変わり、
+   その下の操作ボタンの位置がずれてしまう(画面の30%を超えることもあった)。
+   ここはタップ対象ではない表示専用の行なので、横スクロールにしても誤タップは起きない。 */
+.ac-dayinfo {
+  display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; min-height: 22px;
+  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+}
+.ac-dayinfo::-webkit-scrollbar { display: none; }
+.ac-dayinfo > * { flex: 0 0 auto; }
+.ac-daybar { display: flex; gap: 6px; margin-top: 5px; }
+.ac-actbtn {
+  border: 1px solid var(--ac-line-strong); background: #fff; color: var(--ac-fg);
+  border-radius: 7px; font-size: 14px; font-weight: 700; cursor: pointer;
+  min-height: 46px; padding: 0 10px; white-space: nowrap;
+}
+.ac-actbtn:active { filter: brightness(.94); }
+/* いちばん使う「配置を追加」を最大にし、押し間違えないよう他と色を分ける */
+.ac-actmain { flex: 1 1 auto; background: var(--ac-accent); border-color: var(--ac-accent); color: #fff; font-size: 15px; }
+.ac-actsub  { flex: 0 0 auto; }
+.ac-actmore { flex: 0 0 auto; width: 46px; padding: 0; font-size: 18px; line-height: 1; }
+.ac-daytitle { font-size: 14px; font-weight: 700; }
+.ac-daytitle .ac-hol { color: var(--ac-sun); font-size: 12px; margin-left: 6px; }
+.ac-btn {
+  border: 1px solid var(--ac-line-strong); background: #fff; color: var(--ac-fg);
+  border-radius: 4px; padding: 5px 9px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.ac-btn:active { background: #e9edf2; }
+.ac-btn.ac-primary { background: var(--ac-accent); border-color: var(--ac-accent); color: #fff; }
+.ac-btn.ac-danger { color: #c62828; border-color: #e8a5a5; }
+.ac-btn.ac-sm { position: relative; padding: 6px 9px; font-size: 11.5px; }
+.ac-btn.ac-sm::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+.ac-btn:disabled { opacity: .45; cursor: default; }
+
+.ac-sched {
+  border-bottom: 1px solid var(--ac-line);
+  padding: 5px 8px;
+  border-left: 5px solid transparent;
+  cursor: pointer;
+}
+.ac-sched:active { background: #f4f6f9; }
+.ac-del {
+  position: relative;
+  border: 0; background: transparent; color: #b08585; cursor: pointer;
+  font-size: 14px; line-height: 20px; padding: 0 6px; flex: 0 0 auto;
+}
+.ac-del::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+.ac-schedtop { display: flex; align-items: center; gap: 5px; }
+.ac-schedname { font-size: 14px; font-weight: 700; flex: 1; }
+.ac-badge {
+  font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 8px;
+  background: #e5e9ef; color: var(--ac-muted); white-space: nowrap; flex: 0 0 auto;
+}
+.ac-badge.ac-ok { background: #d9f0e0; color: #15642f; }
+.ac-badge.ac-warn { background: #fde8cf; color: #8a4b12; }
+.ac-schedmeta { font-size: 11px; color: var(--ac-muted); margin-top: 1px; }
+.ac-members { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+.ac-mem {
+  font-size: 12.5px; font-weight: 600; padding: 5px 7px; border-radius: 3px;
+  background: #eef1f5; border: 1px solid var(--ac-line);
+  display: inline-flex; align-items: center; min-height: 30px;
+}
+.ac-mem.ac-confirmed { background: #e3f4e8; border-color: #a8d8b6; }
+.ac-mem.ac-unconfirmed { background: #fdf0e0; border-color: #e2c197; }
+/* 名前をタップすると移動シートが開くことを、下線で控えめに示す */
+.ac-mem.ac-movable {
+  position: relative; cursor: pointer;
+  text-decoration: underline dotted rgba(22,32,46,.35); text-underline-offset: 2px;
+}
+.ac-mem.ac-movable::after {
+  content: ""; position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%); height: 44px;
+}
+.ac-mem.ac-movable:active { background: #dde3ea; }
+.ac-mem.ac-sub { background: #f6ecdf; border-color: #dcc3a2; }
+.ac-mem .ac-role { font-size: 10px; color: #8a4b12; margin-left: 3px; }
+.ac-mem .ac-mt { font-size: 10px; color: var(--ac-muted); margin-left: 3px; }
+.ac-note { font-size: 12px; color: #4a5563; margin-top: 3px; white-space: pre-wrap; }
+.ac-empty { padding: 14px 8px; color: var(--ac-muted); font-size: 13px; text-align: center; }
+.ac-bodywrap { padding-bottom: var(--ac-safe-bottom); }
+
+/* ---------------- 警告 ---------------- */
+.ac-issues { padding: 6px 8px; background: #fff8e1; border-bottom: 1px solid #e8d9a0; }
+.ac-issue { font-size: 12px; line-height: 1.5; }
+.ac-issue::before { content: "▲ "; }
+.ac-issue.ac-error { color: #b3261e; font-weight: 600; }
+.ac-issue.ac-error::before { content: "● "; }
+.ac-issue.ac-info { color: var(--ac-muted); }
+
+/* ---------------- シート(登録・検索など) ---------------- */
+.ac-sheet {
+  position: fixed; inset: 0; z-index: 60;
+  background: rgba(10,16,26,.45);
+  display: flex; align-items: flex-end; justify-content: center;
+}
+.ac-sheet[hidden] { display: none; }
+.ac-sheetbody {
+  background: #fff; width: 100%; max-width: 720px;
+  max-height: 92vh;
+  /* iOSでキーボードが出ると vh は変わらないが dvh は縮む。
+     dvhを使うことで、入力中でも決定ボタンが画面内に残る。 */
+  max-height: 92dvh;
+  border-radius: 10px 10px 0 0; display: flex; flex-direction: column; overflow: hidden;
+}
+.ac-sheethead {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; background: var(--ac-accent); color: #fff;
+}
+.ac-sheethead h3 { margin: 0; font-size: 15px; font-weight: 700; flex: 1; }
+.ac-sheetscroll { overflow-y: auto; padding: 8px 10px 12px; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+.ac-sheetfoot {
+  display: flex; gap: 6px;
+  padding: 8px 10px calc(8px + var(--ac-safe-bottom));
+  border-top: 1px solid var(--ac-line); background: #f7f8fa;
+}
+.ac-sheetfoot .ac-btn { flex: 1; padding: 10px; font-size: 13px; }
+
+.ac-field { margin-bottom: 8px; }
+.ac-label { font-size: 11px; font-weight: 700; color: var(--ac-muted); margin-bottom: 2px; }
+.ac-input, .ac-select {
+  width: 100%; padding: 9px 8px;
+  /* 16px未満にするとiOS Safariがフォーカス時にページごと自動ズームしてしまい、
+     閉じても拡大が戻らない。ここは密度より優先して16pxを死守する。 */
+  font-size: 16px;
+  border: 1px solid var(--ac-line-strong); border-radius: 4px; background: #fff; color: var(--ac-fg);
+  font-family: inherit; -webkit-appearance: none; appearance: none;
+}
+.ac-row { display: flex; gap: 6px; }
+.ac-row > * { flex: 1; }
+
+/* 選択トークン(現場・社員・カテゴリ) */
+.ac-tokens { display: flex; flex-wrap: wrap; gap: 4px; }
+.ac-token {
+  font-size: 13px; font-weight: 600; padding: 9px 12px; border-radius: 18px;
+  border: 1px solid var(--ac-line-strong); background: #fff; color: var(--ac-fg); cursor: pointer;
+  min-height: 38px; display: inline-flex; align-items: center;
+}
+/* 種別は26件あり、既定の「仕事」から変えることは少ない。折り返して5行を占めると
+   その下の社員選択が画面外へ押し出されるため、1行の横スクロールに収める。 */
+.ac-tokens.ac-onerow { flex-wrap: nowrap; overflow-x: auto; -webkit-overflow-scrolling: touch; padding-bottom: 3px; }
+.ac-tokens.ac-onerow .ac-token { flex: 0 0 auto; font-size: 12.5px; padding: 7px 10px; min-height: 34px; }
+.ac-token.ac-on { background: var(--ac-accent); border-color: var(--ac-accent); color: #fff; }
+.ac-token.ac-cat { border-left-width: 10px; }
+.ac-sublabel { font-size: 10px; opacity: .7; margin-left: 3px; }
+
+.ac-picked {
+  display: flex; align-items: center; gap: 6px; padding: 6px 8px;
+  background: #eef1f5; border: 1px solid var(--ac-line); border-radius: 4px; font-size: 14px; font-weight: 700;
+}
+.ac-list { max-height: 168px; overflow-y: auto; border: 1px solid var(--ac-line); border-radius: 4px; }
+.ac-listitem {
+  padding: 11px 8px; font-size: 14px; min-height: 44px;
+  border-bottom: 1px solid var(--ac-line); cursor: pointer; background: #fff;
+}
+.ac-listitem:last-child { border-bottom: 0; }
+.ac-listitem:active { background: #e9edf2; }
+.ac-listitem .ac-sub2 { font-size: 11px; color: var(--ac-muted); }
+
+/* 検索結果 */
+.ac-result { padding: 7px 8px; border-bottom: 1px solid var(--ac-line); cursor: pointer; }
+.ac-result .ac-rdate { font-size: 11px; font-weight: 700; color: var(--ac-muted); }
+.ac-result .ac-rlabel { font-size: 14px; font-weight: 700; }
+.ac-result .ac-rmem { font-size: 12px; color: #4a5563; }
+
+/* 社員向け「自分の予定」 */
+.ac-mycard {
+  margin: 8px; padding: 10px; border-radius: 6px;
+  border: 1px solid var(--ac-line); border-left: 6px solid var(--ac-accent); background: #fff;
+}
+.ac-mycard.ac-next { border-color: #f0a800; border-left-color: #f0a800; background: #fffdf3; }
+.ac-mydate { font-size: 12px; font-weight: 700; color: var(--ac-muted); }
+.ac-mysite { font-size: 20px; font-weight: 800; line-height: 1.25; margin: 2px 0; }
+.ac-mymeet { font-size: 15px; font-weight: 700; }
+.ac-mymeet b { font-size: 22px; }
+.ac-myrow { font-size: 13px; color: #4a5563; margin-top: 2px; }
+.ac-confirmbtn {
+  width: 100%; margin-top: 8px; padding: 12px; font-size: 15px; font-weight: 700;
+  border: 0; border-radius: 6px; background: #12213f; color: #fff; cursor: pointer;
+}
+.ac-confirmbtn.ac-done { background: #d9f0e0; color: #15642f; }
+
+.ac-toast {
+  position: fixed; left: 50%; bottom: calc(24px + var(--ac-safe-bottom)); transform: translateX(-50%);
+  background: rgba(20,28,40,.94); color: #fff; padding: 9px 14px; border-radius: 20px;
+  font-size: 13px; z-index: 90; max-width: 90vw; text-align: center;
+}
+.ac-toast[hidden] { display: none; }
+.ac-offline {
+  padding: 5px 8px; background: #fde8cf; color: #8a4b12; font-size: 11.5px; font-weight: 600; text-align: center;
+}
+
+/* 画面が広い場合は月グリッドの1日をもっと高くし、より多くの現場を省略なしで見せる */
+/* 1日セルの高さと1セルに入る件数は、端末の画面高からJS側で算出して
+   grid-auto-rows へ設定する(assignment-calendar.js の layoutMonthGrid)。
+   画面が大きいほど省略「+N」が減り、そのぶん現場名がそのまま見える。 */
+@media (min-width: 700px) {
+  .ac-chip { font-size: 11.5px; letter-spacing: 0; }
+}
+/* iPhone SE(第1世代)相当の320px幅では、ヘッダーのボタンが並びきらず
+   ページ全体が横スクロールしてしまう(実測: 内容幅354px > 画面320px)。
+   月表示は縦にしかスクロールしない前提の画面なので、横スクロールは出さない。 */
+@media (max-width: 400px) {
+  .ac-header { gap: 4px; padding: 6px; }
+  .ac-ym { font-size: 15px; min-width: 0; white-space: nowrap; }
+  .ac-hbtn { padding: 5px 6px; font-size: 11px; }
+  .ac-hbtn.ac-icon { padding: 5px 6px; font-size: 13px; }
+}
+@media (max-width: 359px) {
+  .ac-chip { font-size: 9px; padding: 0 1px; }
+  .ac-headcount { display: none; }   /* 幅が足りないときは人数を諦め、日付と六曜を優先する */
+}
+
+/* ---------------- 配置の詳細(閲覧) ---------------- */
+.ac-dhead {
+  border-left: 6px solid #1a73e8; padding: 2px 0 8px 10px; margin-bottom: 8px;
+  border-bottom: 1px solid var(--ac-line); position: relative;
+}
+.ac-dsite { font-size: 18px; font-weight: 800; line-height: 1.3; padding-right: 60px; }
+.ac-dsub { font-size: 12px; color: var(--ac-muted); margin-top: 2px; }
+.ac-dcount {
+  position: absolute; right: 0; top: 0;
+  font-size: 15px; font-weight: 800; background: #eef1f5; border-radius: 10px; padding: 2px 9px;
+}
+.ac-drow { display: flex; gap: 8px; padding: 7px 0; border-bottom: 1px solid #eef1f5; }
+.ac-dlabel { flex: 0 0 84px; font-size: 12px; font-weight: 700; color: var(--ac-muted); padding-top: 2px; }
+.ac-dvalue { flex: 1 1 auto; font-size: 14px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.ac-dvalue .ac-members { margin-top: 0; }
+.ac-dstrong { font-weight: 700; }
+.ac-dsmall { font-size: 12px; color: var(--ac-muted); line-height: 1.6; }
+
+/* ---------------- 外注の入力(会社+人数+任意の名前) ---------------- */
+.ac-subcard {
+  border: 1px solid var(--ac-line); border-radius: 6px; padding: 8px; margin-bottom: 8px; background: #fdfaf5;
+}
+.ac-subtop { display: flex; align-items: center; gap: 6px; }
+.ac-subname { font-size: 14px; font-weight: 700; }
+.ac-subcount { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+.ac-steplabel { font-size: 12px; font-weight: 700; color: var(--ac-muted); }
+.ac-step {
+  width: 46px; min-height: 46px; border: 1px solid var(--ac-line-strong); background: #fff;
+  border-radius: 8px; font-size: 20px; font-weight: 700; cursor: pointer; line-height: 1;
+}
+.ac-step:active { background: #e9edf2; }
+.ac-stepnum { font-size: 17px; font-weight: 800; min-width: 52px; text-align: center; }
+.ac-subworkers { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; align-items: center; }
+
+/* ---------------- 種別・カテゴリー管理 ---------------- */
+.ac-catcard {
+  border: 1px solid var(--ac-line); border-radius: 6px; padding: 8px; margin-bottom: 8px; background: #fff;
+}
+.ac-catadd { background: #f4f7fb; border-style: dashed; }
+.ac-cattop { display: flex; align-items: center; gap: 8px; }
+.ac-catcolor {
+  width: 46px; height: 46px; flex: 0 0 auto; padding: 2px;
+  border: 1px solid var(--ac-line-strong); border-radius: 8px; background: #fff;
+}
+.ac-catname { flex: 1 1 auto; }
+.ac-catopts { display: flex; align-items: center; gap: 6px; margin-top: 7px; flex-wrap: wrap; }
+
+/* ---------------- メニュー項目 ---------------- */
+.ac-menutitle { font-size: 14.5px; font-weight: 700; }
+/* コピー元として選んだ現場 */
+.ac-picked-row { background: #e8f0fb; box-shadow: inset 3px 0 0 var(--ac-accent); }
+.ac-listitem.ac-disabled { opacity: .5; cursor: default; }
+
+/* 重要連絡・持ち物。備考と見分けが付かないと意味がないので明確に色を変える。 */
+.ac-important {
+  background: #fdecec; border: 1px solid #e9a8a8; border-radius: 6px;
+  padding: 8px 10px; margin-top: 8px; font-size: 14px; line-height: 1.6;
+  color: #8a1f1f; font-weight: 600; white-space: pre-wrap;
+}
+.ac-importanthead { font-size: 11px; font-weight: 800; letter-spacing: .04em; margin-bottom: 2px; }
+.ac-importantinput { border-color: #e9a8a8; background: #fffafa; }
+.ac-labelrow { display: flex; align-items: center; justify-content: space-between; }
+/* 「種別はどこから追加するのか分からない」への対応。選ぶ場所のすぐ横に出す。 */
+.ac-selcount {
+  font-size: 12px; font-weight: 800; color: var(--ac-accent);
+  background: #eef1f5; border-radius: 9px; padding: 1px 8px;
+}
+.ac-linkbtn {
+  border: 0; background: transparent; color: #1a5fb4; font-size: 12px; font-weight: 700;
+  text-decoration: underline; cursor: pointer; padding: 6px 2px; min-height: 32px;
+}
+
+/* ---------------- 運搬(運送要員) ----------------
+   色だけで区別すると、色覚特性・屋外の直射日光・印刷したものでは判別できない。
+   LifeBearのタイヤ印にあたるものとして、アイコン+「運搬」の文字で必ず判別できるようにする。 */
+.ac-haulmark {
+  display: inline-block; margin-right: 3px; font-size: 10px; font-weight: 800;
+  color: #00695c; letter-spacing: -.02em;
+}
+.ac-mem.ac-haulmem {
+  background: #e0f2f1; border-color: #4db6ac; border-left: 3px solid #00695c;
+}
+.ac-badge.ac-haul { background: #e0f2f1; color: #00554c; border-color: #4db6ac; }
+
+/* ---------------- 社員ごとの時間・運搬の入力行 ---------------- */
+.ac-mrow {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+  padding: 3px 0; border-bottom: 1px dotted var(--ac-line);
+}
+.ac-mrowname { flex: 0 0 auto; min-width: 84px; font-size: 13px; font-weight: 700; }
+/* 押せることが分かるよう、ただのテキストではなくボタンの見た目にする */
+.ac-mrowtime {
+  flex: 1 1 auto; min-height: 32px; text-align: left;
+  border: 1px solid var(--ac-line-strong); border-radius: 6px; background: #fff;
+  font-size: 13px; font-weight: 600; color: var(--ac-fg); padding: 4px 8px; cursor: pointer;
+}
+.ac-mrowtime:active { background: #eef1f5; }
+
+/* ---------------- 現場ヘッダー(独立した大きなタップ領域) ----------------
+   人数の多い現場では社員名チップが画面を埋め、現場自体を押しにくかった。
+   ヘッダーだけを押せる帯にして、社員名の並びを押しても何も起きないようにする。 */
+.ac-sitehead {
+  min-height: 46px; cursor: pointer; border-radius: 5px;
+  padding: 4px 4px 4px 2px; margin: -2px 0 2px;
+}
+.ac-sitehead:active { background: #e7ecf3; }
+.ac-sitehead::after {
+  /* 見た目を大きくせずに押せる範囲だけ広げる */
+  content: ""; position: absolute; left: 0; right: 0; height: 0;
+}
+
+/* ---------------- 重複警告のボタン ---------------- */
+.ac-issuebtns { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+.ac-issuebtns .ac-btn { min-height: 36px; }
+
+/* ---------------- 「どちらを編集しますか？」の選択行 ---------------- */
+.ac-pickrow {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 1px solid var(--ac-line-strong); border-radius: 7px; background: #fff;
+  padding: 9px 10px; margin-top: 7px; min-height: 52px;
+}
+.ac-pickrow:active { background: #eef1f5; }
+.ac-pickname { font-size: 15px; font-weight: 700; color: var(--ac-fg); }
+.ac-picktime { font-size: 13px; color: var(--ac-muted); margin-top: 2px; }
