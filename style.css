@@ -1276,3 +1276,17 @@ body.assignment-calendar-open main { padding: 0; }
 body.assignment-calendar-open #screen-assignment-calendar .ac-root {
   height: calc(100dvh - var(--ac-host-offset, 0px) - var(--ac-nav-h));
 }
+
+/* 初回登録で「あなたは〇〇さんですね」と確認させるための氏名表示。
+   見間違えると他人のアカウントを登録してしまうため、本文より明確に大きくする。 */
+.confirm-name {
+  font-size: 26px;
+  font-weight: 700;
+  text-align: center;
+  padding: 16px 12px;
+  margin: 4px 0 2px;
+  border-radius: 10px;
+  background: rgba(198, 162, 90, 0.14);
+  border: 1px solid rgba(198, 162, 90, 0.45);
+  letter-spacing: 0.04em;
+}

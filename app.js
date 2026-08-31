@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v78-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T16:21:23.500Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v79-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T17:09:58.858Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -388,7 +388,7 @@ async function startLoginFlow() {
     }
     if (!info.has_pin) {
       showScreen('pin-register');
-      document.getElementById('pin-register-name').textContent = `${info.employee_name}さん`;
+      resetRegisterSteps();
       return;
     }
     document.getElementById('pin-entry-name').textContent = `${info.employee_name}さん`;
@@ -417,8 +417,8 @@ async function doSubmitEmployeeCode() {
       showScreen('pin-entry');
     } else {
       hideError('pin-register-error');
-      document.getElementById('pin-register-name').textContent = `${info.employee_name}さん`;
       showScreen('pin-register');
+      resetRegisterSteps();
     }
   } catch (e) {
     showError('login-error', '通信エラーが発生しました。電波の良い場所でもう一度お試しください。');
@@ -633,22 +633,63 @@ async function doVerifyPin() {
   }
 }
 
+// 初回登録は2段階。ここが1段階目: 初回登録コードから対象社員を特定し、氏名を本人に見せる。
+// コードはまだ消費しない(ここでやめても、もう一度やり直せる)。
+function resetRegisterSteps() {
+  const step1 = document.getElementById('pin-register-step1');
+  const step2 = document.getElementById('pin-register-step2');
+  if (step1) step1.style.display = '';
+  if (step2) step2.style.display = 'none';
+  const name = document.getElementById('pin-register-name');
+  if (name) name.textContent = '初めての方へ';
+  const identified = document.getElementById('pin-register-identified-name');
+  if (identified) identified.textContent = '';
+  hideError('pin-register-error');
+  hideError('pin-register-error2');
+  for (const id of ['pin-register-code', 'pin-register-confirm']) {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  }
+}
+
+async function doIdentifyForRegister() {
+  const firstCode = document.getElementById('pin-register-first-code').value.trim();
+  hideError('pin-register-error');
+  if (!firstCode) {
+    showError('pin-register-error', '初回登録コードを入力してください。管理者から渡されていない場合は管理者へお問い合わせください。');
+    return;
+  }
+  const btn = document.getElementById('pin-register-identify');
+  btn.disabled = true;
+  try {
+    const rows = await rpc('identify_employee_by_first_login_code',
+      { p_employee_code: pendingLoginCode, p_first_login_code: firstCode });
+    const name = rows && rows[0] && rows[0].out_employee_name;
+    if (!name) throw new Error('初回登録コードが正しくありません。管理者へお問い合わせください。');
+    document.getElementById('pin-register-identified-name').textContent = `${name} さん`;
+    document.getElementById('pin-register-step1').style.display = 'none';
+    document.getElementById('pin-register-step2').style.display = '';
+    hideError('pin-register-error2');
+  } catch (e) {
+    showError('pin-register-error', e.message);
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// 2段階目: 本人だと確認できたうえで、本人が自分の暗証番号を決める。
 async function doRegisterPin() {
   const firstCode = document.getElementById('pin-register-first-code').value.trim();
   const pin = document.getElementById('pin-register-code').value.trim();
   const pinConfirm = document.getElementById('pin-register-confirm').value.trim();
-  hideError('pin-register-error');
+  hideError('pin-register-error2');
 
-  if (!firstCode) {
-    showError('pin-register-error', '初回登録コードを入力してください。管理者から伝えられていない場合は管理者へお問い合わせください。');
-    return;
-  }
   if (!/^[0-9]{4,6}$/.test(pin)) {
-    showError('pin-register-error', '暗証番号は4〜6桁の数字で入力してください。');
+    showError('pin-register-error2', '暗証番号は4〜6桁の数字で入力してください。');
     return;
   }
   if (pin !== pinConfirm) {
-    showError('pin-register-error', '確認用の暗証番号が一致しません。');
+    showError('pin-register-error2', '確認用の暗証番号が一致しません。');
     return;
   }
 
@@ -665,11 +706,12 @@ async function doRegisterPin() {
     if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
-    showError('pin-register-error', e.message);
+    showError('pin-register-error2', e.message);
   } finally {
     btn.disabled = false;
   }
 }
+
 
 // 承認待ち画面の「更新して確認する」ボタン。承認されていればenterMenu()、まだなら
 // 画面はそのまま(showScreenは何度呼んでも安全)。
@@ -10089,7 +10131,9 @@ function init() {
   // 暗証番号欄すべてに表示/非表示を付ける (E-14)
   attachPinRevealToggles();
 
+  document.getElementById('pin-register-identify').addEventListener('click', doIdentifyForRegister);
   document.getElementById('pin-register-submit').addEventListener('click', doRegisterPin);
+  document.getElementById('pin-register-back').addEventListener('click', resetRegisterSteps);
   document.getElementById('pin-register-switch').addEventListener('click', switchEmployee);
 
   document.getElementById('device-pending-retry').addEventListener('click', retryDevicePending);

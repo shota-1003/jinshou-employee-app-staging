@@ -77,16 +77,30 @@
       <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
       <div class="login-company" id="pin-register-name">初めての方へ</div>
       <div class="card">
-        <div class="hint" style="margin-bottom:14px;">初めてのご利用には、管理者から伝えられた初回登録コードが必要です。今後ログインに使う暗証番号(4〜6桁の数字)もあわせて設定してください。次回からはこの暗証番号だけでログインできます。</div>
-        <label for="pin-register-first-code">初回登録コード(管理者から伝えられたもの)</label>
-        <input type="text" id="pin-register-first-code" autocomplete="off" autocapitalize="characters" placeholder="例: QMSJCN8R2C">
-        <label for="pin-register-code">暗証番号(4〜6桁)</label>
-        <input type="password" id="pin-register-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
-        <label for="pin-register-confirm">確認のためもう一度入力</label>
-        <input type="password" id="pin-register-confirm" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
-        <div class="error" id="pin-register-error"></div>
-        <button id="pin-register-submit">登録してログイン</button>
-        <button class="link" id="pin-register-switch">別の社員番号でログイン</button>
+        <!-- 初回登録は2段階。
+             (1) 初回登録コードを入れる → そのコードから対象社員を特定し、氏名を本人に確認させる
+             (2) 本人だと確認できてから、自分の暗証番号を決める
+             1画面でまとめて入力させると、コードを配り間違えたときに本人が気づけないため。 -->
+        <div id="pin-register-step1">
+          <div class="hint" style="margin-bottom:14px;">初めてのご利用には、管理者から直接お渡しした初回登録コードが必要です。まずコードを入力してください。</div>
+          <label for="pin-register-first-code">初回登録コード(管理者から渡されたもの)</label>
+          <input type="text" id="pin-register-first-code" autocomplete="off" autocapitalize="characters" placeholder="例: QMSJCN8R2C">
+          <div class="error" id="pin-register-error"></div>
+          <button id="pin-register-identify">次へ</button>
+          <button class="link" id="pin-register-switch">別の社員番号でログイン</button>
+        </div>
+        <div id="pin-register-step2" style="display:none;">
+          <div class="hint" style="margin-bottom:10px;">お名前をご確認ください。違う場合は登録せず、管理者へお知らせください。</div>
+          <div class="confirm-name" id="pin-register-identified-name"></div>
+          <div class="hint" style="margin:12px 0 14px;">ご本人であれば、今後ログインに使う暗証番号(4〜6桁の数字)を決めてください。次回からはこの暗証番号だけでログインできます。</div>
+          <label for="pin-register-code">暗証番号(4〜6桁)</label>
+          <input type="password" id="pin-register-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+          <label for="pin-register-confirm">確認のためもう一度入力</label>
+          <input type="password" id="pin-register-confirm" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+          <div class="error" id="pin-register-error2"></div>
+          <button id="pin-register-submit">この名前で登録する</button>
+          <button class="link" id="pin-register-back">名前が違う / コードを入れ直す</button>
+        </div>
       </div>
     </div>
   </section>
