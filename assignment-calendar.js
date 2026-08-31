@@ -1502,9 +1502,17 @@
             catLabel.append(el('span', null, '種別（色）'));
             // 「種別はどこから追加するのか」が分からない、という指摘への対応。
             // 実際に種別を選ぶこの場所からも設定画面へ行けるようにする。
-            const catEdit = el('button', 'ac-linkbtn', '種別を追加・編集');
-            catEdit.addEventListener('click', openCategorySheet);
-            catLabel.append(catEdit);
+            //
+            // 2026-09-01: 管理者だけに出す。種別は会社全体で共有するマスターで、
+            // 更新は assignment_upsert_category が require_assignment_admin で弾いている。
+            // それまでは一般社員にもこのリンクが見えており、開いて操作してから
+            // 権限エラーになる状態だった(データは守られていたが、押せる場所に
+            // 押せない操作を置かない。⚙カレンダー設定と同じ扱いに揃える)。
+            if (state.isAdmin) {
+                const catEdit = el('button', 'ac-linkbtn', '種別を追加・編集');
+                catEdit.addEventListener('click', openCategorySheet);
+                catLabel.append(catEdit);
+            }
             catField.append(catLabel);
             const cats = el('div', 'ac-tokens ac-onerow');
             for (const c of state.categories) {
