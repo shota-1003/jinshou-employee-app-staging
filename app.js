@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T04:30:05.364Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v75-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T04:35:02.742Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -3213,12 +3213,21 @@ async function loadAnnounceBanner() {
       .filter((a) => (a.importance === 'important' || a.importance === 'critical') && shouldShowOnHome(a) && a.related_type !== 'daily_reports')
       .sort((a, b) => (a.importance === b.importance ? 0 : a.importance === 'critical' ? -1 : 1) || new Date(b.created_at) - new Date(a.created_at));
     if (importantOnes.length === 0) return;
-    area.innerHTML = importantOnes.map((important) => `
+    // ホームが重要お知らせだけで埋まらないよう表示は3件まで(最重要優先・新しい順は上のsort済み)。
+    // 残りは件数つきの1ボタンへまとめ、お知らせ一覧へ誘導する(2026-08-31、統合フェーズ§15)。
+    const HOME_BANNER_LIMIT = 3;
+    const shown = importantOnes.slice(0, HOME_BANNER_LIMIT);
+    const restCount = importantOnes.length - shown.length;
+    area.innerHTML = shown.map((important) => `
       <button type="button" class="announce-banner home-announce-banner-item" data-id="${important.id}">
         <div class="announce-banner-label">📢 ${important.importance === 'critical' ? '最重要のお知らせ' : '重要なお知らせ'}</div>
         <div class="announce-banner-title">${important.title}</div>
       </button>
-    `).join('');
+    `).join('') + (restCount > 0 ? `
+      <button type="button" class="announce-banner home-announce-banner-item announce-banner-more">
+        <div class="announce-banner-title">重要なお知らせが他${restCount}件あります(すべて見る)</div>
+      </button>
+    ` : '');
     area.querySelectorAll('.home-announce-banner-item').forEach((btn) => {
       btn.addEventListener('click', () => showScreen('announcements'));
     });
