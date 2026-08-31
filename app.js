@@ -16,8 +16,8 @@
 // 別の端末では対応するトークンを持たないため暗証番号の再確認が必ず発生し、
 // 管理者は社員詳細画面「ログイン端末」タブから特定の端末だけを個別に無効化できる。
 
-const SUPABASE_URL = 'https://fnhpplsuwanuxwktthqv.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZuaHBwbHN1d2FudXh3a3R0aHF2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODc4MTkxODYsImV4cCI6MjEwMzM5NTE4Nn0.l3Rafu627Pe2e-aM6zG7FOlijPuyjp7xba_pYGFtG50';
+const SUPABASE_URL = 'https://tcxbtanumtuyfrqtjtvo.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 // Staging/Production取り違え防止用フラグ(2026-08-28)。ソース上は常にfalseで、
 // scripts/deploy-employee-portal-staging.jsがコピー先だけをtrueへ書き換える
 // (SUPABASE_URL/ANON_KEYと同じ「ソースは変更しない、コピー先だけ差し替える」方式)。
@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v80-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T17:43:25.676Z';
+const BUILD_DEPLOYED_AT = '2026-08-31T19:32:34.537Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10090,15 +10090,18 @@ function closeAiGuidePanel() {
 
 // ---------- 初期化 ----------
 
-// Staging/Production取り違え防止(2026-08-28)。ログイン画面を含む全画面で、IS_STAGINGが
-// trueのビルドだけbodyへ.is-stagingクラスを付け、アプリ名・タブタイトル・ビルド情報表示を
-// 切り替える。Productionはこの関数自体は呼ばれるが、IS_STAGINGがfalseなので何もしない。
+// 2026-09-01の運用方針変更。以前は「Stagingは開発者だけが使うテスト環境」だったが、
+// 通常利用版(A)と先行更新版(B)の2本立てに変え、**どちらも全社員が実利用する**構成にした。
+// 両方とも同じ本番Supabaseを見るため、業務データは完全に共通である。
+// 違いは「新しい修正がどちらに先に入るか」だけなので、表示も
+// 「本番ではありません」ではなく「先行更新版・データは同じ」と伝える。
+// IS_STAGING は「先行更新版のビルドかどうか」を表すフラグとして引き続き使う。
 function applyStagingIndicator() {
   if (!IS_STAGING) return;
   document.body.classList.add('is-staging');
-  document.title = '迅翔興業 社員ポータル STAGING';
+  document.title = '迅翔興業 社員ポータル（先行更新版）';
   const titleEl = document.getElementById('app-header-title');
-  if (titleEl) titleEl.textContent = '社員ポータル｜アップデート用';
+  if (titleEl) titleEl.textContent = '社員ポータル｜先行更新版';
   const versionEl = document.getElementById('staging-build-version');
   if (versionEl) versionEl.textContent = APP_BUILD_VERSION || '-';
   const timeEl = document.getElementById('staging-build-time');

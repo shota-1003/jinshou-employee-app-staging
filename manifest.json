@@ -1,6 +1,6 @@
 {
-  "name": "迅翔興業 社員ポータル STAGING",
-  "short_name": "社員ポータルSTG",
+  "name": "迅翔興業 社員ポータル（先行更新版）",
+  "short_name": "社員ポータル先行",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
