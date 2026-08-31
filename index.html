@@ -13,6 +13,9 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<!-- 配置カレンダー(現場・人員配置)。セレクタは全て .ac- 接頭辞に閉じているため、
+     ポータル本体のスタイルと衝突しない(統合仕様書 INT-03)。 -->
+<link rel="stylesheet" href="assignment-calendar.css">
 </head>
 <body>
 <!-- 2026-08-28: Staging/Production取り違え防止。IS_STAGING=trueのビルドでのみJSが
@@ -56,6 +59,16 @@
         <button class="link" id="pin-entry-switch">別の社員番号でログイン</button>
       </div>
     </div>
+  </section>
+
+  <!-- 配置カレンダー(現場・人員配置)。
+       画面自体はモジュールが #assignment-calendar-root の中へ描く。
+       ポータルの rpc() とログイン中の社員番号をそのまま渡すため、再ログインは発生しない。
+       配置カレンダーは上部(年月ナビ・週ストリップ)をスクロール領域の外に置くことで
+       「日付移動UIが画面外へ出ない」ことを構造的に保証している。そのためこの画面を
+       開いている間はページ側をスクロールさせない(統合仕様書 INT-16)。 -->
+  <section id="screen-assignment-calendar" class="screen">
+    <div id="assignment-calendar-root"></div>
   </section>
 
   <!-- 暗証番号登録画面(初回、または管理者リセット後) -->
@@ -177,6 +190,11 @@
          外出・遅刻・早退/経費/常用伝票/支給品/会議/接待・会食(ユーザー指示)。 -->
     <div class="section-title">よく使う機能</div>
     <div class="home-card-grid">
+      <button type="button" class="home-card" data-nav="assignment-calendar">
+        <span class="icon-slot" data-icon="calendar"></span>
+        <span class="home-card-label">配置カレンダー</span>
+        <span class="home-card-desc">現場・人員の配置を見る</span>
+      </button>
       <button type="button" class="home-card" id="home-daily-report-card" data-nav="daily-report">
         <span class="icon-slot" data-icon="clipboard-list"></span>
         <span class="home-card-label" id="home-daily-report-label">日報</span>
@@ -3254,6 +3272,10 @@
 </div>
 
 <script src="icons.js"></script>
+<!-- 配置カレンダーは window.AssignmentCalendar / window.Rokuyou だけを公開する。
+     app.js より先に読み込む(app.js の初期化時点で mount() を呼べるようにするため)。 -->
+<script src="rokuyou.js"></script>
+<script src="assignment-calendar.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

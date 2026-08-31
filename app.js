@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v77-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T14:16:48.067Z';
+const BUILD_DEPLOYED_AT = '2026-08-31T14:36:52.964Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -195,6 +195,7 @@ const SCREEN_ENTER_HOOKS = {};
 // 元のタブが点灯したままになるようにマッピングする。
 const BOTTOM_NAV_MAP = {
   menu: 'menu',
+  'assignment-calendar': 'menu',
   'menu-apply': 'menu-apply', leave: 'menu-apply', expense: 'menu-apply', 'expense-select': 'menu-apply', 'expense-advance': 'menu-apply', 'expense-company': 'menu-apply',
   'expense-bulk': 'menu-apply',
   meeting: 'menu-apply', 'supply-request': 'menu-apply', 'qual-submit': 'menu-apply', 'health-submit': 'menu-apply',
@@ -258,6 +259,12 @@ function showScreen(id, opts) {
     if (ADMIN_SCREENS.has(id)) inAdminMode = true;
     else if (BOTTOM_NAV_MAP[id] || id === 'menu') inAdminMode = false; // 個人側の画面へ来たら管理者モードを解除
   }
+  // 配置カレンダーを開いている間だけページ側をスクロールさせない(INT-16)。
+  // 配置カレンダーは上部を「スクロール領域の外」に置いて日付移動UIを固定しているため、
+  // ページ側が別にスクロールすると、その保証が崩れてモジュールごと上へ流れてしまう。
+  document.body.classList.toggle('assignment-calendar-open', id === 'assignment-calendar');
+  if (id === 'assignment-calendar') mountAssignmentCalendar();
+  else unmountAssignmentCalendar();
   document.getElementById('bottom-nav').style.display = (!preAuthScreens.includes(id) && !inAdminMode) ? 'flex' : 'none';
   document.getElementById('admin-bottom-nav').style.display = (!preAuthScreens.includes(id) && inAdminMode) ? 'flex' : 'none';
   // ログイン前・管理者モード中は案内AIを表示しない(下部ナビと同じ扱い)。
@@ -562,6 +569,42 @@ async function doPinChangeReset() {
   } finally {
     btn.disabled = false;
   }
+}
+
+// ============================================================
+// 配置カレンダー(別モジュール)の組み込み
+//
+// 独自の認証・独自の社員/現場マスターは持たせない。ポータルが既に持っている
+// rpc() とログイン中の社員番号をそのまま渡すだけで、同じセッションで動く
+// (統合仕様書 §6)。画面を離れるときは destroy() を呼んで resize リスナーを外す。
+// ============================================================
+let assignmentCalendarApi = null;
+
+function mountAssignmentCalendar() {
+  const root = document.getElementById('assignment-calendar-root');
+  if (!root || !window.AssignmentCalendar) return;
+  const session = getSession();
+  if (!session) return;
+  if (assignmentCalendarApi) { assignmentCalendarApi.refresh(); return; }
+  try {
+    assignmentCalendarApi = window.AssignmentCalendar.mount(root, {
+      rpc,
+      employeeCode: session.employeeCode,
+      employeeName: session.employeeName,
+      // 現場管理アプリはまだ無い。用意できたらここで site_id を渡して遷移させる。
+      onOpenSite: null,
+    });
+  } catch (e) {
+    root.innerHTML = '<div class="hint" style="padding:16px;">配置カレンダーを開けませんでした。時間をおいてもう一度お試しください。</div>';
+  }
+}
+
+function unmountAssignmentCalendar() {
+  if (!assignmentCalendarApi) return;
+  try { assignmentCalendarApi.destroy(); } catch (e) { /* 既に外れている */ }
+  assignmentCalendarApi = null;
+  const root = document.getElementById('assignment-calendar-root');
+  if (root) root.innerHTML = '';
 }
 
 async function doVerifyPin() {

@@ -1251,3 +1251,17 @@ body.is-staging::after {
   font-weight: 700; margin-bottom: 4px; color: oklch(0.86 0.14 80);
 }
 .pin-weak-banner button { margin-top: 10px; }
+
+
+/* ---------------- 配置カレンダー同居のための調整 (INT-03 / INT-16) ----------------
+   配置カレンダーは上部(年月ナビ・週ストリップ)をスクロール領域の外に置くことで
+   「日付移動UIが画面外へ出ない」ことを構造的に保証している。ページ側が別に
+   スクロールするとその保証が崩れるため、この画面の間だけ body を固定する。 */
+body.assignment-calendar-open { overflow: hidden; }
+/* 配置カレンダー自身の高さは 100dvh から --ac-host-offset を引いて決まる。
+   ポータルは下部ナビが画面下に固定で乗るため、そのぶんを差し引く。 */
+#screen-assignment-calendar { padding: 0; }
+#screen-assignment-calendar .ac-root { --ac-nav-h: 64px; }
+body.assignment-calendar-open #screen-assignment-calendar .ac-root {
+  height: calc(100dvh - var(--ac-host-offset, 0px) - var(--ac-nav-h));
+}
