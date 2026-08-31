@@ -52,6 +52,7 @@
         <input type="password" id="pin-entry-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
         <div class="error" id="pin-entry-error"></div>
         <button id="pin-entry-submit">ログイン</button>
+        <button class="link" id="pin-forgot-link">暗証番号をお忘れの方</button>
         <button class="link" id="pin-entry-switch">別の社員番号でログイン</button>
       </div>
     </div>
@@ -77,6 +78,39 @@
     </div>
   </section>
 
+  <!-- 暗証番号をお忘れの方 (E-15)。
+       2段構えにしている:
+         (1) いつも使っている端末が手元にある場合 … 端末トークンが「その端末を持っている」
+             という所持要素そのものなので、これを本人確認として本人がその場で再設定できる。
+             最も多いケース(PINだけ忘れた)が管理者を介さず解決する。
+         (2) 端末を失った/データを消した場合 … 本人確認ができないので再設定はさせない。
+             管理者へ再設定依頼を送るだけ(電話をかけずに済む)。 -->
+  <section id="screen-pin-forgot" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company">暗証番号をお忘れの方</div>
+      <div class="card" id="pin-forgot-device-card">
+        <div class="hint" style="margin-bottom:14px;">この端末はご本人の端末として登録済みです。新しい暗証番号をその場で設定できます。</div>
+        <label for="pin-forgot-new">新しい暗証番号(4〜6桁の数字)</label>
+        <div class="pin-field">
+          <input type="password" id="pin-forgot-new" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        </div>
+        <label for="pin-forgot-confirm">確認のためもう一度入力</label>
+        <div class="pin-field">
+          <input type="password" id="pin-forgot-confirm" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        </div>
+        <div class="error" id="pin-forgot-error"></div>
+        <button id="pin-forgot-submit">この暗証番号にする</button>
+      </div>
+      <div class="card" id="pin-forgot-request-card">
+        <div class="hint" style="margin-bottom:14px;">この端末では本人確認ができないため、その場での再設定はできません。管理者へ再設定を依頼してください。依頼すると管理者に通知が届き、初回登録コードが発行されます。</div>
+        <div class="error" id="pin-forgot-request-error"></div>
+        <button id="pin-forgot-request-submit">管理者へ再設定を依頼する</button>
+      </div>
+      <button class="link" id="pin-forgot-back">ログイン画面に戻る</button>
+    </div>
+  </section>
+
   <!-- 2026-08-28: セキュリティ強化(新端末は管理者承認制)により、承認待ちの間はここで止める。
        トークン自体は既に発行済み(setDeviceAuth済み)なので、承認され次第「更新して確認する」で
        そのままenterMenu()できる。 -->
@@ -96,6 +130,12 @@
        大きなカテゴリーカード(申請/自分の情報/会社/管理者)だけを表示する。各カテゴリーを
        タップした先の専用画面で、初めてそのカテゴリーの中身(フォーム一覧等)を表示する構造。 -->
   <section id="screen-menu" class="screen">
+    <!-- 既存の弱い暗証番号を使っている人へのお願い。ログインは拒否せず、ここで促すだけ。 -->
+    <div class="pin-weak-banner" id="pin-weak-banner" style="display:none;">
+      <div class="pin-weak-title">暗証番号の変更をお願いします</div>
+      <div>いまお使いの暗証番号は推測されやすいものです(同じ数字の繰り返しや1234のような連番)。安全のため変更してください。</div>
+      <button type="button" id="pin-weak-change-btn">暗証番号を変更する</button>
+    </div>
     <div class="greeting-block">
       <div class="greeting-hi" id="menu-greeting-hi"></div>
       <div class="greeting-name" id="menu-greeting-name"></div>
