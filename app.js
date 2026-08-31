@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v73-staging';
-const BUILD_DEPLOYED_AT = '2026-08-30T16:58:04.514Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v74-staging';
+const BUILD_DEPLOYED_AT = '2026-08-31T04:30:05.364Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2840,6 +2840,9 @@ async function doAdminResetPin() {
   if (!confirm(`社員番号${targetCode}の暗証番号をリセットします。現在の暗証番号は使えなくなり、新しい初回登録コードを本人へ伝える必要があります。よろしいですか？`)) return;
   statusEl.textContent = '';
   try {
+    // admin_reset_employee_pinは既存のPINを無効化したうえで、register_employee_pinで
+    // 本人が次回ログイン時に新PINを設定するための初回登録コードを発行する
+    // (admin_issue_first_login_codeと同じ形式で返る、表示方法もそちらに合わせた)。
     const r = await rpc('admin_reset_employee_pin', { p_admin_employee_code: session.employeeCode, p_target_employee_code: targetCode });
     const info = r[0];
     statusEl.style.color = 'var(--success)';
@@ -8054,6 +8057,7 @@ function renderAdminRoleCandidates(query) {
 const ADMIN_ROLE_LABEL = {
   general_admin: '全体管理者', nippo_admin: '日報担当', accounting_admin: '経理承認担当',
   hr_admin: '社員管理担当', subcontractor_admin: '外注管理担当', site_admin: '現場管理担当', device_admin: '端末承認担当',
+  expense_approval_exempt: '経費承認免除',
 };
 
 async function doGrantAdminRole(employeeCode, employeeName) {
