@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v89-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T13:37:33.693Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v90-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T14:45:55.707Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7307,6 +7307,106 @@ function addDailyReportEntry(prefill) {
   updateDailyReportTotal();
 }
 
+// ================= 外注（応援）人数の登録(P0-3) =================
+// 職長が自分の日報登録時に、当日その現場へ入った外注を「会社+人数」で登録する。社員自身の日報
+// (submit_daily_report)には手を加えず、独立RPC submit_subcontractor_headcount_report を使う。
+let drScCompanies = null;
+async function loadDrScCompanies() {
+  if (drScCompanies) return drScCompanies;
+  try {
+    const session = getSession();
+    const rows = await rpc('assignment_list_subcontractor_companies', { p_employee_code: session.employeeCode });
+    drScCompanies = Array.isArray(rows) ? rows : [];
+  } catch (e) { drScCompanies = []; }
+  return drScCompanies;
+}
+function updateDrScTotals() {
+  let people = 0; let hc = 0;
+  document.querySelectorAll('#dr-sc-list .dr-sc-entry').forEach((el) => {
+    const n = Number(el.querySelector('.dr-sc-headcount').value) || 0;
+    const wt = el.querySelector('.dr-sc-work-type').value;
+    people += n; hc += n * (wt === '終日' ? 1.0 : 0.5);
+  });
+  const p = document.getElementById('dr-sc-total-people'); const h = document.getElementById('dr-sc-total-headcount');
+  if (p) p.textContent = String(people);
+  if (h) h.textContent = String(hc).replace(/\.0$/, '');
+}
+async function addDailyReportSubcontractorLine(prefill) {
+  const tmpl = document.getElementById('dr-sc-entry-template');
+  const clone = tmpl.content.cloneNode(true);
+  const wrap = clone.querySelector('.dr-sc-entry');
+  const companySel = clone.querySelector('.dr-sc-company');
+  const companies = await loadDrScCompanies();
+  companySel.innerHTML = '<option value="">選択してください</option>' + companies.map((c) => `<option value="${c.id}">${c.company_name}</option>`).join('');
+  if (prefill && prefill.subcontractor_company_id) companySel.value = String(prefill.subcontractor_company_id);
+  const siteSel = clone.querySelector('.dr-sc-site-select');
+  const siteSearch = clone.querySelector('.dr-sc-site-search');
+  populateSiteSelect(siteSel, '', false).then(() => { if (prefill && prefill.site_id) siteSel.value = String(prefill.site_id); });
+  siteSearch.addEventListener('input', () => populateSiteSelect(siteSel, siteSearch.value.trim(), false));
+  const wt = clone.querySelector('.dr-sc-work-type');
+  if (prefill && prefill.work_type) wt.value = prefill.work_type;
+  const hcInput = clone.querySelector('.dr-sc-headcount');
+  if (prefill && prefill.headcount != null) hcInput.value = prefill.headcount;
+  if (prefill && prefill.notes) clone.querySelector('.dr-sc-notes').value = prefill.notes;
+  hcInput.addEventListener('input', updateDrScTotals);
+  wt.addEventListener('change', updateDrScTotals);
+  clone.querySelector('.dr-sc-remove').addEventListener('click', () => { wrap.remove(); updateDrScTotals(); });
+  document.getElementById('dr-sc-list').appendChild(clone);
+  updateDrScTotals();
+}
+async function loadDrScSection(dateStr) {
+  const card = document.getElementById('daily-report-subcontractor-card');
+  if (!card) return;
+  // 外注人数は「自分の日報」入力時のみ表示(代理入力・外注作業員個別入力時は隠す)。
+  const showIt = (dailyReportTarget.type === 'self');
+  card.style.display = showIt ? '' : 'none';
+  if (!showIt) return;
+  const list = document.getElementById('dr-sc-list');
+  list.innerHTML = '';
+  document.getElementById('dr-sc-status').textContent = '';
+  hideError('dr-sc-error');
+  try {
+    const session = getSession();
+    const rows = await rpc('get_my_subcontractor_headcount_report', { p_employee_code: session.employeeCode, p_report_date: dateStr });
+    if (rows && rows.length > 0) {
+      for (const r of rows) {
+        // eslint-disable-next-line no-await-in-loop
+        await addDailyReportSubcontractorLine({ subcontractor_company_id: r.subcontractor_company_id, site_id: r.site_id, work_type: r.work_type, headcount: r.headcount, notes: r.notes });
+      }
+    }
+  } catch (e) { /* 取得失敗でも新規追加は可能 */ }
+  updateDrScTotals();
+}
+async function doSubmitSubcontractorHeadcount() {
+  const session = getSession();
+  hideError('dr-sc-error');
+  const dateStr = document.getElementById('daily-report-date').value;
+  if (!dateStr) { showError('dr-sc-error', '日付を選択してください。'); return; }
+  const entries = [];
+  for (const el of document.querySelectorAll('#dr-sc-list .dr-sc-entry')) {
+    const companyId = el.querySelector('.dr-sc-company').value;
+    const siteId = el.querySelector('.dr-sc-site-select').value;
+    const headcount = el.querySelector('.dr-sc-headcount').value;
+    const workType = el.querySelector('.dr-sc-work-type').value;
+    if (!companyId) { showError('dr-sc-error', '外注会社を選択してください。'); return; }
+    if (!siteId || siteId === '__new__') { showError('dr-sc-error', '外注の現場を選択してください。'); return; }
+    if (!headcount || Number(headcount) < 1) { showError('dr-sc-error', '人数を1以上で入力してください。'); return; }
+    entries.push({ company_id: companyId, headcount: String(headcount), site_id: siteId, work_type: workType, is_night_shift: false, notes: el.querySelector('.dr-sc-notes').value.trim() || null });
+  }
+  if (entries.length === 0) { showError('dr-sc-error', '外注を1件以上追加してください。'); return; }
+  const btn = document.getElementById('dr-sc-submit');
+  btn.disabled = true;
+  try {
+    const r = await rpc('submit_subcontractor_headcount_report', { p_actor_employee_code: session.employeeCode, p_report_date: dateStr, p_entries: entries });
+    const info = Array.isArray(r) ? r[0] : r;
+    document.getElementById('dr-sc-status').textContent = `登録しました（${info.entry_count}社・合計${info.total_people}名・${Number(info.total_headcount)}人工）`;
+  } catch (e) {
+    showError('dr-sc-error', e.message || '外注の登録に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ワンタップで現場を差し込む(昨日と同じ現場・よく使う現場)。空の入力欄が無ければ1件追加してから入れる。
 function applyRecentSiteToEntry(siteId, siteName) {
   let entryEls = Array.from(document.querySelectorAll('.daily-report-entry'));
@@ -7431,6 +7531,7 @@ async function loadDailyReportForDate(dateStr) {
   dailyReportQualAttachment = null;
   loadDailyReportRecentSites();
   loadDailyReportAssignmentChips(dateStr);
+  loadDrScSection(dateStr);
 
   let existing = [];
   try {
@@ -10763,6 +10864,8 @@ function init() {
   document.getElementById('daily-report-add-special-entry').addEventListener('click', () => addDailyReportEntry());
   document.getElementById('daily-report-submit').addEventListener('click', () => doSubmitDailyReport(false));
   document.getElementById('daily-report-save-draft').addEventListener('click', () => doSubmitDailyReport(true));
+  onId('dr-sc-add', 'click', () => addDailyReportSubcontractorLine());
+  onId('dr-sc-submit', 'click', doSubmitSubcontractorHeadcount);
   document.getElementById('daily-report-has-qualification').addEventListener('change', (e) => {
     document.getElementById('daily-report-qual-fields').style.display = e.target.checked ? 'block' : 'none';
   });

@@ -704,18 +704,26 @@
                     b.title = tip;
                     roleRow.append(b);
                 };
-                put('ac-hc-craft', '職人', h.craft, '現場に出る職人の人数(自社＋外注)。同じ人が複数現場に入っていても1人として数えます。');
-                put('ac-hc-office', '事務', h.office, '事務・営業・管理など現場作業以外の人数。');
-                put('ac-hc-haul', '運搬', h.haul, '運搬だけを担当する人の数。運んでそのまま現場で働く人は職人として数え、ここには入れません。');
+                put('ac-hc-craft', '職人', h.craft, '自社の職人。同じ人が複数現場に入っていても1人として数えます。');
+                put('ac-hc-office', '事務', h.office, '事務・総務・経理など、現場に出ない社員。');
+                put('ac-hc-sales', '営業', h.sales, '営業の社員、またはその日ずっと営業活動だった社員。');
+                put('ac-hc-sub', '外注', h.sub, '外注の作業人数。会社まとめの行は登録された人数で数えます。');
+                put('ac-hc-haul', '運搬', h.haul, '運搬だけを担当した人の数(自社＋外注)。運んでそのまま現場で働く人は職人として数えます。');
+                // 「その他」は押すと内訳(研修・健康診断など、種別ごと)が開く。
+                // 上部を詰め込まないため、通常は人数だけを出す。
+                if (h.other > 0) {
+                    const ob = el('button', 'ac-hc ac-hc-other ac-hc-tap', `その他${h.other}`);
+                    ob.title = 'その日ずっと現場以外の用事だった人。押すと内訳が見られます。';
+                    ob.addEventListener('click', () => openOtherBreakdown(h));
+                    roleRow.append(ob);
+                }
                 roleRow.append(el('span', 'ac-hc ac-hc-total', `計${h.total}人`));
                 info.append(roleRow);
 
                 const subRow = el('div', 'ac-hcrow ac-hcrow2');
                 const own = el('span', 'ac-hc ac-hc-own', `自社${h.employees}`);
                 own.title = '自社社員の実人数。二重配置されていても1人として数えます。';
-                const sub = el('span', 'ac-hc ac-hc-sub', `外注${h.subcontractors}`);
-                sub.title = '外注の人数。会社まとめの行は登録された人数で数えます。';
-                subRow.append(own, sub);
+                subRow.append(own);
                 if (h.double_booked > 0) {
                     const db = el('span', 'ac-hc ac-hc-warn', `⚠時間重複${h.double_booked}`);
                     db.title = '同じ社員の時間帯が重なっている人数。午前A現場→午後B現場のように重なっていない移動は数えません。';
@@ -1118,6 +1126,29 @@
         // -----------------------------------------------------------
         // その日の二次的な操作(操作バーの「⋯」)
         // -----------------------------------------------------------
+        // 「その他」の内訳。種別名(研修・健康診断・ラーメン店…)ごとの人数を出す。
+        // 種別は管理者が自由に追加できるので、ここは追加した名前がそのまま並ぶ。
+        function openOtherBreakdown(h) {
+            sheet('その他の内訳', (box) => {
+                box.append(el('div', 'ac-schedmeta',
+                    'その日ずっと現場以外の用事だった人を、種別ごとに分けています。'
+                    + '現場作業と半々の人は職人・事務として数えており、ここには入りません。'));
+                const rows = (h.other_breakdown || []);
+                if (!rows.length) { box.append(el('div', 'ac-empty', '内訳はありません')); return; }
+                const list = el('div', 'ac-list');
+                for (const r of rows) {
+                    const it = el('div', 'ac-listitem');
+                    it.append(el('div', 'ac-menutitle', r.label));
+                    it.append(el('div', 'ac-sub2', `${r.count}人`));
+                    list.append(it);
+                }
+                box.append(list);
+                box.append(el('div', 'ac-schedmeta',
+                    '種別は「⋯ → カレンダー設定」から追加できます(管理者のみ)。'
+                    + '追加した種別に「その他」の枠を付けると、ここへ名前で出ます。'));
+            });
+        }
+
         function openDayMenuSheet() {
             sheet(`${labelDate(state.selected)} の操作`, (box, api) => {
                 // 2026-09-01 権限仕様: コピー・履歴・LINE共有は社員誰でも使える。
@@ -2349,6 +2380,27 @@
                             active.textContent = c.is_active ? '使う' : '使わない';
                             active.classList.toggle('ac-on', c.is_active);
                         });
+                        // 上部の人数サマリーでどの枠に数えるか。
+                        // 「自動」は社員の職種(職人/事務/営業)で判定する従来どおりの動き。
+                        // 「その他」にすると、その種別名が“その他”の内訳へ出る
+                        // (研修・健康診断・ラーメン店 など、会社の業務が増えたときはここで足す)。
+                        const GROUPS = [
+                            { v: null, label: '自動(職種で判定)' },
+                            { v: 'haul', label: '運搬' },
+                            { v: 'sales', label: '営業' },
+                            { v: 'other', label: 'その他' },
+                        ];
+                        const gi = Math.max(0, GROUPS.findIndex((g) => g.v === (c.headcount_group || null)));
+                        let gIdx = gi;
+                        const group = el('button', 'ac-token' + (c.headcount_group ? ' ac-on' : ''),
+                            `枠: ${GROUPS[gi].label}`);
+                        group.title = '上部の人数サマリーでこの種別をどこに数えるか';
+                        group.addEventListener('click', () => {
+                            gIdx = (gIdx + 1) % GROUPS.length;
+                            c.headcount_group = GROUPS[gIdx].v;
+                            group.textContent = `枠: ${GROUPS[gIdx].label}`;
+                            group.classList.toggle('ac-on', !!c.headcount_group);
+                        });
                         const up = el('button', 'ac-ord', '↑');
                         const down = el('button', 'ac-ord', '↓');
                         up.addEventListener('click', () => moveCategory(rows, i, -1));
@@ -2360,12 +2412,13 @@
                                     p_employee_code: me, p_id: c.id, p_name: name.value,
                                     p_color: swatch.value, p_sort_order: c.sort_order,
                                     p_is_active: c.is_active, p_counts_as_deployment: c.counts_as_deployment,
+                                    p_headcount_group: c.headcount_group || null,
                                 });
                                 toast('保存しました');
                                 await loadMonth(); await loadDay(); render();
                             } catch (e) { fail(e); }
                         });
-                        opts.append(deploy, active, el('div', 'ac-spacer'), up, down, save);
+                        opts.append(deploy, group, active, el('div', 'ac-spacer'), up, down, save);
                         card.append(opts);
 
                         if (c.usage_count > 0) {

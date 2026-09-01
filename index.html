@@ -420,7 +420,48 @@
       <button id="daily-report-submit">日報を提出する</button>
       <button type="button" class="secondary" id="daily-report-save-draft">下書きとして保存する</button>
     </div>
+
+    <div class="card" id="daily-report-subcontractor-card">
+      <div class="form-title" style="font-size:16px;">外注（応援）の人数</div>
+      <div class="hint" style="margin-bottom:10px;">当日その現場に入った外注（応援）を会社ごとに人数で登録できます。人工は「人数 × 勤務区分(終日1.0/半日0.5)」で自動計算します。社員自身の日報とは別に登録されます。</div>
+      <div id="dr-sc-list"></div>
+      <button type="button" class="secondary" id="dr-sc-add">＋ 外注を追加</button>
+      <div class="stat-mini-row" style="margin-top:8px;">
+        <div class="stat-mini"><span class="stat-mini-label">外注 合計人数</span><span class="stat-mini-value" id="dr-sc-total-people">0</span></div>
+        <div class="stat-mini"><span class="stat-mini-label">外注 合計人工</span><span class="stat-mini-value" id="dr-sc-total-headcount">0</span></div>
+      </div>
+      <div class="error" id="dr-sc-error"></div>
+      <button type="button" id="dr-sc-submit">外注（応援）を登録する</button>
+      <div class="hint-inline" id="dr-sc-status"></div>
+    </div>
   </section>
+
+  <template id="dr-sc-entry-template">
+    <div class="item-new-site-wrap dr-sc-entry" style="display:block;border:1px solid var(--line,rgba(128,128,128,0.25));border-radius:14px;padding:12px;margin-bottom:10px;">
+      <label>外注会社<span class="required-mark">(必須)</span></label>
+      <select class="dr-sc-company"></select>
+      <label>現場<span class="required-mark">(必須)</span></label>
+      <input type="text" class="dr-sc-site-search" placeholder="現場名で検索...">
+      <select class="dr-sc-site-select"></select>
+      <div style="display:flex;gap:10px;">
+        <div style="flex:1;">
+          <label>人数<span class="required-mark">(必須)</span></label>
+          <input type="number" class="dr-sc-headcount" inputmode="numeric" pattern="[0-9]*" min="1" max="99" step="1" placeholder="例: 3">
+        </div>
+        <div style="flex:1;">
+          <label>勤務区分<span class="required-mark">(必須)</span></label>
+          <select class="dr-sc-work-type">
+            <option value="終日">終日(×1.0)</option>
+            <option value="午前">午前(×0.5)</option>
+            <option value="午後">午後(×0.5)</option>
+          </select>
+        </div>
+      </div>
+      <label>備考(任意)</label>
+      <input type="text" class="dr-sc-notes" placeholder="任意">
+      <button type="button" class="link dr-sc-remove" style="color:var(--danger);">この外注を削除</button>
+    </div>
+  </template>
 
   <template id="daily-report-entry-template">
     <div class="item-new-site-wrap daily-report-entry" style="display:block;">

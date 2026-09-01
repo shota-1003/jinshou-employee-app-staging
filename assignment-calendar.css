@@ -724,3 +724,10 @@
    バッジはその下の行へ折り返す。 */
 .ac-schedtop, .ac-sitehead { flex-wrap: wrap; row-gap: 3px; }
 .ac-schedname { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
+
+/* 人数サマリーに増えた枠。営業・外注・その他。 */
+.ac-hc-sales { background: #fde7cf; border-color: #e6bc8c; color: #7a4510; }
+.ac-hc-other { background: #e6e9ef; border-color: #b7bfcc; color: #3b4658; }
+.ac-hc-tap { cursor: pointer; font-family: inherit; }
+.ac-hc-tap::after { content: " ›"; font-weight: 800; }
+.ac-hc-tap:active { filter: brightness(.94); }
