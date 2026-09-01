@@ -636,6 +636,9 @@ button.link {
   background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 16px;
   cursor: pointer; font-family: inherit; box-shadow: var(--shadow-sm);
 }
+.drm-summary-card { text-align: left; -webkit-appearance: none; appearance: none; transition: border-color .12s, box-shadow .12s; }
+.drm-summary-card:hover { border-color: var(--accent, var(--border)); box-shadow: var(--shadow-md, var(--shadow-sm)); }
+.drm-summary-card:active { transform: translateY(1px); }
 .dash-card-top { display: flex; align-items: center; justify-content: space-between; width: 100%; }
 .dash-card-top .icon { width: 18px; height: 18px; color: var(--text-faint); }
 .dash-card-count { font-size: 25px; font-weight: 800; color: var(--text); letter-spacing: -.02em; }

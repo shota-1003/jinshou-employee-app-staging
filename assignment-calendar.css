@@ -731,3 +731,23 @@
 .ac-hc-tap { cursor: pointer; font-family: inherit; }
 .ac-hc-tap::after { content: " ›"; font-weight: 800; }
 .ac-hc-tap:active { filter: brightness(.94); }
+
+/* 2026-09-02: 社員チップから当日の役割を変えられるようにした。
+   「押せると分からない」という指摘への対応で、押せるチップには記号を出す。 */
+.ac-mem.ac-tappable { cursor: pointer; }
+.ac-mem.ac-tappable:active { filter: brightness(.94); }
+.ac-mem .ac-chevron { font-size: 10px; font-weight: 800; margin-left: 4px; opacity: .55; }
+
+/* 当日の役割で増えた区分の色。営業・その他。 */
+.ac-mem.ac-role-own-sales { background: #fdf0e2; border-color: #e2c197; }
+.ac-mem.ac-role-own-sales .ac-rtag { background: #f4dcbc; color: #7a4510; }
+.ac-mem.ac-role-own-other { background: #eceff4; border-color: #b7bfcc; }
+.ac-mem.ac-role-own-other .ac-rtag { background: #dfe4ec; color: #3b4658; }
+
+/* 「今は決められない」と判断済みの印。未設定(警告が出る)とは別物。 */
+.ac-badge.ac-leadundecided {
+  background: #f0f1f4; border-color: #b7bfcc; color: #5a6472; font-weight: 700;
+}
+
+/* シートの選択肢で「いま選ばれているもの」を分かるようにする */
+.ac-listitem.ac-on { background: #eef3fb; box-shadow: inset 3px 0 0 #12213f; }

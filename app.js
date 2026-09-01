@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v92-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T15:42:31.414Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v93-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T17:30:03.684Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -3570,9 +3570,44 @@ async function loadAnnounceBanner() {
       </button>
     ` : '');
     area.querySelectorAll('.home-announce-banner-item').forEach((btn) => {
-      btn.addEventListener('click', () => showScreen('announcements'));
+      if (btn.classList.contains('announce-banner-more')) {
+        btn.addEventListener('click', () => showScreen('announcements'));
+      } else {
+        // 「お知らせ一覧へ飛ぶだけ」は不可。種別に応じて対象の詳細へ直接遷移する
+        // (配置通知→対象日の配置カレンダー詳細、申請/差し戻し通知→申請詳細、日報通知→日報入力)。
+        btn.addEventListener('click', () => announceDeepLink(Number(btn.dataset.id)));
+      }
     });
   } catch (e) { /* 表示できなくても致命的ではないため無視 */ }
+}
+
+// お知らせ(通知)を、種別に応じた「対象の詳細画面」へ直接遷移させる。
+// get_announcement_target が種別・対象日・対象IDを1回で解決する。解決できない/該当画面が無い
+// 種別のみお知らせ一覧へフォールバックする。遷移時にそのお知らせを既読化する。
+async function announceDeepLink(announcementId) {
+  const session = getSession();
+  try { await rpc('mark_announcement_read', { p_employee_code: session.employeeCode, p_announcement_id: announcementId }); } catch (e) { /* 無視 */ }
+  let t = null;
+  try {
+    const rows = await rpc('get_announcement_target', { p_employee_code: session.employeeCode, p_announcement_id: announcementId });
+    t = rows && rows[0];
+  } catch (e) { /* 解決失敗時は一覧へフォールバック */ }
+  if (!t || !t.related_type) { showScreen('announcements'); return; }
+  if (t.related_type === 'assignment_member') {
+    // 対象日の配置カレンダー詳細へ。ここで「確認しました」を押すと管理者の確認数へ反映される。
+    openAssignmentCalendarAt(t.target_date || null);
+    return;
+  }
+  if (t.related_type === 'daily_reports') {
+    dailyReportPrefillDate = t.target_date || todayJST();
+    showScreen('daily-report');
+    return;
+  }
+  if (t.related_type === 'employee_requests' && t.target_id) {
+    openMyRequestDetail(t.target_id, 'announcements');
+    return;
+  }
+  showScreen('announcements');
 }
 
 // お知らせがホーム画面に表示され続けてよいかどうかの判定(共通)。
@@ -3612,6 +3647,7 @@ async function loadAnnouncements(includeArchived) {
         </div>
         <div class="body">${a.body}${a.attachment_url ? `<br><a href="${a.attachment_url}" target="_blank" rel="noopener">添付ファイルを開く</a>` : ''}</div>
         ${a.related_type === 'employee_requests' ? `<button type="button" class="secondary announce-detail-btn" data-request-id="${a.related_id}">この申請の詳細を見る</button>` : ''}
+        ${a.related_type === 'assignment_member' ? `<button type="button" class="secondary announce-assign-btn">配置を確認する</button>` : ''}
         ${a.importance !== 'normal' ? `
           <div class="announce-ack-row">
             ${a.acknowledged_at
@@ -3624,7 +3660,7 @@ async function loadAnnouncements(includeArchived) {
     hydrateIcons(listEl);
     listEl.querySelectorAll('.announce-item').forEach((el) => {
       el.addEventListener('click', async (e) => {
-        if (e.target.closest('.announce-ack-btn') || e.target.closest('.announce-detail-btn') || e.target.closest('a')) return;
+        if (e.target.closest('.announce-ack-btn') || e.target.closest('.announce-detail-btn') || e.target.closest('.announce-assign-btn') || e.target.closest('a')) return;
         const wasUnread = el.classList.contains('unread');
         el.classList.toggle('expanded');
         if (wasUnread) {
@@ -3645,6 +3681,17 @@ async function loadAnnouncements(includeArchived) {
           try { await rpc('mark_announcement_read', { p_employee_code: session.employeeCode, p_announcement_id: Number(item.dataset.id) }); } catch (e2) { /* 無視 */ }
         }
         openMyRequestDetail(btn.dataset.requestId, 'announcements');
+      });
+    });
+    listEl.querySelectorAll('.announce-assign-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const item = btn.closest('.announce-item');
+        if (item && item.classList.contains('unread')) {
+          item.classList.remove('unread');
+          try { rpc('mark_announcement_read', { p_employee_code: session.employeeCode, p_announcement_id: Number(item.dataset.id) }); } catch (e2) { /* 無視 */ }
+        }
+        announceDeepLink(Number(item.dataset.id));
       });
     });
     listEl.querySelectorAll('.announce-ack-btn').forEach((btn) => {
@@ -8891,16 +8938,59 @@ async function loadDrmSummary() {
     const d = rows && rows[0];
     grid.innerHTML = DRM_SUMMARY_CARDS.map((c) => {
       const count = d ? (d[c.key] || 0) : 0;
+      // 数字カードはタップで本日のその状態だけに一覧を絞り込む(ユーザー要望: 提出/未提出/
+      // 確認待ち/差し戻し/確認済みの数字をタップして該当日報へ辿れるようにする)。
       return `
-        <div class="dash-card">
+        <button type="button" class="dash-card drm-summary-card" data-card="${c.key}" title="タップで${c.label}に絞り込み">
           <span class="dash-card-top"><span class="dash-card-count ${count === 0 ? 'zero' : 'alert'}">${count}</span></span>
           <span class="dash-card-label">${c.label}</span>
-        </div>
+        </button>
       `;
     }).join('');
+    grid.querySelectorAll('.drm-summary-card').forEach((btn) => {
+      btn.addEventListener('click', () => applyDrmCardFilter(btn.dataset.card));
+    });
   } catch (e) {
     grid.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
+}
+
+// 本日サマリーの数字カードのタップで、その状態の本日分だけに日報一覧を絞り込む。
+// 未提出カードは一覧(=提出済みの行)には現れないため、未提出者リストを開いてそこへ誘導する。
+const DRM_CARD_TO_STATUS = {
+  submitted_count: '',        // 本日の提出(提出済み/確認済み/差し戻しすべて)
+  pending_confirm_count: 'submitted', // 確認待ち(=提出済みで未確認)
+  rejected_count: 'rejected',
+  confirmed_count: 'confirmed',
+};
+function applyDrmCardFilter(cardKey) {
+  const today = todayJST();
+  if (cardKey === 'missing_count') {
+    const el = document.getElementById('drm-missing-today-list');
+    if (el) {
+      el.style.display = 'block';
+      const tg = document.getElementById('drm-missing-toggle');
+      if (tg) tg.textContent = '未提出者を隠す';
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    return;
+  }
+  const status = DRM_CARD_TO_STATUS[cardKey] || '';
+  // 本日分に日付を固定
+  drmFilters.dateFrom = today; drmFilters.dateTo = today;
+  document.getElementById('drm-date-from').value = today;
+  document.getElementById('drm-date-to').value = today;
+  // 外注/自社の絞り込みは「すべて」に戻す(カードは全員対象のため)
+  drmFilters.workerType = '';
+  document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b, i) => b.classList.toggle('active', i === 0));
+  // 状態フィルタを同期
+  drmFilters.status = status;
+  document.querySelectorAll('#drm-status-filter .filter-chip').forEach((b) => {
+    b.classList.toggle('active', (b.dataset.status || '') === status);
+  });
+  loadDailyReportManagementList();
+  const listEl = document.getElementById('drm-list');
+  if (listEl) listEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function drmGroupKey(r) {
