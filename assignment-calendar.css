@@ -751,3 +751,17 @@
 
 /* シートの選択肢で「いま選ばれているもの」を分かるようにする */
 .ac-listitem.ac-on { background: #eef3fb; box-shadow: inset 3px 0 0 #12213f; }
+
+/* 2026-09-02: 種別バッジ自体にも種別色を塗る。左の細い帯だけでは実機で
+   「仕事」「常傭」「応援」「夜勤」の違いが分からない、という指摘への対応。
+   色は月表示のタグ・日別の左帯・このバッジで同じものを使う。 */
+.ac-badge.ac-catbadge { font-weight: 800; border: none; }
+
+/* 下請け請負。普通の外注応援より強い専用色にして、流し見で区別できるようにする。
+   色だけに頼らないよう「下請け」の文字を必ず出す。 */
+.ac-badge.ac-subcbadge {
+  background: #c2185b; border-color: #c2185b; color: #fff;
+  font-weight: 800; letter-spacing: .04em;
+}
+.ac-sched.ac-subc { background: #fdf2f6; }
+.ac-chip.ac-subcchip { font-weight: 800; }
