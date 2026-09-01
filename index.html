@@ -1795,6 +1795,11 @@
         <div class="menu-item-body">外注作業員名簿<span class="desc">全社横断で外注作業員を検索(会社を問わず)</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="first-login-codes-admin">
+        <span class="icon-slot" data-icon="lock"></span>
+        <div class="menu-item-body">初回登録コード管理<span class="desc">社員の初回登録コードの発行状況を確認し、本人へ渡すコードを発行・再発行・コピー</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
 
     <div class="section-title">保有・資格・健康</div>
@@ -1834,6 +1839,27 @@
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
     </div>
+  </section>
+
+  <!-- 初回登録コード管理: 社員の初回登録コードの発行状況確認+発行/再発行/コピー -->
+  <section id="screen-first-login-codes-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
+    <div class="form-title">初回登録コード管理</div>
+    <div class="hint" style="margin-bottom:10px;">
+      社員が社員ポータルに初めてログインするときに使う「初回登録コード」を管理します。
+      コードは安全のため<strong>ハッシュ化して保存</strong>しており、後から平文を表示することはできません。
+      「発行して表示」または「再発行して表示」を押した<strong>その時だけ</strong>コードが表示されます。
+      表示されたコードは本人へお渡しください(コピーできます)。
+    </div>
+    <div class="card" style="margin-bottom:12px;">
+      <input type="text" id="flc-search" placeholder="社員番号・氏名で絞り込み" autocomplete="off" style="width:100%;">
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+        <button type="button" id="flc-reissue-all-btn" class="btn-secondary" style="flex:1;min-width:180px;">未登録の社員へ一括発行して表示</button>
+      </div>
+      <div class="hint-inline" style="margin-top:6px;">一括発行は「まだ暗証番号を登録していない社員」だけが対象です。既に有効なコードがある社員は再発行され、以前のコードは無効になります。</div>
+    </div>
+    <div id="flc-summary" class="hint" style="margin-bottom:8px;"></div>
+    <div id="flc-list"><div class="hint">読み込み中...</div></div>
   </section>
 
   <!-- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 -->

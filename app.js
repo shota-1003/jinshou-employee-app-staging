@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v86-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T00:43:03.845Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v87-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T00:58:42.576Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -243,6 +243,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
+  'first-login-codes-admin',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -4648,6 +4649,145 @@ async function loadEmployeeDetailPortalAccess() {
       issueBtn.disabled = false;
     };
   } catch (e) { /* 読み込み失敗時は静かに諦める(端末一覧は別途表示されるため) */ }
+}
+
+// ================= 初回登録コード管理(管理者) =================
+// コードはDBにハッシュのみ保存され平文は復元不可のため、(再)発行した瞬間の平文だけを
+// このセッションのメモリ(flcRevealed)に一時保持して表示する。画面を離れる/再読込すると
+// 平文は消える(その場合は再発行して表示する)。一般社員はこの画面・RPCへ到達できない。
+const flcRevealed = new Map();   // employee_code -> { code, expires_at }  ※メモリのみ・端末外へ出さない
+const flcShown = new Set();      // いま平文を表示中の employee_code(「表示する」を押した行)
+let flcRows = [];                // admin_list_first_login_codes の結果(平文は含まない)
+
+const FLC_STATUS_LABEL = {
+  registered: { t: '登録済み', c: 'info' },
+  issued: { t: '発行済み・未使用', c: 'warn' },
+  no_code: { t: '未発行', c: '' },
+  expired: { t: '期限切れ', c: 'danger' },
+  revoked: { t: '失効', c: '' },
+  used: { t: '使用済み', c: 'info' },
+};
+
+async function loadFirstLoginCodesAdmin() {
+  const session = getSession();
+  const listEl = document.getElementById('flc-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  const searchEl = document.getElementById('flc-search');
+  if (searchEl && !searchEl.dataset.wired) {
+    searchEl.dataset.wired = '1';
+    searchEl.addEventListener('input', renderFirstLoginCodesList);
+  }
+  const bulkBtn = document.getElementById('flc-reissue-all-btn');
+  if (bulkBtn && !bulkBtn.dataset.wired) {
+    bulkBtn.dataset.wired = '1';
+    bulkBtn.addEventListener('click', bulkIssueFirstLoginCodes);
+  }
+  try {
+    flcRows = await rpc('admin_list_first_login_codes', { p_admin_employee_code: session.employeeCode });
+    renderFirstLoginCodesList();
+  } catch (e) {
+    listEl.innerHTML = `<div class="empty-state">${e.message || '読み込みに失敗しました'}</div>`;
+  }
+}
+
+function renderFirstLoginCodesList() {
+  const listEl = document.getElementById('flc-list');
+  const summaryEl = document.getElementById('flc-summary');
+  const q = (document.getElementById('flc-search')?.value || '').trim().toLowerCase();
+  const rows = flcRows.filter((r) => !q
+    || (r.employee_code || '').toLowerCase().includes(q)
+    || (r.employee_name || '').toLowerCase().includes(q));
+  if (summaryEl) {
+    const issued = flcRows.filter((r) => r.status === 'issued').length;
+    const registered = flcRows.filter((r) => r.status === 'registered').length;
+    const noCode = flcRows.filter((r) => r.status === 'no_code' || r.status === 'expired' || r.status === 'revoked').length;
+    summaryEl.textContent = `対象社員 ${flcRows.length}名 / 発行済み・未使用 ${issued}名 / 登録済み ${registered}名 / 未発行・要対応 ${noCode}名`;
+  }
+  if (rows.length === 0) { listEl.innerHTML = '<div class="empty-state">該当する社員がいません</div>'; return; }
+  listEl.innerHTML = '';
+  rows.forEach((r) => {
+    const st = FLC_STATUS_LABEL[r.status] || { t: r.status, c: '' };
+    const revealed = flcRevealed.get(r.employee_code);
+    const shown = flcShown.has(r.employee_code);
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    let codeArea = '';
+    if (r.status === 'registered') {
+      codeArea = '<div class="hint-inline">この社員は既に暗証番号を登録済みです(暗証番号でログインします)。コードの発行は不要です。</div>';
+    } else if (revealed) {
+      // 表示するを押した時だけ平文を見せる(既定は伏せ字)。コピー可能。
+      const masked = '•'.repeat(revealed.code.length);
+      codeArea = `
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap;">
+          <code style="font-size:17px;letter-spacing:2px;font-weight:700;">${shown ? revealed.code : masked}</code>
+          <button type="button" class="btn-secondary flc-toggle" data-code="${r.employee_code}" style="padding:4px 10px;">${shown ? '隠す' : '表示する'}</button>
+          <button type="button" class="btn-secondary flc-copy" data-code="${r.employee_code}" style="padding:4px 10px;">コードをコピー</button>
+          <button type="button" class="btn-secondary flc-copy-pair" data-code="${r.employee_code}" style="padding:4px 10px;">社員番号+コードをコピー</button>
+        </div>
+        <div class="hint-inline" style="margin-top:4px;">有効期限: ${revealed.expires_at ? new Date(revealed.expires_at).toLocaleDateString('ja-JP') : '-'}。この画面を離れると再表示できません(その場合は再発行してください)。</div>`;
+    } else {
+      const label = (r.status === 'no_code') ? '発行して表示' : '再発行して表示(前のコードは無効化)';
+      codeArea = `<div style="margin-top:6px;"><button type="button" class="btn-secondary flc-issue" data-code="${r.employee_code}" style="padding:6px 12px;">${label}</button></div>`;
+    }
+    div.innerHTML = `
+      <div class="row1"><span><b>${r.employee_code}</b> ${r.employee_name}</span><span class="mini-tag ${st.c}">${st.t}</span></div>
+      ${r.code_issued_at && r.status !== 'registered' ? `<div class="hint-inline">発行日時: ${new Date(r.code_issued_at).toLocaleString('ja-JP')}</div>` : ''}
+      ${codeArea}
+    `;
+    listEl.appendChild(div);
+  });
+  // 行内ボタンの配線
+  listEl.querySelectorAll('.flc-issue').forEach((b) => b.addEventListener('click', () => issueFirstLoginCodeFor(b.dataset.code, false)));
+  listEl.querySelectorAll('.flc-toggle').forEach((b) => b.addEventListener('click', () => { const c = b.dataset.code; if (flcShown.has(c)) flcShown.delete(c); else flcShown.add(c); renderFirstLoginCodesList(); }));
+  listEl.querySelectorAll('.flc-copy').forEach((b) => b.addEventListener('click', () => flcCopy(b, flcRevealed.get(b.dataset.code)?.code || '', 'コードをコピー')));
+  listEl.querySelectorAll('.flc-copy-pair').forEach((b) => b.addEventListener('click', () => { const rv = flcRevealed.get(b.dataset.code); flcCopy(b, rv ? `${b.dataset.code} ${rv.code}` : '', '社員番号+コードをコピー'); }));
+}
+
+async function flcCopy(btn, text, restoreLabel) {
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+    const orig = btn.textContent; btn.textContent = 'コピーしました';
+    setTimeout(() => { btn.textContent = restoreLabel || orig; }, 1500);
+  } catch (e) {
+    alert('コピーできませんでした。手動で選択してコピーしてください。');
+  }
+}
+
+async function issueFirstLoginCodeFor(employeeCode, silent) {
+  const session = getSession();
+  const row = flcRows.find((r) => r.employee_code === employeeCode);
+  if (row && row.status === 'issued' && !silent) {
+    if (!confirm(`${employeeCode} には既に有効なコードがあります。再発行すると以前のコードは使えなくなります。よろしいですか？`)) return;
+  }
+  try {
+    const r = await rpc('admin_issue_first_login_code', { p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode });
+    const info = Array.isArray(r) ? r[0] : r;
+    flcRevealed.set(employeeCode, { code: info.out_code, expires_at: info.out_expires_at });
+    flcShown.add(employeeCode); // 発行直後は表示状態にする(管理者がすぐ確認できるように)
+    if (row) { row.status = 'issued'; row.code_issued_at = new Date().toISOString(); }
+    if (!silent) renderFirstLoginCodesList();
+    return true;
+  } catch (e) {
+    if (!silent) alert(e.message || '発行に失敗しました。');
+    return false;
+  }
+}
+
+async function bulkIssueFirstLoginCodes() {
+  const targets = flcRows.filter((r) => r.status !== 'registered');
+  if (targets.length === 0) { alert('発行が必要な社員はいません(全員が登録済みです)。'); return; }
+  if (!confirm(`未登録の社員 ${targets.length}名へ初回登録コードを発行します。\n既に有効なコードがある社員は再発行され、以前のコードは無効になります。\n\n表示されたコードは本人へお渡しください。よろしいですか？`)) return;
+  const btn = document.getElementById('flc-reissue-all-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '発行中...'; }
+  let done = 0;
+  for (const r of targets) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await issueFirstLoginCodeFor(r.employee_code, true)) done += 1;
+  }
+  if (btn) { btn.disabled = false; btn.textContent = '未登録の社員へ一括発行して表示'; }
+  renderFirstLoginCodesList();
+  alert(`${done}名分の初回登録コードを発行しました。各行の「表示する」で確認し、本人へお渡しください。`);
 }
 
 // User-Agent文字列をそのまま表示せず、一般の管理者にも分かる端末種別へ短縮する
@@ -11167,6 +11307,7 @@ function init() {
   SCREEN_ENTER_HOOKS['daily-report'] = resetDailyReportForm;
   SCREEN_ENTER_HOOKS['my-daily-reports'] = loadMyDailyReports;
   SCREEN_ENTER_HOOKS['my-daily-report-detail'] = () => { if (myDailyReportDetailDate) renderMyDailyReportDetailBody(myDailyReportDetailDate); };
+  SCREEN_ENTER_HOOKS['first-login-codes-admin'] = loadFirstLoginCodesAdmin;
   SCREEN_ENTER_HOOKS['daily-report-needs-review-admin'] = loadDailyReportNeedsReviewAdmin;
   SCREEN_ENTER_HOOKS['daily-report-edit-requests-admin'] = loadDailyReportEditRequestsAdmin;
   SCREEN_ENTER_HOOKS['daily-report-admin'] = async () => {
