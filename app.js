@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v91-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T14:45:59.876Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v92-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T15:42:31.414Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -5706,6 +5706,7 @@ async function openEmployeeEditBasic() {
   document.getElementById('employee-edit-furigana').value = '';
   document.getElementById('employee-edit-birth').value = '';
   document.getElementById('employee-edit-department').value = '';
+  document.getElementById('employee-edit-headcount-category').value = '';
   hideError('employee-edit-error');
   showScreen('employee-edit-basic');
   // 現在値の読み込み完了までは保存ボタンを無効化する。以前ここが無防備だったため、
@@ -5726,6 +5727,7 @@ async function openEmployeeEditBasic() {
       document.getElementById('employee-edit-birth').value = p.birth_date ? p.birth_date.slice(0, 10) : '';
       document.getElementById('employee-edit-show-birthday').checked = p.show_birthday_on_calendar !== false;
       document.getElementById('employee-edit-department').value = p.department || '';
+      document.getElementById('employee-edit-headcount-category').value = p.headcount_category || '';
       document.getElementById('employee-edit-is-driver').checked = !!p.is_driver;
       document.getElementById('employee-edit-can-overtime').checked = !!p.can_overtime;
       document.getElementById('employee-edit-can-site-duty').checked = !!p.can_input_site_duty;
@@ -5763,6 +5765,8 @@ async function doSaveEmployeeBasic() {
       p_can_input_qualification: document.getElementById('employee-edit-can-qualification').checked,
       p_can_backdate_entertainment_preapproval: document.getElementById('employee-edit-can-backdate-ent').checked,
       p_show_birthday_on_calendar: document.getElementById('employee-edit-show-birthday').checked,
+      // 空文字は「自動判定へ戻す」。RPC側がその意味で受け取る(nullは変更しない)。
+      p_headcount_category: document.getElementById('employee-edit-headcount-category').value,
     });
     showScreen('employee-detail');
     await loadEmployeeDetailBasic();

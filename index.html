@@ -2854,6 +2854,16 @@
       <label for="employee-edit-department">所属/役割</label>
       <input type="text" id="employee-edit-department">
 
+      <label for="employee-edit-headcount-category">人数集計区分</label>
+      <select id="employee-edit-headcount-category">
+        <option value="">自動判定(所属から推測)</option>
+        <option value="craft">職人</option>
+        <option value="office">事務</option>
+        <option value="sales">営業</option>
+        <option value="other">その他</option>
+      </select>
+      <div class="hint-inline">配置カレンダー上部の人数(職人/事務/営業/…)をどこに数えるかです。1日の売上を実働人数で割る指標に使うため、所属名の推測ではなくここで決めます。ただしその日に現場作業が入っていれば、この設定に関わらず職人として数えます。</div>
+
       <div class="section-title">日報の入力項目(対象者だけに表示されます)</div>
       <div class="hint-inline">氏名ではなくこの設定で対象者を判定します。ここで許可した社員だけ、日報にその項目が表示されます。</div>
       <div class="checkbox-row"><input type="checkbox" id="employee-edit-is-driver"><label>運転手として登録(通勤早出・通勤残業の入力対象)</label></div>
