@@ -38,17 +38,37 @@
     // 画面から付ける文字列もここに固定して両者がずれないようにする。
     const LEADER_ROLE = '職長';
 
-    // 下請け請負は「普通の外注応援」と一目で違って見える必要がある。
-    // 既存の種別色(青・黄緑・緑・濃青緑・オレンジ)と重ならない濃いピンクを専用色にし、
-    // 月表示のタグ・日別の左帯・バッジのすべてで同じ色を使う。
-    const SUBCONTRACT_COLOR = '#c2185b';
+    // 現場の稼働形態。「協力会社が入る現場」をひとまとめにすると実態と合わない。
+    //   通常       … 自社社員＋(必要なら)協力会社の応援。これまでどおり。
+    //   下請け応援 … その日だけ自社が行けず、協力会社に応援で入ってもらう。
+    //                何人来るかは自社で把握しているので外注人工として数える。
+    //   下請け請負 … 現場を丸ごと協力会社へ請負で渡している。人数は把握して
+    //                いないことがあるので人工には入れず、「現場日」で数える。
+    // 色は既存の種別色(青・黄緑・緑・濃青緑・オレンジ)と重ならない濃紫と濃ピンク。
+    // 応援と請負は色相を大きく離し、さらに必ず文字バッジも出す(色だけに頼らない)。
+    const WORK_MODES = {
+        normal: { label: '通常', short: '', color: null, cls: '' },
+        sub_support: { label: '下請け応援', short: '応援', color: '#5e35b1', cls: 'ac-mode-support' },
+        sub_contract: { label: '下請け請負', short: '請負', color: '#c2185b', cls: 'ac-mode-contract' },
+    };
+    // 旧データ・旧APIとの互換。work_mode が無い場合は is_subcontracted から読み替える
+    // (以前の is_subcontracted=true は「協力会社の人数を数える」＝下請け応援に相当)。
+    function modeOf(s) {
+        const m = s && s.work_mode;
+        if (m && WORK_MODES[m]) return m;
+        return (s && s.is_subcontracted) ? 'sub_support' : 'normal';
+    }
+    function modeInfo(s) { return WORK_MODES[modeOf(s)]; }
+    // 月表示のタグ・日別の左帯・種別バッジで共通に使う色。
+    function modeColor(s) { return modeInfo(s).color || (s && s.color) || '#1a73e8'; }
     function isLeaderRole(role) { return !!role && String(role).includes(LEADER_ROLE); }
 
     // 人の区分。色だけに頼らず必ず文字も出す(色覚差への配慮)。
     //
-    // 2026-09-02: 表示の元を day_role(その日その人が何として数えられているか)へ変更した。
-    // 以前は社員マスターの職種を出していたため、「チップは事務なのに人数は職人」という
-    // 食い違いが実機で起きていた。人数サマリーと同じ判定元を使う。
+    // 2026-09-02: 表示の元を row_role(その配置での役割)へ変更した。
+    // row_role は「配置を作るときに選んだ種別」を初期値とし、個人ごとの当日設定が
+    // あればそれを最優先する(社員マスターは種別に枠が無いときのフォールバック)。
+    // 種別「事務仕事」の現場に入れた人はその行で事務、と画面上そのまま読める。
     const ROLE_LABELS = {
         craft: { key: 'own-field', label: '職人' },
         office: { key: 'own-office', label: '事務' },
@@ -65,10 +85,11 @@
         }
         // その配置が運搬なら、その行は運搬として見せる(人数は日単位で別途判定)。
         if ((m.assignment_kind || 'work') === 'haul') return ROLE_LABELS.haul;
-        const r = ROLE_LABELS[m.day_role];
+        const role = m.row_role || m.day_role;
+        const r = ROLE_LABELS[role];
         if (!r) return ROLE_LABELS.craft;
         // 「その他」は何のその他かを出す(ラーメン店・研修など)
-        if (m.day_role === 'other' && m.headcount_role_label) {
+        if (role === 'other' && m.headcount_role_label) {
             return { key: r.key, label: m.headcount_role_label };
         }
         return r;
@@ -373,11 +394,13 @@
             const shown = list.slice(0, maxChips);
             for (const x of shown) {
                 // 週ストリップも月表示・日別と同じ色ルールにそろえる。
-                // 下請け請負だけは専用色にして、どの画面でも同じ見え方にする。
-                const c = x.is_subcontracted ? SUBCONTRACT_COLOR : (x.color || '#1a73e8');
-                const chip = el('div', 'ac-wchip', (x.is_subcontracted ? '下請 ' : '') + shortLabel(x.label));
+                // 下請け応援・下請け請負は専用色にし、狭いチップでも読み分けられるよう
+                // 「応援 」「請負 」の2文字を頭に付ける(色だけに頼らない)。
+                const mi = modeInfo(x);
+                const c = modeColor(x);
+                const chip = el('div', 'ac-wchip', (mi.short ? mi.short + ' ' : '') + shortLabel(x.label));
                 chip.style.background = c;
-                chip.title = x.label + (x.is_subcontracted ? '（下請け請負）' : '');
+                chip.title = x.label + (mi.short ? '（' + mi.label + '）' : '');
                 cell.append(chip);
             }
             if (list.length > shown.length) {
@@ -676,12 +699,13 @@
                 const base = hol ? Math.max(2, chipLimit - 1) : chipLimit;
                 const limit = state.showNames ? Math.max(2, Math.floor(base / 2)) : base;
                 list.slice(0, limit).forEach((s) => {
-                    const chipColor = s.is_subcontracted ? SUBCONTRACT_COLOR : (s.color || '#1a73e8');
+                    const mi = modeInfo(s);
+                    const chipColor = modeColor(s);
                     const chip = el('div', 'ac-chip'
                         + (isLightColor(chipColor) ? ' ac-light' : '')
-                        + (s.is_subcontracted ? ' ac-subcchip' : '')
+                        + (mi.cls ? ' ac-subcchip ' + mi.cls : '')
                         + (s.status === 'confirmed' ? '' : ' ac-draft'),
-                        (s.is_subcontracted ? '下請 ' : '') + s.label);
+                        (mi.short ? mi.short + ' ' : '') + s.label);
                     chip.style.background = chipColor;
                     chip.title = `${s.label} (${s.member_count}名)`;
                     cell.append(chip);
@@ -725,7 +749,7 @@
             //   1段目: 職人35 / 事務2 / 運搬5 / 計42   ← まず知りたいのは役割
             //   2段目: 自社25 / 外注17 と 重複・確認    ← 所属の内訳は補助
             // どの数も同じ人を二度数えない(サーバー側で employee_id 単位に1区分へ寄せている)。
-            if (day && day.headcount && day.headcount.total > 0) {
+            if (day && day.headcount && (day.headcount.total > 0 || day.headcount.sub_contract_sites > 0)) {
                 const h = day.headcount;
                 const roleRow = el('div', 'ac-hcrow');
                 const put = (cls, label, n, tip) => {
@@ -748,6 +772,13 @@
                     roleRow.append(ob);
                 }
                 roleRow.append(el('span', 'ac-hc ac-hc-total', `計${h.total}人`));
+                // 下請け請負は人数を把握していないので計人数には入れない。
+                // 代わりに「今日動いている請負現場が何件あるか」を出す。
+                if (h.sub_contract_sites > 0) {
+                    const sc = el('span', 'ac-hc ac-hc-contract', `下請け請負${h.sub_contract_sites}現場`);
+                    sc.title = '協力会社へ丸ごと請負で渡している稼働中の現場数です。人数は把握していないため計人数には含めません。';
+                    roleRow.append(sc);
+                }
                 info.append(roleRow);
 
                 const subRow = el('div', 'ac-hcrow ac-hcrow2');
@@ -892,9 +923,10 @@
 
         function renderSchedule(s, conf) {
             const box = el('div', 'ac-sched');
-            // 左帯は種別色。下請け請負だけは専用色にして、流し見でも区別できるようにする。
-            box.style.borderLeftColor = s.is_subcontracted ? SUBCONTRACT_COLOR : (s.color || '#1a73e8');
-            if (s.is_subcontracted) box.classList.add('ac-subc');
+            // 左帯は種別色。下請け応援・下請け請負は専用色にして、流し見でも区別できる。
+            const smode = modeInfo(s);
+            box.style.borderLeftColor = modeColor(s);
+            if (smode.cls) box.classList.add('ac-subc', smode.cls);
 
             // 現場ヘッダーは独立した大きなタップ領域にする。
             // 人数の多い現場では社員名チップが画面を埋め、現場自体を押しにくかった。
@@ -915,10 +947,15 @@
             catBadge.style.borderColor = catColor;
             catBadge.style.color = isLightColor(catColor) ? '#16202e' : '#fff';
             top.append(catBadge);
-            // 下請け請負は種別より先に、いちばん目立つ位置へ出す。
-            if (s.is_subcontracted) {
-                const sc = el('span', 'ac-badge ac-subcbadge', '下請け');
-                sc.title = '協力会社だけで施工する現場です(自社は入りません)';
+            // 稼働形態は種別より先に、いちばん目立つ位置へ出す。
+            // 色が近い環境でも読み分けられるよう、必ず「下請け応援」「下請け請負」と書く。
+            if (smode.cls) {
+                const sc = el('span', 'ac-badge ac-subcbadge ' + smode.cls, smode.label);
+                sc.style.background = smode.color;
+                sc.style.borderColor = smode.color;
+                sc.title = modeOf(s) === 'sub_contract'
+                    ? '現場を丸ごと協力会社へ請負で渡しています。人数は把握していなくて構いません。'
+                    : 'この日は自社社員が行かず、協力会社に応援で入ってもらう現場です。';
                 top.append(sc);
             }
             if (s.status !== 'confirmed') top.append(el('span', 'ac-badge ac-warn', '未確定'));
@@ -943,10 +980,15 @@
 
             // 現場名の右に人数を大きく出す(「京田辺 4人」が一目で読めることを優先)。
             // 人数は「その現場で実際に作業する人」。運搬は別バッジにする。
-            const cnt = el('span', 'ac-sitecount', `${s.member_count}人`);
-            cnt.title = s.subcontractor_count > 0
-                ? `作業 社員 ${s.employee_count}人 / 外注 ${s.subcontractor_count}人`
-                : `作業 社員 ${s.employee_count}人`;
+            // 下請け請負は人数を把握していないことが正常なので、0人と出さない。
+            const unknownHead = modeOf(s) === 'sub_contract' && !s.member_count;
+            const cnt = el('span', 'ac-sitecount', unknownHead ? '人数未把握' : `${s.member_count}人`);
+            if (unknownHead) cnt.classList.add('ac-sitecount-unknown');
+            cnt.title = unknownHead
+                ? '下請け請負のため人数は把握していません(現場が稼働していることだけを記録しています)'
+                : (s.subcontractor_count > 0
+                    ? `作業 社員 ${s.employee_count}人 / 外注 ${s.subcontractor_count}人`
+                    : `作業 社員 ${s.employee_count}人`);
             top.insertBefore(cnt, top.children[1] || null);
             // 職長は現場を回すうえで最初に見たい情報なので、現場名の帯に出す。
             const leader = (s.members || []).find((m) => isLeaderRole(m.role));
@@ -1011,7 +1053,8 @@
                     chip.append(el('span', 'ac-chevron', '▾'));
                     chip.addEventListener('click', (ev) => {
                         ev.stopPropagation();
-                        openMemberActionSheet(m, s);
+                        // 変更後の戻り先は配置メンバー一覧。カレンダーまで戻さない。
+                        openMemberActionSheet(m, s, () => openMemberListSheet(s.id));
                     });
                 }
                 // (以前は)一覧では社員名をタップしても何も起きないようにしていた。
@@ -1076,7 +1119,11 @@
 
                 row('日付', labelDate(state.selected) + (rokuyouOf(state.selected) ? `（${rokuyouOf(state.selected)}）` : ''));
                 row('種別', s.category_name + (s.counts_as_deployment ? '' : '（配置人数に含めない）'));
-                if (s.is_subcontracted) row('請負区分', '下請け請負（協力会社だけで施工）');
+                row('稼働形態', modeOf(s) === 'sub_contract'
+                    ? '下請け請負（現場を丸ごと協力会社へ／人数は未把握でよい）'
+                    : (modeOf(s) === 'sub_support'
+                        ? '下請け応援（この日は自社が行かず協力会社に応援を依頼）'
+                        : '通常（自社社員＋必要に応じて協力会社）'));
                 if (s.prime_contractor) row('元請', s.prime_contractor);
                 row('集合時間', s.meeting_time);
                 row('開始 / 終了', [s.start_time, s.end_time].filter(Boolean).join(' 〜 '));
@@ -1221,11 +1268,24 @@
                         it.append(el('span', 'ac-chevron', '▾'));
                         it.addEventListener('click', () => openMonthOtherSheet(d));
                     }
+                    // 外注は「通常の応援」と「下請け応援」を分けて出す。
+                    // 下請け請負は人数未把握が正常なので、人工の内訳には入れない。
                     if (label === '外注' && Number(n) > 0) {
                         it.append(el('div', 'ac-sub2',
-                            `通常の応援 ${d.sub_normal} 人工／下請け請負 ${d.sub_contracted} 人工`));
+                            `通常外注 ${d.sub_normal} 人工／下請け応援 ${d.sub_support || 0} 人工`));
                     }
                     list.append(it);
+                }
+                // 下請け請負は人工ではなく「現場日」で把握する(1現場が1日動いたら1現場日)。
+                if (Number(d.sub_contract_site_days) > 0) {
+                    const sc = el('div', 'ac-listitem ac-mrow');
+                    const nm = el('div', 'ac-mrowname');
+                    nm.append(el('span', 'ac-hc ac-hc-contract', '下請け請負'));
+                    sc.append(nm);
+                    sc.append(el('div', 'ac-dstrong', `${d.sub_contract_site_days} 現場日`));
+                    sc.append(el('div', 'ac-sub2',
+                        '現場を丸ごと協力会社へ渡しているため人数は把握していません。人工には含めず件数で数えます。'));
+                    list.append(sc);
                 }
                 box.append(list);
 
@@ -1318,19 +1378,77 @@
         // -----------------------------------------------------------
         // 社員チップを押したときの操作メニュー。
         // 「表示だけに見える」という実機の指摘への対応で、操作をここへ集約する。
-        function openMemberActionSheet(member, fromSchedule) {
+        // 配置メンバー一覧。1人直すたびにカレンダーまで戻ると、隣の人を続けて
+        // 直すのに毎回カレンダー→現場→社員と辿り直すことになる。役割を変えたあとは
+        // 必ずこの一覧へ戻し、スマホで上から順に直していけるようにする。
+        let memberSheet = null;
+        function openMemberListSheet(scheduleId) {
+            if (memberSheet && memberSheet.alive && memberSheet.scheduleId === scheduleId) {
+                memberSheet.redraw();
+                return memberSheet.api;
+            }
+            let ref = null;
+            const api = sheet('配置メンバー', (box, a) => {
+                function redraw() {
+                    // 一覧の中のスクロール位置も保つ(下の方の人を直したのに先頭へ戻らない)
+                    const keep = a.scroll ? a.scroll.scrollTop : 0;
+                    box.innerHTML = '';
+                    const s = (state.day_data.schedules || []).find((x) => x.id === scheduleId);
+                    if (!s) { box.append(el('div', 'ac-empty', 'この配置は削除されました')); return; }
+                    a.setTitle(s.label + ' の配置メンバー');
+                    const mi = modeInfo(s);
+                    box.append(el('div', 'ac-schedmeta',
+                        labelDate(state.selected) + '／' + s.category_name
+                        + (mi.short ? '／' + mi.label : '')
+                        + '　名前を押すと、その人の当日の役割・職長・移動を変えられます。'
+                        + '変更しても、この一覧に戻ります。'));
+                    const list = el('div', 'ac-list');
+                    for (const m of s.members) {
+                        const it = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const tag = memberRoleTag(m);
+                        nm.append(el('span', 'ac-rtag ac-role-' + tag.key, tag.label));
+                        nm.append(el('span', 'ac-menutitle', m.name || '(不明)'));
+                        if (isLeaderRole(m.role)) nm.append(el('span', 'ac-badge ac-leadbadge', '職長'));
+                        it.append(nm);
+                        if (m.member_type === 'employee') it.append(el('div', 'ac-sub2', dayRoleText(m)));
+                        if (state.canEdit && m.member_type === 'employee') {
+                            it.classList.add('ac-tappable');
+                            it.append(el('span', 'ac-chevron', '▾'));
+                            it.addEventListener('click', () => openMemberActionSheet(m, s, ref));
+                        }
+                        list.append(it);
+                    }
+                    if (!s.members.length) list.append(el('div', 'ac-empty', 'まだ誰も配置されていません'));
+                    box.append(list);
+                    if (a.scroll) a.scroll.scrollTop = keep;
+                }
+                memberSheet = { scheduleId, api: null, alive: true, redraw };
+                const origClose = a.close;
+                a.close = () => { memberSheet.alive = false; origClose(); };
+                redraw();
+            });
+            memberSheet.api = api;
+            ref = () => openMemberListSheet(scheduleId);
+            return api;
+        }
+
+        function openMemberActionSheet(member, fromSchedule, returnTo) {
+            const back = () => { if (returnTo) returnTo(); };
             sheet(member.name, (box, api) => {
                 box.append(el('div', 'ac-schedmeta', fromSchedule.label + '／' + (member.time_label || '終日')));
                 const items = [
                     ['当日の役割を変える', dayRoleText(member),
-                        () => { api.close(); openDayRoleSheet(member, fromSchedule); }],
+                        () => { api.close(); openDayRoleSheet(member, fromSchedule, returnTo); }],
+                    ['配置メンバー一覧を見る', 'この現場の全員を並べて、続けて直せます',
+                        () => { api.close(); back(); }],
                     ['別の現場へ移す', 'この日の他の現場へ移します',
                         () => { api.close(); openMoveSheet(member, fromSchedule); }],
                     ['時間を変える', member.time_label || '終日',
                         () => { api.close(); openEntrySheet(fromSchedule); }],
                     [isLeaderRole(member.role) ? '職長を解除する' : 'この人を職長にする',
                         isLeaderRole(member.role) ? '現在この現場の職長です' : 'この現場の職長にします',
-                        async () => { api.close(); await toggleLeader(member, fromSchedule); }],
+                        async () => { api.close(); await toggleLeader(member, fromSchedule); back(); }],
                     ['運搬を追加する', '同じ人を運搬にも入れます(兼務できます)',
                         () => { api.close(); openEntrySheet(fromSchedule); }],
                 ];
@@ -1348,7 +1466,8 @@
 
         function dayRoleText(m) {
             if (!m.headcount_role) {
-                return '自動（いまは' + (ROLE_LABELS[m.day_role] || ROLE_LABELS.craft).label + '）';
+                return '種別から自動（いまは'
+                    + (ROLE_LABELS[m.row_role || m.day_role] || ROLE_LABELS.craft).label + '）';
             }
             if (m.headcount_role === 'other') {
                 return 'その他（' + (m.headcount_role_label || '内訳なし') + '）';
@@ -1357,13 +1476,15 @@
         }
 
         // その日・その配置だけの役割を決める。社員マスターは書き換えない。
-        function openDayRoleSheet(member, fromSchedule) {
+        function openDayRoleSheet(member, fromSchedule, returnTo) {
             sheet(member.name + ' の当日の役割', (box, api) => {
                 box.append(el('div', 'ac-schedmeta',
                     'この日・この現場だけの役割です。社員マスターの区分は変わらないので、'
-                    + '翌日はいつもどおりに戻ります。'));
+                    + '翌日はいつもどおりに戻ります。保存すると配置メンバー一覧へ戻るので、'
+                    + '続けて隣の人を直せます。'));
+                const auto = (ROLE_LABELS[member.row_role || member.day_role] || ROLE_LABELS.craft).label;
                 const choices = [
-                    ['', '自動', '種別と社員マスターから判定します'],
+                    ['', '自動（種別のとおり）', '配置を作るときに選んだ種別から決めます（いまは' + auto + '）'],
                     ['craft', '職人', '現場作業として数えます'],
                     ['office', '事務', '事務仕事として数えます'],
                     ['sales', '営業', '営業として数えます'],
@@ -1376,7 +1497,7 @@
                     it.append(el('div', 'ac-sub2', desc));
                     it.addEventListener('click', async () => {
                         api.close();
-                        await saveDayRole(member, fromSchedule, val, null);
+                        await saveDayRole(member, fromSchedule, val, null, returnTo);
                     });
                     list.append(it);
                 }
@@ -1392,7 +1513,7 @@
                     const t = el('button', 'ac-token' + (on ? ' ac-on' : ''), c.name);
                     t.addEventListener('click', async () => {
                         api.close();
-                        await saveDayRole(member, fromSchedule, 'other', c.name);
+                        await saveDayRole(member, fromSchedule, 'other', c.name, returnTo);
                     });
                     tokens.append(t);
                 }
@@ -1400,22 +1521,40 @@
                     tokens.append(el('div', 'ac-schedmeta', '「その他」の種別がまだありません。'));
                 }
                 box.append(tokens);
+
+                // 一覧に無い業務はその場で書ける。種別を足すほどでもない単発の用事
+                // (急な立会い等)のために、設定画面へ行かずに済ませられるようにする。
+                const freeRow = el('div', 'ac-cattop');
+                const free = el('input', 'ac-input');
+                free.placeholder = 'その他の内容を書く（例: ラーメン店）';
+                if (member.headcount_role === 'other') free.value = member.headcount_role_label || '';
+                const freeBtn = el('button', 'ac-btn ac-sm ac-primary', '保存');
+                freeBtn.addEventListener('click', async () => {
+                    const v = free.value.trim();
+                    if (!v) { toast('内容を入力してください'); return; }
+                    api.close();
+                    await saveDayRole(member, fromSchedule, 'other', v, returnTo);
+                });
+                freeRow.append(free, freeBtn);
+                box.append(freeRow);
                 box.append(el('div', 'ac-schedmeta',
-                    'ここに無い業務(ラーメン店・研修など)は、「⋯ → カレンダー設定」で種別を追加し、'
-                    + '枠を「その他」にすると候補に出ます(管理者のみ)。'));
+                    '毎月くり返す業務は「⋯ → カレンダー設定 → 種別・カテゴリー管理」で種別として'
+                    + '追加し、集計グループを「その他」にすると、上の候補にも月集計の内訳にも出ます(管理者のみ)。'));
             });
         }
 
         // 役割の保存。既存の保存RPCへ、その配置のメンバーをそのまま渡し直す。
-        async function saveDayRole(member, fromSchedule, role, label) {
+        // 保存後はカレンダーへ戻さず、呼び出し元(配置メンバー一覧)へ戻す。
+        async function saveDayRole(member, fromSchedule, role, label, returnTo) {
             const members = (fromSchedule.members || []).map((x) => memberToPayload(x,
                 x.member_id === member.member_id
                     ? { headcount_role: role, headcount_role_label: role === 'other' ? (label || '') : '' }
                     : {}));
             try {
                 await saveScheduleWithMembers(fromSchedule, members, {});
-                toast(role ? '当日の役割を変えました' : '自動に戻しました');
+                toast(role ? '当日の役割を変えました' : '種別のとおりに戻しました');
             } catch (e) { fail(e); }
+            if (returnTo) returnTo();
         }
 
         // 画面が持っているメンバー表示用のデータを、保存RPCが受け取る形へ戻す。
@@ -1434,14 +1573,21 @@
                 base = {
                     member_type: 'subcontractor_company',
                     subcontractor_company_id: x.subcontractor_company_id,
-                    headcount: x.headcount || 1,
+                    // 下請け請負の「人数未把握」(null)を 1人 に化けさせない
+                    headcount: (x.headcount === null || x.headcount === undefined) ? null : x.headcount,
+                    // 下請け応援・請負では協力会社の行に職長が付くことがあるので落とさない
+                    role: x.role || '',
+                    assignment_kind: x.assignment_kind || 'work',
                     workers: (x.workers || []).map((w) => ({
                         subcontractor_worker_id: w.subcontractor_worker_id || null,
                         name: w.name || '', phone: w.phone || '',
                     })),
                 };
             } else {
-                base = { member_type: 'subcontractor', subcontractor_worker_id: x.subcontractor_worker_id };
+                base = {
+                    member_type: 'subcontractor', subcontractor_worker_id: x.subcontractor_worker_id,
+                    role: x.role || '', assignment_kind: x.assignment_kind || 'work',
+                };
             }
             return Object.assign(base, patch || {});
         }
@@ -1478,8 +1624,11 @@
                 box.append(el('div', 'ac-schedmeta',
                     '職長を選ぶか、今は決められない場合は「職長未定」にしてください。'
                     + '未定にすると警告は出なくなり、あとから決め直せます。'));
-                const emps = (s.members || []).filter((m) => m.member_type === 'employee'
-                    && (m.assignment_kind || 'work') !== 'haul');
+                // 下請け応援・下請け請負は自社社員が入らないので、社員だけを候補に
+                // すると職長を1人も選べない。協力会社の行も候補に含める。
+                const subMode = modeOf(s) !== 'normal';
+                const emps = (s.members || []).filter((m) => (m.assignment_kind || 'work') !== 'haul'
+                    && (m.member_type === 'employee' || subMode));
                 const list = el('div', 'ac-list');
                 for (const m of emps) {
                     const it = el('div', 'ac-listitem' + (isLeaderRole(m.role) ? ' ac-on' : ''));
@@ -1489,7 +1638,7 @@
                     list.append(it);
                 }
                 if (!emps.length) {
-                    list.append(el('div', 'ac-empty', 'この現場にはまだ社員が入っていません。'));
+                    list.append(el('div', 'ac-empty', 'この現場にはまだ誰も入っていません。'));
                 }
                 box.append(list);
 
@@ -1819,7 +1968,7 @@
                 meeting_time: existing ? (existing.meeting_time || '') : '',
                 note: existing ? (existing.note || '') : '',
                 important_note: existing ? (existing.important_note || '') : '',
-                is_subcontracted: existing ? !!existing.is_subcontracted : false,
+                work_mode: existing ? modeOf(existing) : 'normal',
                 members: existing
                     ? existing.members.filter((m) => m.member_type === 'employee').map((m) => ({
                         member_type: 'employee', employee_code: m.employee_code, name: m.name,
@@ -1835,7 +1984,9 @@
                         subcontractor_company_id: m.subcontractor_company_id,
                         company_name: m.company_name,
                         short_name: m.company_short_name,
-                        headcount: m.headcount || 1,
+                        // null は「下請け請負で人数未把握」。1人に化けさせない。
+                        headcount: (m.headcount === null || m.headcount === undefined)
+                            ? null : m.headcount,
                         workers: (m.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
@@ -2026,21 +2177,37 @@
                     top.append(el('div', 'ac-spacer'), remove);
                     card.append(top);
 
-                    // 人数(この数字が人工集計の正。作業員名の件数ではない)
+                    // 人数(この数字が人工集計の正。作業員名の件数ではない)。
+                    // 下請け請負のときだけ「未把握」にできる。何人入っているかを
+                    // 自社が知らないのが普通なので、1人と偽らずそのまま残す。
+                    const contractMode = draft.work_mode === 'sub_contract';
                     const cnt = el('div', 'ac-subcount');
+                    const headLabel = () => (sub.headcount === null || sub.headcount === undefined)
+                        ? '未把握' : `${sub.headcount}人`;
                     const minus = el('button', 'ac-step', '−');
-                    const num = el('span', 'ac-stepnum', `${sub.headcount}人`);
+                    const num = el('span', 'ac-stepnum', headLabel());
                     const plus = el('button', 'ac-step', '＋');
                     minus.addEventListener('click', () => {
-                        sub.headcount = Math.max(1, (sub.headcount || 1) - 1);
-                        num.textContent = `${sub.headcount}人`;
+                        const cur = sub.headcount;
+                        if (contractMode && (cur === null || cur === undefined || cur <= 1)) sub.headcount = null;
+                        else sub.headcount = Math.max(1, (cur || 1) - 1);
+                        num.textContent = headLabel();
                     });
                     plus.addEventListener('click', () => {
-                        sub.headcount = Math.min(99, (sub.headcount || 1) + 1);
-                        num.textContent = `${sub.headcount}人`;
+                        sub.headcount = Math.min(99, (sub.headcount || 0) + 1);
+                        num.textContent = headLabel();
                     });
                     cnt.append(el('span', 'ac-steplabel', '人数'), minus, num, plus);
                     card.append(cnt);
+                    if (contractMode) {
+                        const unk = el('button', 'ac-btn ac-sm', '人数は未把握にする');
+                        unk.title = '下請け請負は人数を把握していなくて構いません。人工には数えず「現場日」で数えます。';
+                        unk.addEventListener('click', () => {
+                            sub.headcount = null;
+                            num.textContent = headLabel();
+                        });
+                        card.append(unk);
+                    }
 
                     // 作業員名(任意)
                     const wrapW = el('div', 'ac-subworkers');
@@ -2262,22 +2429,44 @@
                 renderHaulRows();
             }
 
-            // ---------- 下請け請負 ----------
-            // 現場単位のスイッチにした。会社ごとに選ばせるより1タップで済み、
-            // 「この現場は自社が入らない」という現場の性質そのものを表せるため。
+            // ---------- 稼働形態(通常 / 下請け応援 / 下請け請負) ----------
+            // 現場単位の3択にした。「協力会社が入る」を1種類にまとめていたころは、
+            // 人数を把握している応援と、人数を把握していない請負が同じ扱いになり、
+            // 月の外注人工が実態と合わなくなっていた。
+            const MODE_CHOICES = [
+                ['normal', '通常', '自社社員＋必要に応じて協力会社。これまでどおりの配置です。'],
+                ['sub_support', '下請け応援',
+                    'この日は自社社員が行かず、協力会社に応援で入ってもらう現場。人数を入力し、外注として数えます。'],
+                ['sub_contract', '下請け請負',
+                    '現場を丸ごと協力会社へ請負で渡している現場。人数は未把握でよく、人工には数えず「現場日」で数えます。'],
+            ];
             const subcField = el('div', 'ac-field');
-            subcField.append(el('div', 'ac-label', '請負区分'));
-            const subcBtn = el('button', 'ac-token' + (draft.is_subcontracted ? ' ac-on' : ''),
-                draft.is_subcontracted ? '下請け請負（自社は入らない）' : '通常（自社＋外注応援）');
-            subcBtn.addEventListener('click', () => {
-                draft.is_subcontracted = !draft.is_subcontracted;
-                subcBtn.textContent = draft.is_subcontracted ? '下請け請負（自社は入らない）' : '通常（自社＋外注応援）';
-                subcBtn.classList.toggle('ac-on', draft.is_subcontracted);
-            });
-            subcField.append(subcBtn);
-            subcField.append(el('div', 'ac-schedmeta',
-                '下請け請負にすると、自社社員が0人でも警告を出しません。'
-                + '現場一覧・月表示に「下請け」と専用色で表示され、人数は外注として数えます。'));
+            subcField.append(el('div', 'ac-label', '稼働形態'));
+            const modeTokens = el('div', 'ac-tokens');
+            const modeHelp = el('div', 'ac-schedmeta');
+            function drawModes() {
+                modeTokens.innerHTML = '';
+                for (const choice of MODE_CHOICES) {
+                    const val = choice[0];
+                    const on = draft.work_mode === val;
+                    const t = el('button', 'ac-token' + (on ? ' ac-on' : '')
+                        + (WORK_MODES[val].cls ? ' ' + WORK_MODES[val].cls : ''), choice[1]);
+                    if (on && WORK_MODES[val].color) {
+                        t.style.background = WORK_MODES[val].color;
+                        t.style.borderColor = WORK_MODES[val].color;
+                        t.style.color = '#fff';
+                    }
+                    t.addEventListener('click', () => {
+                        draft.work_mode = val;
+                        drawModes();
+                        renderSubPicked();
+                    });
+                    modeTokens.append(t);
+                    if (on) modeHelp.textContent = choice[2];
+                }
+            }
+            drawModes();
+            subcField.append(modeTokens, modeHelp);
             box.append(subcField);
 
             // ---------- 運搬(運送要員) ----------
@@ -2380,11 +2569,12 @@
                     p_meeting_time: draft.meeting_time || null,
                     p_note: draft.note || null,
                     p_important_note: draft.important_note || null,
-                    p_is_subcontracted: !!draft.is_subcontracted,
+                    p_work_mode: draft.work_mode || 'normal',
                     p_members: draft.members.concat(draft.subs.map((x) => ({
                         member_type: 'subcontractor_company',
                         subcontractor_company_id: x.subcontractor_company_id,
-                        headcount: x.headcount || 1,
+                        // 下請け請負の「未把握」は null のまま送る(サーバー側で人工に数えない)
+                        headcount: (x.headcount === null || x.headcount === undefined) ? null : x.headcount,
                         workers: (x.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
@@ -2697,17 +2887,89 @@
             });
         }
 
+        // 人数集計グループの選択肢。ここで選んだ枠が、上部の人数サマリー・
+        // 月集計・当日の役割の初期値のすべてに効く(1か所で決まる)。
+        const HEADCOUNT_GROUPS = [
+            { v: 'craft', label: '職人', deploy: true },
+            { v: 'office', label: '事務', deploy: true },
+            { v: 'sales', label: '営業', deploy: true },
+            { v: 'haul', label: '運搬', deploy: true },
+            { v: 'other', label: 'その他', deploy: true },
+            { v: '', label: '人数集計対象外', deploy: false },
+        ];
+        function groupSelect(current, countsAsDeployment) {
+            const sel = el('select', 'ac-input');
+            for (const g of HEADCOUNT_GROUPS) {
+                const o = el('option', null, g.label);
+                o.value = g.v;
+                sel.append(o);
+            }
+            // 枠が未設定でも「人数に数える」種別は、社員マスターの職種で判定する
+            // 従来動作。選択肢としては出さず、いちばん近い表示に寄せる。
+            sel.value = current || (countsAsDeployment ? 'craft' : '');
+            return sel;
+        }
+
         function openCategorySheet() {
             sheet('種別・カテゴリー管理', async (box) => {
                 async function reload() {
                     box.innerHTML = '';
                     box.append(el('div', 'ac-schedmeta',
-                        '月表示のチップの色と、配置人数に数えるかどうかをここで決めます。'
-                        + '休み・会議など現場へ出ない種別は「人数に数える」を外してください。'));
+                        '配置を作るときに選ぶ「種別」の一覧です。ここで決めた集計グループが、'
+                        + 'その配置に入れた人の当日の役割の初期値になります'
+                        + '（例: 種別「事務仕事」の予定に入れた人は、その日は事務として数えます）。'));
 
                     let rows = [];
                     try { rows = await rpc('assignment_list_categories', { p_employee_code: me, p_include_inactive: true }); }
                     catch (e) { fail(e); return; }
+
+                    // --- 新しい種別の追加(一覧の上に置く) ---
+                    // 以前は28件の一覧の下にあり、実機では「追加する枠が無い」と
+                    // 見えていた。いちばん使う操作なので先頭へ出す。
+                    const add = el('div', 'ac-catcard ac-catadd');
+                    add.append(el('div', 'ac-label', '＋ 新しい種別を追加'));
+                    const newTop = el('div', 'ac-cattop');
+                    const newColor = el('input', 'ac-catcolor');
+                    newColor.type = 'color';
+                    newColor.value = '#8d6e63';
+                    const newName = el('input', 'ac-input ac-catname');
+                    newName.placeholder = '種別の名前（例: ラーメン店 / 安全講習 / 資材整理）';
+                    newTop.append(newColor, newName);
+                    add.append(newTop);
+                    const newGroupRow = el('div', 'ac-cattop');
+                    newGroupRow.append(el('span', 'ac-steplabel', '人数集計'));
+                    const newGroup = groupSelect('other', true);
+                    newGroupRow.append(newGroup);
+                    add.append(newGroupRow);
+                    let newActive = true;
+                    const newActiveBtn = el('button', 'ac-token ac-on', '使う');
+                    newActiveBtn.addEventListener('click', () => {
+                        newActive = !newActive;
+                        newActiveBtn.textContent = newActive ? '使う' : '使わない';
+                        newActiveBtn.classList.toggle('ac-on', newActive);
+                    });
+                    add.append(newActiveBtn);
+                    const addBtn = el('button', 'ac-btn ac-primary', 'この種別を追加');
+                    addBtn.style.width = '100%';
+                    addBtn.addEventListener('click', async () => {
+                        if (!newName.value.trim()) { toast('種別の名前を入力してください'); return; }
+                        try {
+                            await rpc('assignment_upsert_category', {
+                                p_employee_code: me, p_id: null, p_name: newName.value,
+                                p_color: newColor.value, p_sort_order: null, p_is_active: newActive,
+                                p_counts_as_deployment: newGroup.value !== '',
+                                p_headcount_group: newGroup.value || null,
+                            });
+                            toast('追加しました');
+                            await Promise.all([loadMonth(), loadDay()]);
+                            render();
+                            reload();
+                        } catch (e) { fail(e); }
+                    });
+                    add.append(addBtn);
+                    add.append(el('div', 'ac-schedmeta',
+                        '追加するとすぐ、配置の追加画面・当日の役割の候補・月集計の内訳で使えます。'));
+                    box.append(add);
 
                     for (let i = 0; i < rows.length; i += 1) {
                         const c = rows[i];
@@ -2737,26 +2999,20 @@
                             active.textContent = c.is_active ? '使う' : '使わない';
                             active.classList.toggle('ac-on', c.is_active);
                         });
-                        // 上部の人数サマリーでどの枠に数えるか。
-                        // 「自動」は社員の職種(職人/事務/営業)で判定する従来どおりの動き。
-                        // 「その他」にすると、その種別名が“その他”の内訳へ出る
-                        // (研修・健康診断・ラーメン店 など、会社の業務が増えたときはここで足す)。
-                        const GROUPS = [
-                            { v: null, label: '自動(職種で判定)' },
-                            { v: 'haul', label: '運搬' },
-                            { v: 'sales', label: '営業' },
-                            { v: 'other', label: 'その他' },
-                        ];
-                        const gi = Math.max(0, GROUPS.findIndex((g) => g.v === (c.headcount_group || null)));
-                        let gIdx = gi;
-                        const group = el('button', 'ac-token' + (c.headcount_group ? ' ac-on' : ''),
-                            `枠: ${GROUPS[gi].label}`);
+                        // 上部の人数サマリー・月集計でこの種別をどの枠に数えるか。
+                        // 送り式のボタンだと選べる枠が隠れて分かりにくかったため、
+                        // 選択肢がすべて見えるプルダウンにした。
+                        const group = groupSelect(c.headcount_group, c.counts_as_deployment);
                         group.title = '上部の人数サマリーでこの種別をどこに数えるか';
-                        group.addEventListener('click', () => {
-                            gIdx = (gIdx + 1) % GROUPS.length;
-                            c.headcount_group = GROUPS[gIdx].v;
-                            group.textContent = `枠: ${GROUPS[gIdx].label}`;
-                            group.classList.toggle('ac-on', !!c.headcount_group);
+                        group.addEventListener('change', () => {
+                            c.headcount_group = group.value || null;
+                            if (!group.value) {
+                                c.counts_as_deployment = false;
+                            } else if (!c.counts_as_deployment) {
+                                c.counts_as_deployment = true;
+                            }
+                            deploy.textContent = c.counts_as_deployment ? '人数に数える' : '人数に数えない';
+                            deploy.classList.toggle('ac-on', c.counts_as_deployment);
                         });
                         const up = el('button', 'ac-ord', '↑');
                         const down = el('button', 'ac-ord', '↓');
@@ -2802,34 +3058,6 @@
                         } catch (e) { fail(e); }
                     }
 
-                    // --- 新しい種別の追加 ---
-                    const add = el('div', 'ac-catcard ac-catadd');
-                    add.append(el('div', 'ac-label', '＋ 種別を追加'));
-                    const newTop = el('div', 'ac-cattop');
-                    const newColor = el('input', 'ac-catcolor');
-                    newColor.type = 'color';
-                    newColor.value = '#1a73e8';
-                    const newName = el('input', 'ac-input ac-catname');
-                    newName.placeholder = '種別の名前（例: 夜間工事）';
-                    newTop.append(newColor, newName);
-                    add.append(newTop);
-                    const addBtn = el('button', 'ac-btn ac-primary', 'この種別を追加');
-                    addBtn.style.width = '100%';
-                    addBtn.addEventListener('click', async () => {
-                        if (!newName.value.trim()) { toast('種別の名前を入力してください'); return; }
-                        try {
-                            await rpc('assignment_upsert_category', {
-                                p_employee_code: me, p_id: null, p_name: newName.value,
-                                p_color: newColor.value, p_sort_order: null, p_is_active: true,
-                                p_counts_as_deployment: true,
-                            });
-                            toast('追加しました');
-                            await loadMonth(); render();
-                            reload();
-                        } catch (e) { fail(e); }
-                    });
-                    add.append(addBtn);
-                    box.append(add);
                 }
                 reload();
             });
@@ -2970,7 +3198,13 @@
             if (Math.abs(top - cur) >= 1) root.style.setProperty('--ac-host-offset', `${top}px`);
         }
 
-        function render() {
+        // 再描画で elBody を作り直すため、そのままだと保存のたびに先頭へ飛ぶ。
+        // 「岩崎さんを直す→隣の徳永さんを直す」のような連続操作で毎回スクロール
+        // し直すのは実機でかなり使いにくいので、既定でスクロール位置を保つ。
+        // 日付移動のように意図的に先頭へ戻したい場合だけ resetScroll を渡す。
+        function render(opts) {
+            const keep = !(opts && opts.resetScroll);
+            const prev = keep ? elBody.scrollTop : 0;
             renderHeader();
             syncHostOffset();
             syncHeaderHeight();
@@ -2982,8 +3216,9 @@
                 renderMonth(elBody);
                 renderDay(elBody);
                 reflowMonthIfNeeded();
-                syncWeekStripVisibility();
             }
+            if (prev > 0) elBody.scrollTop = prev;
+            if (state.view !== 'me') syncWeekStripVisibility();
         }
 
         // 月グリッドが画面外へ出たら、同じカレンダーが1週間ぶんに縮んで上部へ残る。

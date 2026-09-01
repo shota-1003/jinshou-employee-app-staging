@@ -1593,6 +1593,8 @@
     <button type="button" class="secondary" id="my-supply-initial-holding-btn" style="margin-bottom:14px;">現在保有している支給品を登録する</button>
     <div class="section-title">現在の保有数</div>
     <div id="my-supply-holdings"></div>
+    <div class="section-title">申請状況</div>
+    <div id="my-supply-requests"></div>
     <div class="section-title">支給履歴</div>
     <div id="my-supply-list"></div>
   </section>
@@ -2092,6 +2094,9 @@
     <div class="form-title">支給品申請の確認</div>
     <div class="hint" style="margin-bottom:10px;">申請単位でまとめて表示されます。品目ごとに数量・サイズを修正のうえ承認、または却下できます。</div>
     <div id="supply-request-admin-list"><div class="hint">読み込み中...</div></div>
+    <div class="form-title" style="margin-top:22px;">受渡待ち(承認済み・未受渡)</div>
+    <div class="hint" style="margin-bottom:10px;">承認済みでまだ渡していない支給品です。実際に本人へ渡したら「受渡完了」を押してください。押した時点で本人の保有数に加算されます。</div>
+    <div id="supply-delivery-queue-list"><div class="hint">読み込み中...</div></div>
   </section>
 
   <!-- 免許種別マスター管理(管理者) -->

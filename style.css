@@ -407,6 +407,14 @@ button.link {
   width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border);
   cursor: zoom-in; margin-top: 8px; margin-right: 6px; display: inline-block; vertical-align: top;
 }
+/* 経費承認画面などで領収書原本(Edge Function receipt-image 経由)をサムネイル表示する。
+   読み込み完了までは薄い枠のプレースホルダーを見せ、タップで拡大(openImageZoom)する。 */
+.receipt-thumb-wrap { margin-top: 8px; }
+.receipt-proxy-thumb {
+  width: 88px; height: 88px; object-fit: cover; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2, rgba(128,128,128,0.12));
+  display: inline-block; vertical-align: top; min-width: 88px;
+}
 /* 案内AI「迅翔くん」: 常時右下に小さく常駐するボタンと、タップで開くチャットパネル。
    下部ナビと同じ「fixed + max-width480pxで中央寄せ」の技法で、デスクトップ幅でも
    アプリの表示カラムの右下に正しく収まるようにする(ラッパーはクリックを透過させ、

@@ -757,11 +757,37 @@
    色は月表示のタグ・日別の左帯・このバッジで同じものを使う。 */
 .ac-badge.ac-catbadge { font-weight: 800; border: none; }
 
-/* 下請け請負。普通の外注応援より強い専用色にして、流し見で区別できるようにする。
-   色だけに頼らないよう「下請け」の文字を必ず出す。 */
+/* 現場の稼働形態。下請け応援(濃紫)と下請け請負(濃ピンク)は色相を大きく離し、
+   さらに必ず「下請け応援」「下請け請負」の文字を出す(色だけに頼らない)。
+   背景の淡い色も分けて、カードを流し見しただけで区別が付くようにする。 */
 .ac-badge.ac-subcbadge {
   background: #c2185b; border-color: #c2185b; color: #fff;
   font-weight: 800; letter-spacing: .04em;
 }
+.ac-badge.ac-subcbadge.ac-mode-support { background: #5e35b1; border-color: #5e35b1; }
 .ac-sched.ac-subc { background: #fdf2f6; }
+.ac-sched.ac-subc.ac-mode-support { background: #f4f1fb; }
+.ac-sched.ac-subc.ac-mode-contract { background: #fdf2f6; }
 .ac-chip.ac-subcchip { font-weight: 800; }
+/* 下請け請負で人数を把握していない現場。0人と出さず「人数未把握」と書く。 */
+.ac-sitecount-unknown { font-size: 12px; font-weight: 700; color: #8a4b6a; }
+/* 日別サマリー・月集計の「下請け請負 ○現場(日)」。人工の数字と混ざらないよう別色。 */
+.ac-hc-contract { background: #fbe6ee; border-color: #e59bbb; color: #8e1046; }
+/* 稼働形態の選択トークン(未選択時も種別が想像できるよう枠線に色を付ける) */
+.ac-token.ac-mode-support { border-color: #b9a7e0; }
+.ac-token.ac-mode-contract { border-color: #e59bbb; }
+/* 配置メンバー一覧の行。名前と役割タグを1行で読ませる。
+   月集計シート(.ac-mrow)は列幅を固定したいので、一覧側だけに効かせる。 */
+.ac-memrow .ac-mrowname { display: flex; align-items: center; gap: 2px; flex: 1 1 auto; min-width: 0; }
+.ac-memrow .ac-rtag {
+  display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 11px; font-weight: 800; background: #e6e9ef; color: #3b4658;
+}
+.ac-memrow .ac-rtag.ac-role-own-field  { background: #d3e1f5; color: #14356b; }
+.ac-memrow .ac-rtag.ac-role-own-office { background: #ddd2f5; color: #3d2a72; }
+.ac-memrow .ac-rtag.ac-role-own-sales  { background: #f4dcbc; color: #7a4510; }
+.ac-memrow .ac-rtag.ac-role-own-haul   { background: #c7e7df; color: #0f5b4d; }
+.ac-memrow .ac-rtag.ac-role-sub-field  { background: #f0dcc0; color: #7a4510; }
+.ac-memrow .ac-rtag.ac-role-sub-haul   { background: #e6d3b4; color: #6b4a14; }
+/* 種別管理のプルダウン(枠の選択肢を隠さない) */
+.ac-catopts select.ac-input, .ac-catadd select.ac-input { flex: 1 1 auto; min-width: 130px; height: 34px; }

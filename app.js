@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v95-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T18:27:26.542Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v97-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T20:14:39.786Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2465,10 +2465,13 @@ async function loadBulkExpenseDetail() {
             ${it.duplicate_warning ? `<div class="mini-tag warn">${icon('alert-triangle')}重複の疑いあり</div>` : ''}
           </span>
         </label>
-        ${it.receipt_url ? `<a href="${it.receipt_url}" target="_blank" rel="noopener" class="secondary" style="display:inline-block;text-decoration:none;text-align:center;">元画像を見る</a>` : ''}
+        ${it.document_id
+          ? `<div class="receipt-thumb-wrap"><img class="receipt-proxy-thumb" data-document-id="${it.document_id}" alt="領収書" loading="lazy"></div>`
+          : '<div class="hint-inline">領収書画像なし</div>'}
       </div>
     `).join('');
     hydrateIcons(document.getElementById('bed-item-list'));
+    hydrateReceiptImages(document.getElementById('bed-item-list'));
     document.querySelectorAll('.bed-item-check').forEach((cb) => {
       cb.checked = bulkExpenseSelectedItems.has(cb.dataset.id);
       cb.addEventListener('change', () => {
@@ -2641,6 +2644,46 @@ function openImageZoom(url) {
   if (!url) return;
   document.getElementById('image-zoom-img').src = url;
   document.getElementById('image-zoom-overlay').classList.add('open');
+}
+
+// 領収書原本(Google Drive 非公開)を Edge Function receipt-image 経由で認証付き取得し、
+// Blob→objectURL でインライン表示する。Drive URL も Google 認証情報もフロントへ出さない。
+// container 内の img.receipt-proxy-thumb[data-document-id] を対象に、サムネイル表示＋タップ拡大を配線する。
+async function fetchReceiptObjectUrl(documentId) {
+  const session = getSession();
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/receipt-image?document_id=${encodeURIComponent(documentId)}`, {
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      'x-employee-code': (session && session.employeeCode) || '',
+      'x-device-token': currentDeviceToken || '',
+    },
+  });
+  if (!res.ok) throw new Error('receipt_fetch_' + res.status);
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+function hydrateReceiptImages(container) {
+  if (!container) return;
+  container.querySelectorAll('img.receipt-proxy-thumb[data-document-id]').forEach((img) => {
+    if (img.dataset.hydrated) return;
+    img.dataset.hydrated = '1';
+    const docId = img.dataset.documentId;
+    fetchReceiptObjectUrl(docId)
+      .then((objUrl) => {
+        img.src = objUrl;
+        img.dataset.zoom = objUrl;
+        img.addEventListener('click', () => openImageZoom(objUrl));
+        img.style.cursor = 'zoom-in';
+      })
+      .catch(() => {
+        const note = document.createElement('div');
+        note.className = 'hint-inline';
+        note.textContent = '領収書画像を表示できませんでした';
+        img.replaceWith(note);
+      });
+  });
 }
 
 let currentMyRequestDetail = null;
@@ -5990,10 +6033,14 @@ async function loadSupplyRequestAdminList() {
           <div class="supply-item" data-item-request-id="${it.item_request_id}">
             <div class="row1"><span>${it.item_name}</span></div>
             ${it.reason ? `<div class="row2">${it.reason}</div>` : ''}
-            <div class="row2" style="display:flex; gap:6px; align-items:center;">
+            <div class="row2" style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
               数量 <input type="number" min="1" class="decide-qty-input" style="width:56px;" value="${it.quantity}">
               サイズ <input type="text" class="decide-size-input" style="width:64px;" value="${it.size || ''}">
             </div>
+            <div class="row2" style="display:flex; gap:6px; align-items:center;">
+              支給予定日 <input type="date" class="decide-schedule-input" style="width:150px;">
+            </div>
+            <div class="hint-inline">承認しても保有数はまだ増えません。実際に渡したら「受渡待ち」から受渡完了を押してください。</div>
             <div class="qual-verify-btns">
               <button type="button" class="approve-btn decide-approve-btn">承認する</button>
               <button type="button" class="reject-btn decide-reject-btn">却下する</button>
@@ -6011,8 +6058,9 @@ async function loadSupplyRequestAdminList() {
           item_request_id: Number(item.dataset.itemRequestId), action: 'approve',
           quantity: Number(item.querySelector('.decide-qty-input').value) || 1,
           size: item.querySelector('.decide-size-input').value.trim() || null,
+          scheduled_issue_date: item.querySelector('.decide-schedule-input').value || null,
         };
-        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: [decision] }); await loadSupplyRequestAdminList(); }
+        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: [decision] }); await loadSupplyRequestAdminList(); await loadSupplyDeliveryQueue(); }
         catch (e) { window.alert(e.message || '承認に失敗しました。'); }
       });
     });
@@ -6033,13 +6081,59 @@ async function loadSupplyRequestAdminList() {
           item_request_id: Number(item.dataset.itemRequestId), action: 'approve',
           quantity: Number(item.querySelector('.decide-qty-input').value) || 1,
           size: item.querySelector('.decide-size-input').value.trim() || null,
+          scheduled_issue_date: item.querySelector('.decide-schedule-input').value || null,
         }));
-        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: decisions }); await loadSupplyRequestAdminList(); }
+        try { await rpc('admin_decide_supply_items', { p_admin_employee_code: session.employeeCode, p_decisions: decisions }); await loadSupplyRequestAdminList(); await loadSupplyDeliveryQueue(); }
         catch (e) { window.alert(e.message || '承認に失敗しました。'); }
       });
     });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+// 受渡待ち(承認済み・未受渡)の一覧。受渡完了で初めて本人の保有へ加算される。
+async function loadSupplyDeliveryQueue() {
+  const session = getSession();
+  const el = document.getElementById('supply-delivery-queue-list');
+  if (!el) return;
+  el.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_supply_pending_delivery', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { el.innerHTML = '<div class="hint">受渡待ちの支給品はありません。</div>'; return; }
+    el.innerHTML = rows.map((r) => `
+      <div class="card supply-delivery-row" data-item-request-id="${r.item_request_id}">
+        <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span class="mini-tag info">承認済み</span></div>
+        <div class="row2">${r.item_name}${r.size ? `・${r.size}` : ''}　数量${r.quantity}</div>
+        <div class="row2" style="display:flex; gap:6px; align-items:center;">
+          支給予定日 <input type="date" class="dq-schedule-input" style="width:150px;" value="${r.scheduled_issue_date ? String(r.scheduled_issue_date).slice(0, 10) : ''}">
+          <button type="button" class="secondary dq-save-schedule">予定日を保存</button>
+        </div>
+        <div class="row2 hint-inline">承認: ${r.decided_by || ''}${r.decided_at ? '（' + new Date(r.decided_at).toLocaleDateString('ja-JP') + '）' : ''}</div>
+        <div class="qual-verify-btns">
+          <button type="button" class="approve-btn dq-deliver-btn">受渡完了(本人へ渡した)</button>
+        </div>
+      </div>
+    `).join('');
+    el.querySelectorAll('.dq-save-schedule').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.supply-delivery-row');
+        const d = row.querySelector('.dq-schedule-input').value;
+        if (!d) { window.alert('支給予定日を入力してください。'); return; }
+        try { await rpc('admin_set_supply_schedule', { p_admin_employee_code: session.employeeCode, p_item_request_id: Number(row.dataset.itemRequestId), p_scheduled_issue_date: d }); await loadSupplyDeliveryQueue(); }
+        catch (e) { window.alert(e.message || '保存に失敗しました。'); }
+      });
+    });
+    el.querySelectorAll('.dq-deliver-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const row = btn.closest('.supply-delivery-row');
+        if (!window.confirm('本人へ渡したものとして受渡完了にします。本人の保有数に加算されます。よろしいですか？')) return;
+        try { await rpc('admin_mark_supply_delivered', { p_admin_employee_code: session.employeeCode, p_deliveries: [{ item_request_id: Number(row.dataset.itemRequestId) }] }); await loadSupplyDeliveryQueue(); }
+        catch (e) { window.alert(e.message || '受渡完了に失敗しました。'); }
+      });
+    });
+  } catch (e) {
+    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
@@ -11126,6 +11220,7 @@ function init() {
   SCREEN_ENTER_HOOKS['supply-request-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadSupplyRequestAdminList();
+    loadSupplyDeliveryQueue();
   };
   SCREEN_ENTER_HOOKS['my-supply'] = loadMySupply;
   SCREEN_ENTER_HOOKS.myinfo = loadMyInfo;
