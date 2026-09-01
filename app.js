@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v87-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T00:58:42.576Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v88-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T13:21:05.023Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -3700,8 +3700,36 @@ function dashCardColorClass(status, count) {
   return 'alert';
 }
 
+// 管理者HOME「今日やること」: 配置由来の要対応(要確認日報・配置あり未提出・配置未確認)＋新着申請を
+// 優先度順に表示し、件数タップで対象画面へ直接遷移する(admin_home_today_tasks RPCを集約に再利用)。
+async function renderAdminTodayTasks(session) {
+  const el = document.getElementById('admin-today-tasks');
+  if (!el) return;
+  try {
+    const rows = await rpc('admin_home_today_tasks', { p_admin_employee_code: session.employeeCode });
+    const actionable = (rows || []).filter((r) => Number(r.cnt) > 0).sort((a, b) => a.sort_order - b.sort_order);
+    if (actionable.length === 0) {
+      el.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);">今日、対応が必要なことはありません 🎉</div>';
+      return;
+    }
+    el.innerHTML = actionable.map((r) => {
+      const color = r.severity === 'urgent' ? 'var(--danger)' : (r.severity === 'attention' ? 'var(--gold, #c9a227)' : 'var(--primary)');
+      return `<button type="button" class="history-item admin-today-task" data-nav="${r.nav_screen}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;border-left:3px solid ${color};">
+        <span style="flex:1;min-width:0;">${r.label}</span>
+        <span style="font-weight:800;font-size:18px;color:${color};flex:none;">${r.cnt}</span>
+        <span aria-hidden="true" style="color:var(--muted);flex:none;">›</span>
+      </button>`;
+    }).join('');
+    el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => showScreen(btn.dataset.nav)));
+  } catch (e) {
+    // 集約が取れなくても下のカードは別途表示されるため、静かに隠す
+    el.innerHTML = '';
+  }
+}
+
 async function loadAdminDashboard() {
   const session = getSession();
+  renderAdminTodayTasks(session);
   const grid = document.getElementById('admin-dashboard-grid');
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
