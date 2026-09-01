@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v85-staging';
-const BUILD_DEPLOYED_AT = '2026-08-31T23:27:21.045Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v86-staging';
+const BUILD_DEPLOYED_AT = '2026-09-01T00:43:03.845Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -666,7 +666,9 @@ function resetRegisterSteps() {
 }
 
 async function doIdentifyForRegister() {
-  const firstCode = document.getElementById('pin-register-first-code').value.trim();
+  // 初回登録コードは大文字英数字のみ。コピペや一部キーボードで小文字・空白が混ざると
+  // bcrypt照合(サーバ側)で失敗するため、送信前に空白除去+大文字化して正規化する。
+  const firstCode = document.getElementById('pin-register-first-code').value.replace(/\s+/g, '').toUpperCase();
   hideError('pin-register-error');
   if (!firstCode) {
     showError('pin-register-error', '初回登録コードを入力してください。管理者から渡されていない場合は管理者へお問い合わせください。');
@@ -692,7 +694,9 @@ async function doIdentifyForRegister() {
 
 // 2段階目: 本人だと確認できたうえで、本人が自分の暗証番号を決める。
 async function doRegisterPin() {
-  const firstCode = document.getElementById('pin-register-first-code').value.trim();
+  // 初回登録コードは大文字英数字のみ。コピペや一部キーボードで小文字・空白が混ざると
+  // bcrypt照合(サーバ側)で失敗するため、送信前に空白除去+大文字化して正規化する。
+  const firstCode = document.getElementById('pin-register-first-code').value.replace(/\s+/g, '').toUpperCase();
   const pin = document.getElementById('pin-register-code').value.trim();
   const pinConfirm = document.getElementById('pin-register-confirm').value.trim();
   hideError('pin-register-error2');
