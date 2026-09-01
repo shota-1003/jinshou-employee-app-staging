@@ -296,9 +296,10 @@
 /* 情報行は必ず1行に収める。折り返すと固定領域の高さが日によって変わり、
    その下の操作ボタンの位置がずれてしまう(画面の30%を超えることもあった)。
    ここはタップ対象ではない表示専用の行なので、横スクロールにしても誤タップは起きない。 */
+/* 2026-09-01: 横スクロールをやめて折り返しにした。1行に詰め込むと狭い機種で
+   「時間重複」「確認」が画面外へ出てしまい、実機で見えないという指摘があった。 */
 .ac-dayinfo {
-  display: flex; align-items: center; gap: 5px; flex-wrap: nowrap; min-height: 22px;
-  overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  display: flex; align-items: center; gap: 4px 5px; flex-wrap: wrap; min-height: 22px;
 }
 .ac-dayinfo::-webkit-scrollbar { display: none; }
 .ac-dayinfo > * { flex: 0 0 auto; }
@@ -380,8 +381,8 @@
 .ac-bodywrap { padding-bottom: var(--ac-safe-bottom); }
 
 /* ---------------- 警告 ---------------- */
-.ac-issues { padding: 6px 8px; background: #fff8e1; border-bottom: 1px solid #e8d9a0; }
-.ac-issue { font-size: 12px; line-height: 1.5; }
+.ac-issues { padding: 4px 8px; background: #fff8e1; border-bottom: 1px solid #e8d9a0; }
+.ac-issue { font-size: 11.5px; line-height: 1.35; }
 .ac-issue::before { content: "▲ "; }
 .ac-issue.ac-error { color: #b3261e; font-weight: 600; }
 .ac-issue.ac-error::before { content: "● "; }
@@ -697,8 +698,9 @@
 .ac-leadbtn.ac-on { background: #12213f; border-color: #12213f; color: #f2c022; }
 
 /* 上部の人数。2段に分けて、狭い画面でも右端が切れないようにする。 */
-.ac-hcrow { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
-.ac-hcrow2 { margin-top: 2px; }
+/* ラッパーは折り返しの邪魔をしないよう透過させ、バッジを親の行へ直接流す。
+   こうすると入るところまで1行に入り、入らない分だけ次の行へ落ちる。 */
+.ac-hcrow { display: contents; }
 .ac-hc {
   font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
   border: 1px solid var(--ac-line); background: #f1f4f8; color: #33405a; white-space: nowrap;
@@ -716,3 +718,9 @@
 .ac-issue.ac-issue-tap { cursor: pointer; }
 .ac-issue.ac-issue-tap:active { background: rgba(0, 0, 0, .05); }
 .ac-issuego { font-weight: 800; color: #12213f; margin-left: 6px; white-space: nowrap; }
+
+/* 現場名は最優先で読ませる。バッジ(人数・職長・種別・確認)が増えても
+   名前が縦書きのように潰れないよう、名前は必ず1行まるごと使い、
+   バッジはその下の行へ折り返す。 */
+.ac-schedtop, .ac-sitehead { flex-wrap: wrap; row-gap: 3px; }
+.ac-schedname { flex: 1 1 100%; min-width: 0; overflow-wrap: anywhere; }
