@@ -33,6 +33,25 @@
     const DOW_JP = ['日', '月', '火', '水', '木', '金', '土'];
     const CACHE_KEY = 'assignment_calendar_my_cache';
 
+    // 職長は assignment_members.role へ文字列で入る。サーバー側の警告判定
+    // (assignment_validate_day の no_leader)が role ILIKE '%職長%' を見ているため、
+    // 画面から付ける文字列もここに固定して両者がずれないようにする。
+    const LEADER_ROLE = '職長';
+    function isLeaderRole(role) { return !!role && String(role).includes(LEADER_ROLE); }
+
+    // 人の区分。色だけに頼らず必ず文字も出す(色覚差への配慮)。
+    // 自社/外注 × 職人/事務/運搬 の5通りに整理し、増やしすぎない。
+    function memberRoleTag(m) {
+        const isSub = m.member_type === 'subcontractor' || m.member_type === 'subcontractor_company';
+        if ((m.assignment_kind || 'work') === 'haul') {
+            return isSub ? { key: 'sub-haul', label: '外注運搬' } : { key: 'own-haul', label: '運搬' };
+        }
+        if (isSub) return { key: 'sub-field', label: '外注' };
+        return (m.work_category === 'office')
+            ? { key: 'own-office', label: '事務' }
+            : { key: 'own-field', label: '職人' };
+    }
+
     // ---------------------------------------------------------------
     // 小さなユーティリティ
     // ---------------------------------------------------------------
@@ -671,41 +690,51 @@
             }
             if (day && day.holiday) title.append(el('span', 'ac-hol', day.holiday));
             info.append(title);
-            // 「社員19｜外注6｜計25人」。すべて配置データからの自動集計。
+            // 人数は2段に分ける。狭いスマホで1行に詰め込むと右端が切れて
+            // 「時間重複」「確認」が見えなくなるため(実機で確認済み)。
+            //   1段目: 職人35 / 事務2 / 運搬5 / 計42   ← まず知りたいのは役割
+            //   2段目: 自社25 / 外注17 と 重複・確認    ← 所属の内訳は補助
+            // どの数も同じ人を二度数えない(サーバー側で employee_id 単位に1区分へ寄せている)。
             if (day && day.headcount && day.headcount.total > 0) {
                 const h = day.headcount;
-                const badge = el('span', 'ac-badge ac-hcbadge',
-                    `社員${h.employees}｜外注${h.subcontractors}｜計${h.total}人`);
-                badge.title = '休み・有給・会議など現場配置ではない予定は含みません。'
-                    + '二重配置の社員は1人として数え、外注は登録された人数で数えます。';
-                info.append(badge);
-                // 運搬要員 = その日「運搬だけ」で配置された人。
-                // 材料を運んでそのまま現場で働く人は運搬要員ではなく作業員なので、
-                // ここには出さない(社員数には1人として入っている)。
-                if (h.haul_only > 0) {
-                    const hb = el('span', 'ac-badge ac-haul', `🚚運搬要員${h.haul_only}`);
-                    hb.title = '運搬だけのために配置された人の数です。'
-                        + '材料を運んでそのまま現場で働く人は作業員として社員数に入っており、ここには含めません。';
-                    info.append(hb);
-                }
+                const roleRow = el('div', 'ac-hcrow');
+                const put = (cls, label, n, tip) => {
+                    if (!n) return;
+                    const b = el('span', `ac-hc ${cls}`, `${label}${n}`);
+                    b.title = tip;
+                    roleRow.append(b);
+                };
+                put('ac-hc-craft', '職人', h.craft, '現場に出る職人の人数(自社＋外注)。同じ人が複数現場に入っていても1人として数えます。');
+                put('ac-hc-office', '事務', h.office, '事務・営業・管理など現場作業以外の人数。');
+                put('ac-hc-haul', '運搬', h.haul, '運搬だけを担当する人の数。運んでそのまま現場で働く人は職人として数え、ここには入れません。');
+                roleRow.append(el('span', 'ac-hc ac-hc-total', `計${h.total}人`));
+                info.append(roleRow);
+
+                const subRow = el('div', 'ac-hcrow ac-hcrow2');
+                const own = el('span', 'ac-hc ac-hc-own', `自社${h.employees}`);
+                own.title = '自社社員の実人数。二重配置されていても1人として数えます。';
+                const sub = el('span', 'ac-hc ac-hc-sub', `外注${h.subcontractors}`);
+                sub.title = '外注の人数。会社まとめの行は登録された人数で数えます。';
+                subRow.append(own, sub);
                 if (h.double_booked > 0) {
-                    const db = el('span', 'ac-badge ac-warn', `⚠時間重複${h.double_booked}`);
+                    const db = el('span', 'ac-hc ac-hc-warn', `⚠時間重複${h.double_booked}`);
                     db.title = '同じ社員の時間帯が重なっている人数。午前A現場→午後B現場のように重なっていない移動は数えません。';
-                    info.append(db);
+                    subRow.append(db);
                 }
-            }
-            if (state.confirmation && Number(state.confirmation.total) > 0) {
-                const c = state.confirmation;
-                const okAll = Number(c.confirmed) === Number(c.total);
-                // 母数は社員のみ(外注はポータルのアカウントを持たないため確認できない)
-                const b = el('span', 'ac-badge' + (okAll ? ' ac-ok' : ' ac-warn'), `確認${c.confirmed}/${c.total}`);
-                b.title = '確認できるのは社員のみです。外注は母数に含めていません。';
-                info.append(b);
-                if (Number(c.important_total) > 0) {
-                    const okImp = Number(c.important_confirmed) === Number(c.important_total);
-                    info.append(el('span', 'ac-badge' + (okImp ? ' ac-ok' : ' ac-warn'),
-                        `重要${c.important_confirmed}/${c.important_total}`));
+                if (state.confirmation && Number(state.confirmation.total) > 0) {
+                    const c = state.confirmation;
+                    const okAll = Number(c.confirmed) === Number(c.total);
+                    // 母数は社員のみ(外注はポータルのアカウントを持たないため確認できない)
+                    const b = el('span', 'ac-hc' + (okAll ? ' ac-hc-ok' : ' ac-hc-warn'), `確認${c.confirmed}/${c.total}`);
+                    b.title = '確認できるのは社員のみです。外注は母数に含めていません。';
+                    subRow.append(b);
+                    if (Number(c.important_total) > 0) {
+                        const okImp = Number(c.important_confirmed) === Number(c.important_total);
+                        subRow.append(el('span', 'ac-hc' + (okImp ? ' ac-hc-ok' : ' ac-hc-warn'),
+                            `重要${c.important_confirmed}/${c.important_total}`));
+                    }
                 }
+                info.append(subRow);
             }
             head.append(info);
 
@@ -735,6 +764,17 @@
                     const line = el('div', 'ac-issue ac-' + i.severity, i.message);
                     // 意図した複数現場配置なら承認して警告から外せるようにする。
                     // 本当に危険な二重配置が警告の山に埋もれないようにするため。
+                    // 「職長が指定されていません」は押すとその現場の編集が開く。
+                    // 警告だけ出して直す場所が無い状態にしない。
+                    if (i.rule === 'no_leader') {
+                        const target = (state.day_data && state.day_data.schedules || [])
+                            .find((s2) => s2.label === i.label || (i.message || '').includes(s2.label));
+                        if (target) {
+                            line.classList.add('ac-issue-tap');
+                            line.append(el('span', 'ac-issuego', '職長を決める ›'));
+                            line.addEventListener('click', () => openEntrySheet(target));
+                        }
+                    }
                     if (i.rule === 'double_booking' && i.employee_code) {
                         const row = el('div', 'ac-issuebtns');
                         const b = el('button', 'ac-btn ac-sm', '意図した配置として承認');
@@ -855,6 +895,13 @@
                 ? `作業 社員 ${s.employee_count}人 / 外注 ${s.subcontractor_count}人`
                 : `作業 社員 ${s.employee_count}人`;
             top.insertBefore(cnt, top.children[1] || null);
+            // 職長は現場を回すうえで最初に見たい情報なので、現場名の帯に出す。
+            const leader = (s.members || []).find((m) => isLeaderRole(m.role));
+            if (leader) {
+                const lb = el('span', 'ac-badge ac-leadbadge', `職長 ${leader.short_name || leader.name}`);
+                lb.title = 'この現場の職長';
+                top.insertBefore(lb, top.children[2] || null);
+            }
             if (s.haul_count > 0) {
                 const hb = el('span', 'ac-badge ac-haul', `🚚${s.haul_count}`);
                 hb.title = 'この現場へ運搬で入っている人数です。作業人数とは別に数えています。';
@@ -881,14 +928,17 @@
                 const confirmed = m.notification_status === 'confirmed';
                 const waiting = m.notification_status === 'notified';
                 const haul = m.assignment_kind === 'haul';
-                const chip = el('span', 'ac-mem'
+                const tag = memberRoleTag(m);
+                const chip = el('span', 'ac-mem ac-role-' + tag.key
                     + (confirmed ? ' ac-confirmed' : (waiting ? ' ac-unconfirmed' : ''))
                     + (haul ? ' ac-haulmem' : '')
                     + (m.member_type === 'subcontractor' ? ' ac-sub' : ''), '');
-                // 色だけに頼らず、アイコン+文字で運搬と分かるようにする
-                if (haul) chip.append(el('span', 'ac-haulmark', '🚚運搬'));
+                // 色だけに頼らず、必ず文字でも区分が分かるようにする(色覚差への配慮)。
+                if (haul) chip.append(el('span', 'ac-haulmark', '🚚'));
+                chip.append(el('span', 'ac-rtag', tag.label));
                 chip.append(document.createTextNode(m.name || '(不明)'));
-                if (m.role) chip.append(el('span', 'ac-role', m.role));
+                if (isLeaderRole(m.role)) chip.append(el('span', 'ac-leadtag', '職長'));
+                else if (m.role) chip.append(el('span', 'ac-role', m.role));
                 // 現場と違う時間の人だけ時間を出す(全員に付けると一覧性が落ちる)
                 if (!m.is_allday && (m.start_time || m.end_time || haul)) {
                     chip.append(el('span', 'ac-mt', m.time_label));
@@ -969,8 +1019,13 @@
                 if (emps.length) {
                     const wrap2 = el('div', 'ac-members');
                     for (const m of emps) {
-                        const chip = el('span', 'ac-mem' + (m.notification_status === 'confirmed' ? ' ac-confirmed' : ''), m.name);
-                        if (m.role) chip.append(el('span', 'ac-role', m.role));
+                        const dtag = memberRoleTag(m);
+                        const chip = el('span', 'ac-mem ac-role-' + dtag.key
+                            + (m.notification_status === 'confirmed' ? ' ac-confirmed' : ''), '');
+                        chip.append(el('span', 'ac-rtag', dtag.label));
+                        chip.append(document.createTextNode(m.name));
+                        if (isLeaderRole(m.role)) chip.append(el('span', 'ac-leadtag', '職長'));
+                        else if (m.role) chip.append(el('span', 'ac-role', m.role));
                         // 誰が何時から何時までいるのかは、詳細では必ず出す
                         chip.append(el('span', 'ac-mt', m.time_label || '終日'));
                         // 「1人を別の現場へ移す」操作はここに置く。
@@ -1819,8 +1874,19 @@
                     const nm = el('div', 'ac-mrowname', m.name);
                     const tm = el('button', 'ac-mrowtime', memberTimeText(m));
                     tm.addEventListener('click', () => openMemberTimeSheet(m, renderDetailRows));
-                    row.append(nm, tm);
-                    if (m.role) row.append(el('span', 'ac-role', m.role));
+                    // 職長はここで直接切り替えられるようにする。以前は「役割（任意）」の
+                    // 自由入力に「職長」と打つしかなく、警告(職長が指定されていません)は
+                    // 出るのに指定する場所が見つからない状態だった。
+                    // 保存先はこれまでどおり role なので、集計・警告の判定は変えていない。
+                    const lead = el('button', 'ac-leadbtn' + (isLeaderRole(m.role) ? ' ac-on' : ''), '職長');
+                    lead.title = '職長にする / 解除する';
+                    lead.addEventListener('click', () => {
+                        m.role = isLeaderRole(m.role) ? '' : LEADER_ROLE;
+                        renderDetailRows();
+                    });
+                    row.append(nm, tm, lead);
+                    // 職長以外の役割(手元・レッカー等)を入れている場合はそのまま出す
+                    if (m.role && !isLeaderRole(m.role)) row.append(el('span', 'ac-role', m.role));
                     detailRows.append(row);
                 }
                 if (!work.length) detailRows.append(el('div', 'ac-schedmeta', '社員を選ぶとここに表示されます'));

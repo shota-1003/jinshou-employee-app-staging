@@ -634,3 +634,85 @@
 .ac-pickrow:active { background: #eef1f5; }
 .ac-pickname { font-size: 15px; font-weight: 700; color: var(--ac-fg); }
 .ac-picktime { font-size: 13px; color: var(--ac-muted); margin-top: 2px; }
+
+/* ============================================================
+   2026-09-01 実機フィードバック対応
+   ・現場ごとの左端の色帯が細くて識別しにくい(LifeBear比)
+   ・人の区分(自社職人/事務/運搬/外注)が色でも文字でも分からない
+   ・職長を指定する場所が無い
+   ・上部の人数が1行に詰め込まれて右が切れる
+   文字は小さくせず、余白を詰めて1画面に入る現場数を増やす方針。
+   ============================================================ */
+
+/* 左端のカテゴリー色帯を太くし、現場の切れ目をはっきりさせる。
+   月表示のチップと同じ色なので、月→日で同じ現場が同じ色で追える。 */
+.ac-sched {
+  border-left-width: 10px;
+  border-bottom: 2px solid #e3e7ee;
+  padding: 4px 8px 5px 8px;
+}
+.ac-sched + .ac-sched { margin-top: 3px; }
+
+/* 現場名を最優先で読ませる。人数・種別・確認は脇役として少し小さくする。 */
+.ac-schedname { font-size: 15px; line-height: 1.25; }
+.ac-sched .ac-badge { font-size: 10px; padding: 1px 5px; }
+.ac-sched .ac-schedmeta { margin: 1px 0 2px; }
+.ac-members { gap: 2px; margin-top: 3px; }
+
+/* 人の区分。色の面積は小さく保ち、必ず短い文字ラベルを添える。
+   色だけで判断させない(色覚差・屋外の直射日光下でも読めるように)。 */
+.ac-mem .ac-rtag {
+  font-size: 9.5px; font-weight: 800; letter-spacing: .02em;
+  padding: 1px 4px; border-radius: 3px; margin-right: 4px;
+  background: rgba(0, 0, 0, .07); color: #33405a; white-space: nowrap;
+}
+.ac-mem.ac-role-own-field  { background: #eef3fb; border-color: #b9cbe6; }
+.ac-mem.ac-role-own-field  .ac-rtag { background: #d3e1f5; color: #14356b; }
+.ac-mem.ac-role-own-office { background: #f2eefb; border-color: #c7bce4; }
+.ac-mem.ac-role-own-office .ac-rtag { background: #ddd2f5; color: #3d2a72; }
+.ac-mem.ac-role-own-haul   { background: #e6f4f1; border-color: #9fcfc4; }
+.ac-mem.ac-role-own-haul   .ac-rtag { background: #c7e7df; color: #0f5b4d; }
+.ac-mem.ac-role-sub-field  { background: #fbf1e4; border-color: #dcc3a2; }
+.ac-mem.ac-role-sub-field  .ac-rtag { background: #f0dcc0; color: #7a4510; }
+.ac-mem.ac-role-sub-haul   { background: #f7efe2; border-color: #d3bfa0; }
+.ac-mem.ac-role-sub-haul   .ac-rtag { background: #e6d3b4; color: #6b4a14; }
+/* 確認済み・未確認は枠線の左端で示し、区分の色を潰さない */
+.ac-mem.ac-confirmed { box-shadow: inset 3px 0 0 #2e9e5b; }
+.ac-mem.ac-unconfirmed { box-shadow: inset 3px 0 0 #d98324; }
+
+/* 職長。現場名の帯にも社員チップにも同じ見た目で出す。 */
+.ac-leadtag, .ac-badge.ac-leadbadge {
+  background: #12213f; color: #f2c022; font-weight: 800;
+}
+.ac-leadtag {
+  font-size: 9.5px; padding: 1px 5px; border-radius: 3px; margin-left: 4px; white-space: nowrap;
+}
+.ac-badge.ac-leadbadge { border-color: #12213f; }
+/* 編集画面の「職長」切り替えボタン */
+.ac-leadbtn {
+  appearance: none; border: 1px solid var(--ac-line-strong); background: #fff;
+  color: var(--ac-muted); font-size: 11px; font-weight: 700; font-family: inherit;
+  border-radius: 4px; padding: 5px 9px; min-height: 32px; cursor: pointer; white-space: nowrap;
+}
+.ac-leadbtn.ac-on { background: #12213f; border-color: #12213f; color: #f2c022; }
+
+/* 上部の人数。2段に分けて、狭い画面でも右端が切れないようにする。 */
+.ac-hcrow { display: flex; flex-wrap: wrap; gap: 3px; align-items: center; }
+.ac-hcrow2 { margin-top: 2px; }
+.ac-hc {
+  font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 3px;
+  border: 1px solid var(--ac-line); background: #f1f4f8; color: #33405a; white-space: nowrap;
+}
+.ac-hc-craft { background: #d3e1f5; border-color: #a9c3e6; color: #14356b; }
+.ac-hc-office { background: #ddd2f5; border-color: #bfaee6; color: #3d2a72; }
+.ac-hc-haul { background: #c7e7df; border-color: #93c8bb; color: #0f5b4d; }
+.ac-hc-total { background: #12213f; border-color: #12213f; color: #fff; }
+.ac-hc-own { background: #eef3fb; border-color: #b9cbe6; }
+.ac-hc-sub { background: #fbf1e4; border-color: #dcc3a2; color: #7a4510; }
+.ac-hc-warn { background: #fde8d8; border-color: #e9b98a; color: #8a4b12; }
+.ac-hc-ok { background: #dff1e5; border-color: #9fd3b2; color: #1c6b3c; }
+
+/* 職長未指定の警告は押せる。押した先でその現場の編集が開く。 */
+.ac-issue.ac-issue-tap { cursor: pointer; }
+.ac-issue.ac-issue-tap:active { background: rgba(0, 0, 0, .05); }
+.ac-issuego { font-weight: 800; color: #12213f; margin-left: 6px; white-space: nowrap; }
