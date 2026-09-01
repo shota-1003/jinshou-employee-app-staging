@@ -372,9 +372,12 @@
             // 見えることが目的なので、日付だけの帯にはしない。
             const shown = list.slice(0, maxChips);
             for (const x of shown) {
-                const chip = el('div', 'ac-wchip', shortLabel(x.label));
-                chip.style.background = x.color || '#1a73e8';
-                chip.title = x.label;
+                // 週ストリップも月表示・日別と同じ色ルールにそろえる。
+                // 下請け請負だけは専用色にして、どの画面でも同じ見え方にする。
+                const c = x.is_subcontracted ? SUBCONTRACT_COLOR : (x.color || '#1a73e8');
+                const chip = el('div', 'ac-wchip', (x.is_subcontracted ? '下請 ' : '') + shortLabel(x.label));
+                chip.style.background = c;
+                chip.title = x.label + (x.is_subcontracted ? '（下請け請負）' : '');
                 cell.append(chip);
             }
             if (list.length > shown.length) {
