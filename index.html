@@ -1687,6 +1687,20 @@
     <div id="admin-search-results"></div>
   </section>
 
+  <!-- 暗証番号リセット専用(支給品と完全分離) -->
+  <section id="screen-pin-reset-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">暗証番号のリセット</div>
+    <div class="hint" style="margin-bottom:12px;">社員本人からの暗証番号の再設定依頼に対応します。本人確認のうえリセットし、表示される初回登録コードを本人へお伝えください。本人が次回ログイン時に新しい暗証番号を設定します。</div>
+    <div class="card">
+      <label for="pra-employee-select">対象社員</label>
+      <select id="pra-employee-select"></select>
+      <div id="pra-employee-detail" class="field-group" style="margin:8px 0;"></div>
+      <button type="button" id="pra-reset-btn">この社員の暗証番号をリセットする</button>
+      <div class="hint-inline" id="pra-reset-status"></div>
+    </div>
+  </section>
+
   <!-- 管理者ダッシュボード -->
   <section id="screen-admin-dashboard" class="screen">
     <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
@@ -2894,15 +2908,17 @@
       <label for="employee-edit-department">所属/役割</label>
       <input type="text" id="employee-edit-department">
 
-      <label for="employee-edit-headcount-category">人数集計区分</label>
+      <label for="employee-edit-headcount-category">基本役割(人数集計区分)</label>
       <select id="employee-edit-headcount-category">
         <option value="">自動判定(所属から推測)</option>
         <option value="craft">職人</option>
         <option value="office">事務</option>
         <option value="sales">営業</option>
+        <option value="doba">土場</option>
+        <option value="haul">運搬</option>
         <option value="other">その他</option>
       </select>
-      <div class="hint-inline">配置カレンダー上部の人数(職人/事務/営業/…)をどこに数えるかです。1日の売上を実働人数で割る指標に使うため、所属名の推測ではなくここで決めます。ただしその日に現場作業が入っていれば、この設定に関わらず職人として数えます。</div>
+      <div class="hint-inline">その社員がふだん何として数えられるかです。配置カレンダーで配置したときの当日役割の初期値になり、上部の人数(職人/事務/営業/土場/運搬/…)にもここで決めた区分で入ります。1日の売上を実働人数で割る指標に使うため、所属名の推測ではなくここで決めます。事務仕事・営業活動・運搬・土場のように役割が決まっている種別で配置した日は、その種別が優先されます。その日だけ変えたい場合は、配置カレンダーの日別画面で名前を押して「当日の役割を変える」を使ってください(社員マスターは変わりません)。この設定は配置カレンダーの「⚙カレンダー設定 → 社員の基本役割」と同じ社員マスターを見ています。</div>
 
       <div class="section-title">日報の入力項目(対象者だけに表示されます)</div>
       <div class="hint-inline">氏名ではなくこの設定で対象者を判定します。ここで許可した社員だけ、日報にその項目が表示されます。</div>

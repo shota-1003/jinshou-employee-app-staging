@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v113-staging';
-const BUILD_DEPLOYED_AT = '2026-09-02T14:45:25.585Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v115-staging';
+const BUILD_DEPLOYED_AT = '2026-09-02T15:16:36.017Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -259,7 +259,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
-  'first-login-codes-admin',
+  'first-login-codes-admin', 'pin-reset-admin',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -3403,6 +3403,55 @@ async function doAdminResetPin() {
   }
 }
 
+// 暗証番号リセット専用画面(支給品と完全分離)。対象社員の 社員番号・氏名 を表示し、
+// 本人確認のうえリセット→初回登録コードを表示する。PIN通知のdeep-linkはこの画面へ来る。
+let pendingPinResetPreselectId = null;
+async function loadPinResetAdmin() {
+  const session = getSession();
+  const sel = document.getElementById('pra-employee-select');
+  document.getElementById('pra-reset-status').textContent = '';
+  document.getElementById('pra-employee-detail').innerHTML = '';
+  try {
+    const rows = await rpc('list_active_employees', { p_admin_employee_code: session.employeeCode });
+    sel.innerHTML = '<option value="">社員を選択してください</option>' + rows.map((e) => `<option value="${e.employee_code}" data-id="${e.id != null ? e.id : ''}">${e.employee_code} ${e.employee_name}</option>`).join('');
+    if (pendingPinResetPreselectId != null) {
+      const opt = Array.from(sel.options).find((o) => String(o.dataset.id) === String(pendingPinResetPreselectId));
+      if (opt) { sel.value = opt.value; }
+      pendingPinResetPreselectId = null;
+    }
+    renderPinResetAdminDetail();
+  } catch (e) {
+    document.getElementById('pra-employee-detail').innerHTML = '<div class="hint">社員一覧の読み込みに失敗しました。</div>';
+  }
+}
+function renderPinResetAdminDetail() {
+  const sel = document.getElementById('pra-employee-select');
+  const detailEl = document.getElementById('pra-employee-detail');
+  const opt = sel.selectedOptions[0];
+  if (!sel.value || !opt) { detailEl.innerHTML = '<div class="hint">対象の社員を選択してください。</div>'; return; }
+  const name = opt.textContent.replace(/^\S+\s/, '');
+  detailEl.innerHTML = `
+    <div class="field-row"><span class="field-label">社員番号</span><span class="field-value">${sel.value}</span></div>
+    <div class="field-row"><span class="field-label">氏名</span><span class="field-value">${name}</span></div>`;
+}
+async function doPinResetAdmin() {
+  const session = getSession();
+  const targetCode = document.getElementById('pra-employee-select').value;
+  const statusEl = document.getElementById('pra-reset-status');
+  if (!targetCode) { statusEl.style.color = 'var(--danger)'; statusEl.textContent = '対象の社員を選択してください。'; return; }
+  if (!confirm(`社員番号${targetCode}の暗証番号をリセットします。現在の暗証番号は使えなくなり、新しい初回登録コードを本人へ伝える必要があります。よろしいですか？`)) return;
+  statusEl.textContent = '';
+  try {
+    const r = await rpc('admin_reset_employee_pin', { p_admin_employee_code: session.employeeCode, p_target_employee_code: targetCode });
+    const info = r[0];
+    statusEl.style.color = 'var(--success)';
+    statusEl.innerHTML = `リセットしました。初回登録コード: <b style="font-size:16px; letter-spacing:1px;">${info.out_code}</b>(このコードはこの画面を離れると二度と表示できません。今すぐ本人へお伝えください。有効期限: ${new Date(info.out_expires_at).toLocaleDateString('ja-JP')})`;
+  } catch (e) {
+    statusEl.textContent = 'リセットに失敗しました: ' + e.message;
+    statusEl.style.color = 'var(--danger)';
+  }
+}
+
 async function doAdminRecordIssuance() {
   const session = getSession();
   const targetCode = document.getElementById('admin-issue-employee').value;
@@ -3819,11 +3868,11 @@ async function announceDeepLink(announcementId) {
     openMyRequestDetail(t.target_id, 'announcements');
     return;
   }
-  // item4: 暗証番号再設定依頼(related_type='employees')は、管理者の社員管理(PINリセット)画面へ直接遷移し、
-  // 対象社員を自動選択する。管理者は本人確認のうえ「この社員の暗証番号をリセットする」を実行できる。
+  // 暗証番号再設定依頼(related_type='employees')は、支給品と完全に分離した「暗証番号のリセット」専用画面へ
+  // 直接遷移し、対象社員を自動選択する。支給品のUI/route/componentは一切経由しない。
   if (t.related_type === 'employees' && t.target_id) {
-    pendingAdminPreselectEmployeeId = Number(t.target_id);
-    showScreen('admin');
+    pendingPinResetPreselectId = Number(t.target_id);
+    showScreen('pin-reset-admin');
     return;
   }
   showScreen('announcements');
@@ -3872,7 +3921,7 @@ async function loadAnnouncements(includeArchived) {
         <div class="body">${a.body}${a.attachment_url ? `<br><a href="${a.attachment_url}" target="_blank" rel="noopener">添付ファイルを開く</a>` : ''}</div>
         ${a.related_type === 'employee_requests' ? `<button type="button" class="secondary announce-detail-btn" data-request-id="${a.related_id}">この申請の詳細を見る</button>` : ''}
         ${a.related_type === 'assignment_member' ? `<button type="button" class="secondary announce-assign-btn">配置を確認する</button>` : ''}
-        ${a.related_type === 'employees' ? `<button type="button" class="secondary announce-admin-btn">社員管理で対応する</button>` : ''}
+        ${a.related_type === 'employees' ? `<button type="button" class="secondary announce-admin-btn">暗証番号のリセットへ</button>` : ''}
         ${a.importance !== 'normal' ? `
           <div class="announce-ack-row">
             ${a.acknowledged_at
@@ -9585,10 +9634,36 @@ function applyDrmCardFilter(cardKey) {
 }
 
 function drmGroupKey(r) {
-  // 外注(応援)は作業員名を持たないため、従来キー(worker_name)だと同日の別会社・別現場が
-  // 1カードに束ねられていた。外注は日報行(id)ごとに独立カードにし、会社×現場×勤務区分を分ける。
-  if (r.worker_type === 'subcontractor') return `${r.report_date}|sc|${r.id}`;
+  // 外注(応援): 会社×現場×日付で1カードに集約する(終日/午前/午後の勤務区分は同じカード内に
+  // まとめ、人数合計・人工合計で表示する。3枚に分けない)。別会社または別現場は別カード。
+  // 作業員紐付けの旧モデル(subcontractor_worker_id)がある行は、作業員単位で分ける。
+  if (r.worker_type === 'subcontractor') {
+    if (r.subcontractor_worker_name) return `${r.report_date}|scw|${r.id}`;
+    const co = r.subcontractor_company_id != null ? r.subcontractor_company_id : 'x';
+    // admin_search_daily_reports は site_name(=COALESCE(sites.site_name, site_raw_name))を返す。
+    // site_id が無い(新規/未マージ現場)場合は現場名で区別する。
+    const site = r.site_id != null ? 's' + r.site_id : 'n' + (r.site_name || r.site_raw_name || '');
+    return `${r.report_date}|sc|${co}|${site}`;
+  }
   return `${r.report_date}|${r.worker_type}|${r.employee_code}`;
+}
+// 外注カードの集約サマリー: 会社名・現場・勤務区分別人数(終日/午前/午後)・人数合計・人工合計。
+function drmSubcontractorSummary(rows) {
+  const active = rows.filter((r) => r.report_status !== 'cancelled');
+  const use = active.length ? active : rows;
+  const co = use[0].subcontractor_company_name || '会社未設定・要修正';
+  const site = use[0].site_name || use[0].site_raw_name || '(現場不明)';
+  const slotLabel = { '終日': '終日', '午前': '午前', '午後': '午後' };
+  const bySlot = {};
+  let people = 0, manDays = 0;
+  use.forEach((r) => {
+    const n = r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) : 0;
+    people += n; manDays += Number(r.headcount || 0);
+    const k = slotLabel[r.work_type] || r.work_type || '';
+    bySlot[k] = (bySlot[k] || 0) + n;
+  });
+  const slots = Object.entries(bySlot).filter(([, n]) => n > 0).map(([k, n]) => `${k}${n}名`).join('・');
+  return { co, site, slots, people, manDays: Math.round(manDays * 100) / 100 };
 }
 
 async function loadDailyReportManagementList() {
@@ -9701,8 +9776,17 @@ function renderDrmAll() {
 
   listEl.innerHTML = groupList.map((g) => {
     const f = g.first;
-    const personName = drmWorkerLabel(f);
-    const sites = g.rows.map((r) => `${r.site_name || '(現場不明)'}・${r.work_type || ''}`).join(' / ');
+    const isSc = f.worker_type === 'subcontractor' && !f.subcontractor_worker_name;
+    let personName, sites;
+    if (isSc) {
+      // 外注(応援): 会社×現場で1カード。勤務区分別人数・人数合計・人工合計を集約表示。
+      const s = drmSubcontractorSummary(g.rows);
+      personName = `外注（応援） ${s.co}`;
+      sites = `${s.site}｜${s.slots || '-'}｜人数${s.people}名 / ${s.manDays}人工`;
+    } else {
+      personName = drmWorkerLabel(f);
+      sites = g.rows.map((r) => `${r.site_name || r.site_raw_name || '(現場不明)'}・${r.work_type || ''}`).join(' / ');
+    }
     const statusBadgeClass = f.report_status === 'confirmed' ? 'done' : (f.report_status === 'rejected' ? 'rejected' : '');
     return `
       <div class="history-item" data-key="${g.key}">
@@ -11397,6 +11481,8 @@ function init() {
   document.getElementById('admin-issue-submit').addEventListener('click', doAdminRecordIssuance);
   document.getElementById('admin-search-btn').addEventListener('click', doAdminSearch);
   document.getElementById('admin-reset-pin-btn').addEventListener('click', doAdminResetPin);
+  document.getElementById('pra-employee-select').addEventListener('change', renderPinResetAdminDetail);
+  document.getElementById('pra-reset-btn').addEventListener('click', doPinResetAdmin);
 
   document.getElementById('anon-submit-btn').addEventListener('click', doSubmitAnonConsultation);
   document.getElementById('anon-thread-send').addEventListener('click', doSendAnonThreadMessage);
@@ -11868,6 +11954,10 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadAdminEmployeeSelects();
     document.getElementById('admin-search-results').innerHTML = '';
+  };
+  SCREEN_ENTER_HOOKS['pin-reset-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadPinResetAdmin();
   };
   SCREEN_ENTER_HOOKS['anon-consult'] = loadMyAnonConsultations;
   SCREEN_ENTER_HOOKS['anon-submit'] = () => { hideError('anon-submit-error'); document.getElementById('anon-content').value = ''; };
