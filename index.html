@@ -36,11 +36,19 @@
       <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
       <div class="login-company">株式会社 迅翔興業</div>
       <div class="card">
+        <div class="section-title" style="color:var(--gold);margin-bottom:8px;">社員の方</div>
         <label for="login-code">社員番号</label>
         <input type="text" id="login-code" inputmode="numeric" placeholder="例: 0001" autocomplete="off">
         <div class="hint">最初の1回だけ入力すれば、次回から社員番号の入力は不要になります(暗証番号でログインします)。</div>
         <div class="error" id="login-error">社員番号が確認できませんでした。</div>
         <button id="login-btn">次へ</button>
+      </div>
+      <!-- 外注の方の入口(社員番号入力とは別導線・仕様3)。外注ポータル(/sub/)へ遷移する。 -->
+      <div class="login-alt-sep"><span>外注の方はこちら</span></div>
+      <div class="card login-subcontractor-card">
+        <div class="section-title" style="margin-bottom:6px;">外注の方</div>
+        <div class="hint" style="margin-top:0;">外注作業員の方は、初回登録・毎日の出勤報告をこちらから行えます(社員番号は不要です)。</div>
+        <button type="button" class="secondary" id="login-subcontractor-btn">外注登録・外注ログインへ</button>
       </div>
     </div>
   </section>
@@ -355,7 +363,7 @@
         <select id="daily-report-target-type">
           <option value="self">自分</option>
           <option value="employee">他の社員(代理入力)</option>
-          <option value="subcontractor_support">外注（応援）</option>
+          <option value="subcontractor_support">外注（応援）を代理入力</option>
         </select>
         <div class="hint-inline">「外注（応援）」を選ぶと、社員の日報フォームは表示されず、外注専用の入力に切り替わります。</div>
         <div id="daily-report-target-employee-wrap" style="display:none;">
@@ -462,6 +470,11 @@
         </div>
       </div>
       <div class="hint-inline dr-sc-row-summary" style="margin-top:4px;">合計 0名 / 0人工</div>
+      <label class="checkbox-row" style="margin-top:8px;"><input type="checkbox" class="dr-sc-has-overtime"> 残業あり</label>
+      <div class="dr-sc-overtime-wrap" style="display:none;margin-top:4px;">
+        <label>残業時間</label>
+        <input type="number" class="dr-sc-overtime" inputmode="decimal" min="0" max="24" step="0.5" placeholder="例: 2">
+      </div>
       <label>備考(任意)</label>
       <input type="text" class="dr-sc-notes" placeholder="任意">
       <button type="button" class="link dr-sc-remove" style="color:var(--danger);">この外注を削除</button>
@@ -681,6 +694,7 @@
     <!-- 日付主軸: 選択した1日だけを表示。前後移動・今日・その日の件数要約。 -->
     <div class="card" id="drm-date-nav" style="margin-bottom:10px;"></div>
     <div class="card" id="drm-day-summary" style="margin-bottom:14px;"></div>
+    <div id="drm-sc-missing" style="margin-bottom:14px;"></div>
 
     <div id="drm-breakdown" style="margin-bottom:14px;"></div>
     <div class="dash-card-grid" id="drm-summary-grid" style="margin-bottom:14px;"></div>

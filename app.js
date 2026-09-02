@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v117-staging';
-const BUILD_DEPLOYED_AT = '2026-09-02T18:40:01.577Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v120-staging';
+const BUILD_DEPLOYED_AT = '2026-09-02T23:20:40.856Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7846,6 +7846,10 @@ async function addDailyReportSubcontractorLine(prefill) {
   }
   if (prefill && prefill.notes) clone.querySelector('.dr-sc-notes').value = prefill.notes;
   [fdInput, amInput, pmInput].forEach((inp) => inp.addEventListener('input', updateDrScTotals));
+  // 残業あり/なし。残業なしの場合は残業時間入力欄を出さない(仕様2)。
+  const otChk = clone.querySelector('.dr-sc-has-overtime');
+  const otWrap = clone.querySelector('.dr-sc-overtime-wrap');
+  if (otChk && otWrap) otChk.addEventListener('change', () => { otWrap.style.display = otChk.checked ? 'block' : 'none'; if (!otChk.checked) { const o = otWrap.querySelector('.dr-sc-overtime'); if (o) o.value = ''; } });
   clone.querySelector('.dr-sc-remove').addEventListener('click', () => { wrap.remove(); updateDrScTotals(); });
   document.getElementById('dr-sc-list').appendChild(clone);
   updateDrScTotals();
@@ -7897,13 +7901,17 @@ async function doSubmitSubcontractorHeadcount() {
     const fd = Number(el.querySelector('.dr-sc-fullday').value) || 0;
     const am = Number(el.querySelector('.dr-sc-am').value) || 0;
     const pm = Number(el.querySelector('.dr-sc-pm').value) || 0;
+    const otChk = el.querySelector('.dr-sc-has-overtime');
+    const otVal = (otChk && otChk.checked) ? (Number(el.querySelector('.dr-sc-overtime').value) || 0) : 0;
     if (!companyId) { showError('dr-sc-error', '外注会社を選択してください。'); return; }
     if (!siteId || siteId === '__new__') { showError('dr-sc-error', '外注の現場を選択してください。'); return; }
     if (fd + am + pm < 1) { showError('dr-sc-error', '終日・午前・午後のいずれかに人数を入力してください。'); return; }
-    // §7/§8: 1行(会社×現場)を 終日/午前/午後 の勤務区分ごとに分けて保存する(人数>0のみ)。
-    if (fd > 0) entries.push({ company_id: companyId, headcount: String(fd), site_id: siteId, work_type: '終日', is_night_shift: false, notes });
-    if (am > 0) entries.push({ company_id: companyId, headcount: String(am), site_id: siteId, work_type: '午前', is_night_shift: false, notes });
-    if (pm > 0) entries.push({ company_id: companyId, headcount: String(pm), site_id: siteId, work_type: '午後', is_night_shift: false, notes });
+    if (otChk && otChk.checked && !(otVal > 0)) { showError('dr-sc-error', '残業ありの場合は残業時間を入力してください。'); return; }
+    const ot = otVal > 0 ? String(otVal) : null;
+    // §7/§8: 1行(会社×現場)を 終日/午前/午後 の勤務区分ごとに分けて保存する(人数>0のみ)。残業は各区分へ付与。
+    if (fd > 0) entries.push({ company_id: companyId, headcount: String(fd), site_id: siteId, work_type: '終日', is_night_shift: false, overtime_hours: ot, notes });
+    if (am > 0) entries.push({ company_id: companyId, headcount: String(am), site_id: siteId, work_type: '午前', is_night_shift: false, overtime_hours: ot, notes });
+    if (pm > 0) entries.push({ company_id: companyId, headcount: String(pm), site_id: siteId, work_type: '午後', is_night_shift: false, overtime_hours: ot, notes });
   }
   if (entries.length === 0) { showError('dr-sc-error', '外注を1件以上追加してください。'); return; }
   const btn = document.getElementById('dr-sc-submit');
@@ -7944,9 +7952,20 @@ async function loadDailyReportAssignmentChips(dateStr) {
   if (!area || !row) return;
   // 本人・社員の日報のみ対象(外注作業員の代理入力は配置カレンダーの社員配置とは別)。
   if (dailyReportTarget.type === 'subcontractor') { area.style.display = 'none'; return; }
-  const code = dailyReportTarget.type === 'employee' ? dailyReportTarget.employeeCode : getSession().employeeCode;
   try {
-    const rows = normalizeSchedule(await rpc('assignment_get_my_schedule', { p_employee_code: code, p_date_from: dateStr, p_date_to: dateStr }));
+    // 代理入力(他の社員)では、対象社員本人の端末トークンが無いため assignment_get_my_schedule
+    // (対象社員コードでセッション検証)は使えない(呼ぶと管理者セッションが破棄されログイン画面へ
+    // 飛ばされる)。管理者本人を認証して対象社員の配置を返す admin 版RPCを使う。
+    let rows;
+    if (dailyReportTarget.type === 'employee') {
+      rows = (await rpc('admin_get_employee_report_site_candidates', {
+        p_admin_employee_code: getSession().employeeCode,
+        p_target_employee_code: dailyReportTarget.employeeCode,
+        p_date: dateStr,
+      })) || [];
+    } else {
+      rows = normalizeSchedule(await rpc('assignment_get_my_schedule', { p_employee_code: getSession().employeeCode, p_date_from: dateStr, p_date_to: dateStr }));
+    }
     // site_idがある配置だけをチップにする(現場未設定・休み等は日報の現場入力には使えない)。
     const withSite = rows.filter((r) => r && r.site_id && r.assignment_kind !== 'off');
     if (withSite.length === 0) { area.style.display = 'none'; row.innerHTML = ''; return; }
@@ -7971,10 +7990,18 @@ async function loadDailyReportAssignmentChips(dateStr) {
 async function loadDailyReportRecentSites() {
   const area = document.getElementById('daily-report-recent-sites');
   const row = document.getElementById('daily-report-recent-sites-row');
-  const params = dailyReportTarget.type === 'subcontractor'
-    ? { p_employee_code: null, p_worker_type: 'subcontractor', p_subcontractor_worker_id: dailyReportTarget.subcontractorWorkerId }
-    : { p_employee_code: dailyReportTarget.type === 'employee' ? dailyReportTarget.employeeCode : getSession().employeeCode, p_worker_type: 'employee', p_subcontractor_worker_id: null };
+  // get_recent_daily_report_sites はセッションを p_employee_code で検証する(その端末トークンが
+  // そのemployee_codeのものか)。代理入力で対象者コードを渡すと、呼び出している管理者本人の
+  // トークンと一致せず「セッションが確認できませんでした」→ログイン画面へ強制送還される不具合が
+  // あった。認証は必ず呼び出し元(管理者/本人)自身のコードで行い、対象の絞り込みは worker_type と
+  // p_subcontractor_worker_id で行う(既存の admin_search_daily_reports と同じ考え方)。社員の代理
+  // 入力では対象社員の履歴を出せないため、この便宜機能は出さない(配置チップが現場候補を補う)。
+  const session = getSession();
+  if (dailyReportTarget.type === 'employee') { area.style.display = 'none'; return; }
   if (dailyReportTarget.type === 'subcontractor' && !dailyReportTarget.subcontractorWorkerId) { area.style.display = 'none'; return; }
+  const params = dailyReportTarget.type === 'subcontractor'
+    ? { p_employee_code: session.employeeCode, p_worker_type: 'subcontractor', p_subcontractor_worker_id: dailyReportTarget.subcontractorWorkerId }
+    : { p_employee_code: session.employeeCode, p_worker_type: 'employee', p_subcontractor_worker_id: null };
   try {
     const rows = await rpc('get_recent_daily_report_sites', params);
     if (!rows || rows.length === 0) { area.style.display = 'none'; return; }
@@ -9478,7 +9505,60 @@ async function renderDrmDaySummary() {
         <span>取消 ${Number(s.cancelled_count || 0)}件</span><span></span>
       </div>`;
   } catch (e) { el.innerHTML = ''; }
+  renderDrmSubcontractorMissing();
 }
+
+// 外注「会社単位」の出勤報告 照合(仕様6/7/8)。配置カレンダーの会社別予定人数と、その日に届いた
+// 出勤報告人数(本人報告＋管理者の外注応援代理入力を二重計上しない照合値)を比較し、
+// 「○○会社 予定N人 報告M人 未報告K人」を一覧化する。未報告がある会社はタップで管理者が
+// 会社単位の外注応援代理入力へ直行できる(本人入力できない作業員の補完)。
+async function renderDrmSubcontractorMissing() {
+  const el = document.getElementById('drm-sc-missing');
+  if (!el) return;
+  const session = getSession();
+  try {
+    const rows = await rpc('admin_get_subcontractor_reconciliation', { p_admin_employee_code: session.employeeCode, p_report_date: drmSelectedDate });
+    const shortfall = (rows || []).filter((r) => (r.status === 'missing' || r.status === 'partial') && Number(r.planned_headcount) > Number(r.reported_headcount));
+    if (!shortfall.length) { el.innerHTML = ''; return; }
+    const totalMissing = shortfall.reduce((s, r) => s + (Number(r.planned_headcount) - Number(r.reported_headcount)), 0);
+    el.innerHTML = `
+      <div class="card" style="border-left:3px solid var(--danger,#d9534f);">
+        <div style="font-weight:700;margin-bottom:8px;color:var(--danger,#d9534f);">⚠️ 外注 出勤報告 未提出 ${shortfall.length}社（未報告 合計${totalMissing}名）</div>
+        <div class="hint" style="margin-bottom:8px;">配置あり・出勤報告が予定人数に届いていない外注会社です。タップすると会社単位で外注応援を代理入力できます。</div>
+        <div id="drm-sc-missing-list"></div>
+      </div>`;
+    const list = document.getElementById('drm-sc-missing-list');
+    list.innerHTML = shortfall.map((m) => {
+      const planned = Number(m.planned_headcount), reported = Number(m.reported_headcount), miss = planned - reported;
+      return `
+      <button type="button" class="history-item" data-cid="${m.company_id}" data-cname="${(m.company_name || '').replace(/"/g, '&quot;')}" style="width:100%;text-align:left;">
+        <div style="font-weight:600;">${m.company_name || '(会社未設定)'} <span style="color:var(--danger,#d9534f);font-weight:700;">未報告 ${miss}名</span></div>
+        <div class="hint">配置予定 ${planned}名 / 出勤報告 ${reported}名　▶ 外注応援を代理入力</div>
+      </button>`;
+    }).join('');
+    list.querySelectorAll('.history-item').forEach((btn) => {
+      btn.addEventListener('click', () => openSubcontractorSupportForCompany(Number(btn.dataset.cid), btn.dataset.cname, drmSelectedDate));
+    });
+  } catch (e) { el.innerHTML = ''; }
+}
+
+// 未報告の外注会社をタップ → 日報入力画面を「外注(応援)を代理入力」モードで開き、その会社・日付を
+// あらかじめ選んだ状態にする(会社単位・仕様2/8)。個人単位の代理入力は廃止した(仕様1/5)。
+async function openSubcontractorSupportForCompany(companyId, companyName, dateStr) {
+  dailyReportPrefillDate = dateStr;
+  showScreen('daily-report');
+  await new Promise((r) => setTimeout(r, 450));
+  const typeSelect = document.getElementById('daily-report-target-type');
+  typeSelect.value = 'subcontractor_support';
+  typeSelect.dispatchEvent(new Event('change'));
+  const dateInput = document.getElementById('daily-report-date');
+  if (dateInput) dateInput.value = dateStr;
+  // 外注応援の会社ドロップダウンは非同期に埋まるため、埋まってから対象会社を選ぶ
+  await new Promise((r) => setTimeout(r, 900));
+  const co = document.querySelector('#dr-sc-list .dr-sc-entry .dr-sc-company');
+  if (co) { co.value = String(companyId); co.dispatchEvent(new Event('change', { bubbles: true })); }
+}
+
 let drmRows = [];
 let drmSelected = new Set(); // 選択中のグループキー(report_date|personKey)
 let drmSort = { col: 'report_date', dir: 'desc' };
@@ -11459,6 +11539,9 @@ function init() {
   hydrateIcons(document);
 
   document.getElementById('login-btn').addEventListener('click', doSubmitEmployeeCode);
+  // 外注の方の入口(仕様3): 外注ポータル(/sub/)へ遷移。社員番号入力とは別導線。
+  const subBtn = document.getElementById('login-subcontractor-btn');
+  if (subBtn) subBtn.addEventListener('click', () => { window.location.href = './sub/'; });
   document.getElementById('login-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') doSubmitEmployeeCode(); });
 
   document.getElementById('pin-entry-submit').addEventListener('click', doVerifyPin);

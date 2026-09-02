@@ -1268,6 +1268,204 @@
         // -----------------------------------------------------------
         // 月の延べ人工。「月間売上 ÷ 月間人工」で1人工あたりの出来高を出すための数字。
         // 同じ社員が20日働けば20人工。1日の中で複数現場・作業+運搬でも、その日は1人工。
+        // ---------------------------------------------------------------
+        // 月次人工集計表(日付を横軸にした表)
+        //
+        // PCの広い画面では「行=社員/協力会社/現場、列=1〜31日、右端=合計」の
+        // 表で見たい、という要望。棒グラフでは「誰が何日に出たか」が読めない。
+        // 行の名前・日付ヘッダー・合計列は固定し、Excelのように位置を見失わない。
+        // スマホでは31日を無理に縮めず、従来の縦型カードのまま。必要なときだけ
+        // 「日別表を見る」で同じ表を横スクロールで開ける。
+        // ---------------------------------------------------------------
+        const MATRIX_HEAD = { employee: '社員', company: '協力会社', site: '現場', role: '区分' };
+        const MATRIX_UNIT = { employee: '人工', company: '人工', site: '人工', role: '人' };
+
+        function fmtNum(n) {
+            const v = Number(n || 0);
+            return Number.isInteger(v) ? String(v) : v.toFixed(1);
+        }
+        function dayClass(d) {
+            if (d.holiday || d.dow === 0) return ' ac-sun';
+            if (d.dow === 6) return ' ac-sat';
+            return '';
+        }
+
+        function renderMatrix(box, data, kind) {
+            const days = data.days || [];
+            const rows = data.rows || [];
+            if (!rows.length) {
+                box.append(el('div', 'ac-empty', 'この月の集計対象はありません'));
+                return;
+            }
+            const wrap = el('div', 'ac-mx');
+            const table = el('table', 'ac-mxtable');
+
+            const thead = el('thead');
+            const hr = el('tr');
+            hr.append(el('th', 'ac-mx-name', MATRIX_HEAD[kind] || ''));
+            for (const d of days) {
+                const th = el('th', 'ac-mx-day' + dayClass(d));
+                th.append(el('span', 'ac-mx-d', String(d.day)));
+                th.append(el('span', 'ac-mx-w', DOW_JP[d.dow]));
+                if (d.holiday) th.title = d.holiday;
+                hr.append(th);
+            }
+            hr.append(el('th', 'ac-mx-total', '合計'));
+            thead.append(hr);
+            table.append(thead);
+
+            const tb = el('tbody');
+            for (const row of rows) {
+                const tr = el('tr');
+                const th = el('th', 'ac-mx-name');
+                th.append(el('div', 'ac-mx-rowname', row.name));
+                if (row.sub) th.append(el('div', 'ac-mx-rowsub', row.sub));
+                tr.append(th);
+                for (const d of days) {
+                    const c = (row.cells || {})[d.date];
+                    const td = el('td', 'ac-mx-cell' + dayClass(d));
+                    if (c && c.v) {
+                        td.classList.add('ac-mx-has');
+                        td.append(el('span', 'ac-mx-v', c.v));
+                        if (c.off) td.classList.add('ac-mx-off');
+                        if (c.contract) td.classList.add('ac-mx-contract');
+                        // 同じ日に2件以上入っている印。合計は1人工のまま。
+                        if (Number(c.parts) > 1) {
+                            td.classList.add('ac-mx-multi');
+                            td.append(el('span', 'ac-mx-parts', String(c.parts)));
+                        }
+                        td.title = `${labelDate(d.date)} ${row.name}`;
+                        td.addEventListener('click', () => openMatrixCellSheet(kind, row, d));
+                    }
+                    tr.append(td);
+                }
+                const tt = el('td', 'ac-mx-total');
+                tt.append(el('div', 'ac-mx-totalnum', `${fmtNum(row.total)} ${MATRIX_UNIT[kind]}`));
+                if (row.total_sub) tt.append(el('div', 'ac-mx-totalsub', row.total_sub));
+                tr.append(tt);
+                tb.append(tr);
+            }
+            table.append(tb);
+            wrap.append(table);
+            box.append(wrap);
+        }
+
+        // 表の1マスを押したときの内訳。
+        async function openMatrixCellSheet(kind, row, day) {
+            let d = null;
+            try {
+                d = await rpc('assignment_get_matrix_cell', {
+                    p_employee_code: me, p_date: day.date, p_kind: kind, p_key: row.key,
+                });
+            } catch (e) { fail(e); return; }
+
+            sheet(`${row.name}　${labelDate(day.date)}`, (box) => {
+                const list = el('div', 'ac-list ac-listfull');
+                if (kind === 'employee') {
+                    const tag = ROLE_LABELS[d.bucket] || ROLE_LABELS.craft;
+                    box.append(el('div', 'ac-schedmeta',
+                        `この日は「${tag.label}」として ${d.manday} 人工。`
+                        + ((d.items || []).length > 1
+                            ? '複数の現場に入っているので、時間の長さで按分した内訳を出しています'
+                              + '(合計は1人工。二重には数えません)。' : '')));
+                    for (const it of (d.items || [])) {
+                        const r = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const rt = ROLE_LABELS[it.role] || ROLE_LABELS.craft;
+                        nm.append(el('span', 'ac-rtag ac-role-' + rt.key, rt.label));
+                        nm.append(el('span', 'ac-menutitle', it.site));
+                        r.append(nm);
+                        r.append(el('div', 'ac-sub2',
+                            `${it.category}／${it.time || '終日'}／${fmtNum(it.manday)} 人工`
+                            + (it.kind === 'haul' ? '（運搬）' : '')));
+                        list.append(r);
+                    }
+                } else if (kind === 'company') {
+                    box.append(el('div', 'ac-schedmeta',
+                        `${fmtNum(d.manday)} 人工`
+                        + (Number(d.contract_sites) ? `／下請け請負 ${d.contract_sites} 現場日` : '')));
+                    for (const it of (d.items || [])) {
+                        const r = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const mi = WORK_MODES[it.work_mode] || WORK_MODES.normal;
+                        if (mi.short) {
+                            const b = el('span', 'ac-badge ac-subcbadge ' + mi.cls, mi.label);
+                            b.style.background = mi.color;
+                            b.style.borderColor = mi.color;
+                            nm.append(b);
+                        }
+                        nm.append(el('span', 'ac-menutitle', it.site));
+                        r.append(nm);
+                        r.append(el('div', 'ac-sub2',
+                            it.headcount === null ? '人数未把握' : `${it.headcount} 人`));
+                        list.append(r);
+                    }
+                } else if (kind === 'site') {
+                    box.append(el('div', 'ac-schedmeta',
+                        `自社 ${fmtNum(d.own)} 人工／外注 ${fmtNum(d.sub)} 人工`
+                        + `／計 ${fmtNum(Number(d.own) + Number(d.sub))} 人工`
+                        + (Number(d.contract_sites) ? `／下請け請負 ${d.contract_sites} 現場` : '')));
+                    if ((d.employees || []).length) box.append(el('div', 'ac-label', '社員'));
+                    for (const e of (d.employees || [])) {
+                        const r = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const rt = ROLE_LABELS[e.role] || ROLE_LABELS.craft;
+                        nm.append(el('span', 'ac-rtag ac-role-' + rt.key, rt.label));
+                        nm.append(el('span', 'ac-menutitle', e.name));
+                        r.append(nm);
+                        r.append(el('div', 'ac-sub2', `${fmtNum(e.manday)} 人工`));
+                        list.append(r);
+                    }
+                    if ((d.subs || []).length) {
+                        const lb = el('div', 'ac-label', '外注');
+                        list.append(lb);
+                        for (const sb of d.subs) {
+                            const r = el('div', 'ac-listitem ac-memrow');
+                            const nm = el('div', 'ac-mrowname');
+                            const mi = WORK_MODES[sb.work_mode] || WORK_MODES.normal;
+                            if (mi.short) {
+                                const b = el('span', 'ac-badge ac-subcbadge ' + mi.cls, mi.label);
+                                b.style.background = mi.color;
+                                b.style.borderColor = mi.color;
+                                nm.append(b);
+                            }
+                            nm.append(el('span', 'ac-menutitle', sb.company || '(会社名なし)'));
+                            r.append(nm);
+                            r.append(el('div', 'ac-sub2',
+                                sb.headcount === null ? '人数未把握' : `${sb.headcount} 人`));
+                            list.append(r);
+                        }
+                    }
+                } else {
+                    box.append(el('div', 'ac-schedmeta',
+                        `${d.title}として数えた社員 ${(d.names || []).length} 人`));
+                    for (const n of (d.names || [])) {
+                        const r = el('div', 'ac-listitem');
+                        r.append(el('div', 'ac-menutitle', n));
+                        list.append(r);
+                    }
+                }
+                if (!list.children.length) list.append(el('div', 'ac-empty', '内訳はありません'));
+                box.append(list);
+            }, null, { tall: true });
+        }
+
+        // スマホから同じ表を見るための入口(横スクロールで確認する)。
+        async function openMatrixSheet(kind) {
+            let data = null;
+            try {
+                data = await rpc('assignment_get_month_matrix', {
+                    p_employee_code: me, p_year: state.year, p_month: state.month, p_kind: kind,
+                });
+            } catch (e) { fail(e); return; }
+            sheet(`${state.year}年${state.month}月 ${MATRIX_HEAD[kind]}別 日別表`, (box) => {
+                box.classList.add('ac-mxmode');
+                box.append(el('div', 'ac-schedmeta', '横にスクロールすると月末まで見られます。'
+                    + 'マスを押すとその日の内訳が出ます。'));
+                renderMatrix(box, data, kind);
+            }, null, { tall: true });
+        }
+
         // 月間集計。役割別・人別・外注別・現場別の4つの切り口をタブで切り替える。
         // スマホで横スクロールにならないよう、どの切り口も「名前 + 人工」の1行リストにし、
         // 多い順に並べて長さの棒を添える(ランキングとして流し見できるようにする)。
@@ -1316,10 +1514,50 @@
                     }
                 }
 
+                // PCは日付を横軸にした月次表、スマホは従来の縦型カード。
+                // 役割別だけは合計カードも便利なので、PCでは切り替えられるようにする。
+                let roleView = 'summary';
+                function drawRoleSwitch(box) {
+                    const sw = el('div', 'ac-tokens ac-roleswitch');
+                    for (const [v, label] of [['summary', 'サマリー'], ['matrix', '日別表']]) {
+                        const t = el('button', 'ac-token' + (roleView === v ? ' ac-on' : ''), label);
+                        t.addEventListener('click', () => { if (roleView !== v) { roleView = v; draw(); } });
+                        sw.append(t);
+                    }
+                    box.append(sw);
+                }
+                function matrixTotal(data, kind) {
+                    const sum = (data.rows || []).reduce((a, r) => a + Number(r.total), 0);
+                    const days = (data.rows || []).reduce((a, r) => a + Number(r.total_sub ? parseInt(r.total_sub, 10) || 0 : 0), 0);
+                    const unit = MATRIX_UNIT[kind];
+                    setTotal(`${(data.rows || []).length} ${kind === 'employee' ? '人' : (kind === 'company' ? '社' : (kind === 'site' ? '現場' : '区分'))}`,
+                        `合計 ${fmtNum(sum)} ${unit}` + (days ? `／下請け請負 ${days} 現場日` : ''));
+                }
+
                 async function draw() {
                     body.innerHTML = '';
-                    if (monthTab === 'role') { drawRole(body); return; }
+                    const useMatrix = isWide() && !(monthTab === 'role' && roleView === 'summary');
+                    box.classList.toggle('ac-mxmode', useMatrix);
+                    if (monthTab === 'role' && !useMatrix) {
+                        if (isWide()) drawRoleSwitch(body);
+                        drawRole(body);
+                        return;
+                    }
                     body.append(el('div', 'ac-empty', '読み込み中...'));
+                    if (useMatrix) {
+                        let data = null;
+                        try {
+                            data = await rpc('assignment_get_month_matrix', {
+                                p_employee_code: me, p_year: state.year,
+                                p_month: state.month, p_kind: monthTab,
+                            });
+                        } catch (e) { body.innerHTML = ''; fail(e); return; }
+                        body.innerHTML = '';
+                        if (monthTab === 'role') drawRoleSwitch(body);
+                        renderMatrix(body, data, monthTab);
+                        matrixTotal(data, monthTab);
+                        return;
+                    }
                     let rows = [];
                     try {
                         rows = await rpc('assignment_get_month_breakdown', {
@@ -1331,11 +1569,17 @@
                     if (monthTab === 'employee') drawEmployee(body, rows);
                     else if (monthTab === 'company') drawCompany(body, rows);
                     else drawSite(body, rows);
+                    // スマホでも同じ表を見たいときの入口(横スクロールで確認する)。
+                    const b = el('button', 'ac-btn', `${MATRIX_HEAD[monthTab]}別の日別表を見る`);
+                    b.style.width = '100%';
+                    b.style.marginTop = '8px';
+                    b.addEventListener('click', () => openMatrixSheet(monthTab));
+                    body.append(b);
                 }
 
                 drawTabs();
                 draw();
-            }, [totalBar], { tall: true });
+            }, [totalBar], { tall: true, full: true });
 
             function setTotal(main, sub) {
                 totalBar.innerHTML = '';
@@ -2104,7 +2348,9 @@
         // 2〜3行しか見えず切り替えて比べられない(実機指摘 2026-09-03)。
         function sheet(title, buildBody, footerButtons, opts) {
             const back = el('div', 'ac-sheet');
-            const body = el('div', 'ac-sheetbody' + (opts && opts.tall ? ' ac-tall' : ''));
+            const body = el('div', 'ac-sheetbody'
+                + (opts && opts.tall ? ' ac-tall' : '')
+                + (opts && opts.full ? ' ac-full' : ''));
             const head = el('div', 'ac-sheethead');
             const h = el('h3', null, title);
             const close = el('button', 'ac-hbtn ac-icon', '✕');

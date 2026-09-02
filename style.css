@@ -1333,3 +1333,8 @@ body.assignment-calendar-open #screen-assignment-calendar .ac-root {
   border: 1px solid rgba(198, 162, 90, 0.45);
   letter-spacing: 0.04em;
 }
+
+/* ログイン画面: 社員/外注の別導線セパレータ(仕様3) */
+.login-alt-sep { display:flex; align-items:center; gap:12px; margin:22px 2px 14px; color:var(--text-muted); font-size:13px; }
+.login-alt-sep::before, .login-alt-sep::after { content:''; flex:1; height:1px; background:var(--border-strong); }
+.login-subcontractor-card { border:1px dashed var(--border-strong); }

@@ -948,3 +948,95 @@
 .ac-root[data-layout="wide"] .ac-rank > .ac-rankbar { grid-area: bar; margin-top: 8px; }
 .ac-root[data-layout="wide"] .ac-listitem { padding: 12px 14px; font-size: 15px; }
 .ac-root[data-layout="wide"] .ac-sheettotal { font-size: 17px; }
+
+/* ============================================================
+   月次人工集計表(日付を横軸にした表、2026-09-03)
+
+   行 = 社員/協力会社/現場/区分、列 = 1〜31日、右端 = 合計。
+   横にスクロールしても左端の名前と右端の合計は残り、
+   縦にスクロールしても日付ヘッダーは残る(Excelのウィンドウ枠固定と同じ狙い)。
+   sticky は「同じスクロール容器」に対して効くので、表のまわり(.ac-mx)自体を
+   縦横のスクロール容器にしている。
+   ============================================================ */
+/* 表を出すときは、シート内側のスクロールを表へ渡す(二重スクロールにしない)。 */
+.ac-sheetscroll.ac-mxmode {
+  display: flex; flex-direction: column; overflow: hidden; padding-bottom: 8px;
+}
+.ac-sheetscroll.ac-mxmode > .ac-tabs,
+.ac-sheetscroll.ac-mxmode > .ac-schedmeta,
+.ac-sheetscroll.ac-mxmode > .ac-roleswitch { flex: 0 0 auto; }
+.ac-sheetscroll.ac-mxmode > div:last-child { min-height: 0; }
+.ac-mx {
+  flex: 1 1 auto; min-height: 0; width: 100%;
+  overflow: auto; -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--ac-line); border-radius: 6px; background: #fff;
+}
+.ac-mxtable { border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.ac-mxtable th, .ac-mxtable td {
+  border-right: 1px solid var(--ac-line); border-bottom: 1px solid var(--ac-line);
+  padding: 0; margin: 0; background: #fff;
+}
+/* 日付ヘッダー(縦スクロールしても残す) */
+.ac-mxtable thead th {
+  position: sticky; top: 0; z-index: 3;
+  background: #eef1f5; border-bottom: 1px solid var(--ac-line-strong);
+  font-size: 11px; font-weight: 700; color: var(--ac-muted);
+  min-width: 34px; width: 34px; padding: 3px 0; text-align: center; line-height: 1.15;
+}
+.ac-mx-d { display: block; font-size: 13px; font-weight: 800; color: var(--ac-fg); }
+.ac-mx-w { display: block; font-size: 10px; }
+.ac-mxtable thead th.ac-sat, .ac-mxtable thead th.ac-sat .ac-mx-d { color: var(--ac-sat); }
+.ac-mxtable thead th.ac-sun, .ac-mxtable thead th.ac-sun .ac-mx-d { color: var(--ac-sun); }
+/* 左端の名前列(横スクロールしても残す) */
+.ac-mxtable th.ac-mx-name {
+  position: sticky; left: 0; z-index: 4;
+  min-width: 168px; width: 168px; text-align: left;
+  padding: 6px 8px; background: #fff;
+  border-right: 1px solid var(--ac-line-strong);
+}
+.ac-mxtable thead th.ac-mx-name { z-index: 6; background: #eef1f5; }
+.ac-mx-rowname { font-size: 13px; font-weight: 700; line-height: 1.25;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ac-mx-rowsub { font-size: 10.5px; color: var(--ac-muted); line-height: 1.2; }
+/* 右端の合計列(横スクロールしても残す) */
+.ac-mxtable .ac-mx-total {
+  position: sticky; right: 0; z-index: 4;
+  min-width: 104px; width: 104px; text-align: right;
+  padding: 6px 10px; background: #f7f8fa;
+  border-left: 1px solid var(--ac-line-strong);
+}
+.ac-mxtable thead th.ac-mx-total { z-index: 6; background: #eef1f5; }
+.ac-mx-totalnum { font-size: 14px; font-weight: 800; }
+.ac-mx-totalsub { font-size: 10.5px; color: var(--ac-muted); }
+/* 日別のマス */
+.ac-mx-cell {
+  min-width: 34px; width: 34px; height: 34px;
+  text-align: center; vertical-align: middle;
+  font-size: 13px; font-weight: 700; color: var(--ac-muted);
+  position: relative;
+}
+.ac-mx-cell.ac-sat { background: #f4f8fd; }
+.ac-mx-cell.ac-sun { background: #fdf5f5; }
+.ac-mx-cell.ac-mx-has { color: #14356b; background: #e8f0fc; cursor: pointer; }
+.ac-mx-cell.ac-mx-has:hover { background: #d6e6fb; }
+.ac-mx-cell.ac-mx-has:active { background: #c6dcf8; }
+.ac-mx-cell.ac-mx-off { background: #eef0f3; color: var(--ac-muted); }
+.ac-mx-cell.ac-mx-contract { background: #fbe6ee; color: #8e1046; }
+/* 同じ日に2件以上入っている印。合計は1人工のまま。 */
+.ac-mx-parts {
+  position: absolute; right: 1px; top: 0;
+  font-size: 9px; font-weight: 800; color: #b0641a;
+}
+.ac-roleswitch { margin-bottom: 6px; }
+
+/* PCは月集計をほぼ全画面にして、月次表をできるだけ大きく見せる。 */
+.ac-root[data-layout="wide"] .ac-sheetbody.ac-full {
+  max-width: none; width: 96vw; height: 92vh; max-height: 92vh;
+}
+/* 余った横幅は名前列へ回し、表を画面幅いっぱいに広げる。 */
+.ac-root[data-layout="wide"] .ac-mxtable { font-size: 14px; width: 100%; }
+.ac-root[data-layout="wide"] .ac-mxtable thead th { min-width: 40px; width: 40px; }
+.ac-root[data-layout="wide"] .ac-mx-cell { min-width: 40px; width: 40px; height: 38px; font-size: 14px; }
+.ac-root[data-layout="wide"] .ac-mxtable th.ac-mx-name { min-width: 210px; width: 210px; }
+.ac-root[data-layout="wide"] .ac-mx-rowname { font-size: 14px; }
+.ac-root[data-layout="wide"] .ac-mxtable .ac-mx-total { min-width: 124px; width: 124px; }
