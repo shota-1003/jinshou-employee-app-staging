@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v97-staging';
-const BUILD_DEPLOYED_AT = '2026-09-01T20:14:39.786Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v105-staging';
+const BUILD_DEPLOYED_AT = '2026-09-02T08:41:45.516Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -239,7 +239,7 @@ const ADMIN_SCREENS = new Set([
   'supply-master-admin', 'entertainment-admin', 'site-admin', 'leave-admin', 'leave-grant',
   'employee-summary', 'employee-monthly-detail', 'attendance-matrix', 'bulk-expense-admin', 'bulk-expense-detail',
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
-  'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'purpose-admin',
+  'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
@@ -1083,20 +1083,11 @@ async function renderHomeUpcomingEvents(session) {
 // 「今日は休みとして登録する」のワンタップ導線だけを、今日やることの直下に残す
 // (提出済み・休暇登録済みの日は表示しない)。
 async function renderHomeDailyReportStatusBanner(session) {
+  // §2: 社員が自分で勤務日を休日に変更できる導線は不要。「今日は休みとして登録する」は完全撤去。
+  // 休日はカレンダー(配置)・休暇情報からシステムが判定し、確定できる日はシステムが自動記録する。
+  // 判定不能/競合時は勝手に休日化せず、管理者の要確認へ回す(サーバ側 daily_report_employee_bucket)。
   const restBtn = document.getElementById('home-daily-report-mark-rest-btn');
-  restBtn.style.display = 'none';
-  const today = todayJST();
-  try {
-    const [rows, leaveRows] = await Promise.all([
-      rpc('get_my_daily_report_detail', { p_employee_code: session.employeeCode, p_report_date: today }),
-      rpc('get_my_leave_status_for_date', { p_employee_code: session.employeeCode, p_date: today }),
-    ]);
-    const leave = leaveRows && leaveRows[0] && leaveRows[0].is_on_leave ? leaveRows[0] : null;
-    if ((!rows || rows.length === 0) && !leave) {
-      restBtn.style.display = '';
-      restBtn.onclick = () => openQuickRestRegisterFromHome(today);
-    }
-  } catch (e) { /* 取れなくても今日やること側の表示は別途機能する */ }
+  if (restBtn) restBtn.style.display = 'none';
 }
 
 // executiveはadmin-dashboard(全管理メニュー)、日報担当(nippo_admin、executiveではない)は
@@ -2649,9 +2640,11 @@ function openImageZoom(url) {
 // 領収書原本(Google Drive 非公開)を Edge Function receipt-image 経由で認証付き取得し、
 // Blob→objectURL でインライン表示する。Drive URL も Google 認証情報もフロントへ出さない。
 // container 内の img.receipt-proxy-thumb[data-document-id] を対象に、サムネイル表示＋タップ拡大を配線する。
-async function fetchReceiptObjectUrl(documentId) {
+// Edge Function receipt-image を認証付きで呼び、画像 Blob の objectURL を返す(汎用)。
+// query 例: 'document_id=12'(領収書) / 'kind=qualification_photo&id=34'(資格証・免許証・健診)。
+async function fetchSecureImageObjectUrl(query) {
   const session = getSession();
-  const res = await fetch(`${SUPABASE_URL}/functions/v1/receipt-image?document_id=${encodeURIComponent(documentId)}`, {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/receipt-image?${query}`, {
     headers: {
       apikey: SUPABASE_ANON_KEY,
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
@@ -2659,9 +2652,71 @@ async function fetchReceiptObjectUrl(documentId) {
       'x-device-token': currentDeviceToken || '',
     },
   });
-  if (!res.ok) throw new Error('receipt_fetch_' + res.status);
+  if (!res.ok) throw new Error('secure_image_fetch_' + res.status);
   const blob = await res.blob();
   return URL.createObjectURL(blob);
+}
+async function fetchReceiptObjectUrl(documentId) {
+  return fetchSecureImageObjectUrl(`document_id=${encodeURIComponent(documentId)}`);
+}
+
+// 資格証/免許証/健診結果などの Drive 画像を、img.secure-proxy-thumb[data-secure-kind][data-secure-id]
+// に対してプロキシ経由で読み込み、タップ拡大を配線する(領収書と同じ仕組みの汎用版)。
+function hydrateSecureImages(container) {
+  if (!container) return;
+  container.querySelectorAll('img.secure-proxy-thumb[data-secure-kind][data-secure-id]').forEach((img) => {
+    if (img.dataset.hydrated) return;
+    img.dataset.hydrated = '1';
+    const q = `kind=${encodeURIComponent(img.dataset.secureKind)}&id=${encodeURIComponent(img.dataset.secureId)}`;
+    fetchSecureImageObjectUrl(q)
+      .then((objUrl) => { img.src = objUrl; img.dataset.zoom = objUrl; img.addEventListener('click', () => openImageZoom(objUrl)); img.style.cursor = 'zoom-in'; })
+      .catch(() => { const note = document.createElement('div'); note.className = 'hint-inline'; note.textContent = '画像を表示できませんでした'; img.replaceWith(note); });
+  });
+  // PDF はプロキシ経由でBlob取得し新規タブで開く(Drive URL/認証情報を出さない)。
+  container.querySelectorAll('button.secure-proxy-pdf[data-secure-kind][data-secure-id]').forEach((btn) => {
+    if (btn.dataset.wired) return; btn.dataset.wired = '1';
+    btn.addEventListener('click', async () => {
+      btn.disabled = true; const old = btn.textContent; btn.textContent = '読み込み中...';
+      try { const u = await fetchSecureImageObjectUrl(`kind=${encodeURIComponent(btn.dataset.secureKind)}&id=${encodeURIComponent(btn.dataset.secureId)}`); window.open(u, '_blank'); }
+      catch (e) { alert('PDFを表示できませんでした。'); }
+      finally { btn.disabled = false; btn.textContent = old; }
+    });
+  });
+}
+// 領収書ギャラリー: 月別に複数の領収書を左右スワイプ/前次/拡大で確認できる。画像は receipt-image
+// プロキシ経由(二重保存なし)。各画像に申請情報(日付/店名/金額/勘定科目/用途/現場)を紐付けて表示。
+let rgItems = []; let rgIdx = 0; const rgUrlCache = new Map();
+async function renderReceiptGalleryItem() {
+  const it = rgItems[rgIdx]; if (!it) return;
+  const img = document.getElementById('rg-img');
+  const info = document.getElementById('rg-info');
+  const yen = (n) => (n != null ? `${Number(n).toLocaleString('ja-JP')}円` : '');
+  info.innerHTML = `
+    <div class="rg-info-head">${rgIdx + 1} / ${rgItems.length}</div>
+    <div class="rg-info-main">${it.vendor_name || '(店名なし)'}　<strong>${yen(it.amount)}</strong></div>
+    <div class="rg-info-sub">${[it.document_date, it.purpose_category, it.expense_category, it.site_name].filter(Boolean).join('・')}</div>`;
+  img.style.opacity = '0.4';
+  try {
+    if (!rgUrlCache.has(it.document_id)) rgUrlCache.set(it.document_id, await fetchSecureImageObjectUrl(`kind=receipt&id=${encodeURIComponent(it.document_id)}`));
+    img.src = rgUrlCache.get(it.document_id); img.style.opacity = '1';
+  } catch (e) { img.removeAttribute('src'); img.style.opacity = '1'; info.innerHTML += '<div class="rg-info-sub">画像を表示できませんでした</div>'; }
+}
+function rgStep(delta) { if (!rgItems.length) return; rgIdx = (rgIdx + delta + rgItems.length) % rgItems.length; renderReceiptGalleryItem(); }
+function openReceiptGallery(items, startIdx) {
+  rgItems = (items || []).filter((x) => x.document_id); rgIdx = Math.max(0, Math.min(startIdx || 0, rgItems.length - 1));
+  if (rgItems.length === 0) { alert('この月に領収書画像はありません。'); return; }
+  document.getElementById('receipt-gallery-overlay').classList.add('open');
+  renderReceiptGalleryItem();
+}
+function closeReceiptGallery() { document.getElementById('receipt-gallery-overlay').classList.remove('open'); }
+
+// 資格証/健診などの Drive 画像・PDF を、画面内サムネイル＋タップ拡大／PDFは新規タブで開く形にする共通HTML。
+function secureFileBlockHtml(photoKind, pdfKind, refId, hasPhoto, hasPdf) {
+  let h = '';
+  if (hasPhoto) h += `<img class="secure-proxy-thumb" data-secure-kind="${photoKind}" data-secure-id="${refId}" alt="画像" loading="lazy">`;
+  if (hasPdf) h += `<button type="button" class="secondary secure-proxy-pdf" data-secure-kind="${pdfKind}" data-secure-id="${refId}" style="margin-left:6px; vertical-align:top;">PDFを開く</button>`;
+  if (!hasPhoto && !hasPdf) return '';
+  return `<div class="secure-file-block" style="margin-top:8px;">${h}</div>`;
 }
 
 function hydrateReceiptImages(container) {
@@ -2770,9 +2825,24 @@ async function renderMyPaymentCard(requestId, head) {
       <div class="mrd-payment-row"><span>支払済み</span><span>${yen(head.paid_total)}</span></div>
       <div class="mrd-payment-row emphasis"><span>未払い</span><span>${yen(head.unpaid_total)}</span></div>
       ${Number(head.unconfirmed_total) > 0 ? `<div class="mrd-payment-row emphasis"><span>受取確認待ち</span><span>${yen(head.unconfirmed_total)}</span></div>` : ''}
+      <div id="mrd-payment-schedule" class="mrd-payment-row"></div>
       <div id="mrd-payment-list"></div>
     </div>
   `;
+  try {
+    const schRows = await rpc('get_my_expense_payment_schedule', { p_employee_code: session.employeeCode, p_employee_request_id: Number(requestId) });
+    const s = schRows && schRows[0];
+    const schEl = document.getElementById('mrd-payment-schedule');
+    if (s && schEl) {
+      if (s.payment_status === 'paid') {
+        schEl.innerHTML = `<span>精算状況</span><span class="status-badge done">精算完了${s.paid_at ? '（' + new Date(s.paid_at).toLocaleDateString('ja-JP') + '）' : ''}</span>`;
+      } else if (s.scheduled_payment_date) {
+        schEl.innerHTML = `<span>精算状況</span><span class="mini-tag info">${new Date(s.scheduled_payment_date).toLocaleDateString('ja-JP')} 精算予定</span>`;
+      } else {
+        schEl.innerHTML = '<span>精算状況</span><span class="mini-tag">承認済み（精算予定日は調整中）</span>';
+      }
+    }
+  } catch (e) { /* 予定情報が無ければ表示しない */ }
   try {
     const payments = await rpc('get_my_expense_payments', { p_employee_code: session.employeeCode, p_employee_request_id: Number(requestId) });
     const listEl = document.getElementById('mrd-payment-list');
@@ -2981,9 +3051,45 @@ async function loadMySupplyHoldings() {
   }
 }
 
+// 支給品「申請状況」: 承認済み(支給予定日つき)/受渡完了/申請中/却下 を本人が確認できる。
+// 承認済みでもまだ受渡されていない間は「保有数」には出さず、ここに「◯月◯日 支給予定」と出す。
+const SUPPLY_REQ_STATE = {
+  pending: { label: '申請中', cls: '' },
+  approved: { label: '承認済み', cls: 'info' },
+  issued: { label: '受渡完了', cls: 'done' },
+  rejected: { label: '却下', cls: 'rejected' },
+};
+async function loadMySupplyRequests() {
+  const session = getSession();
+  const el = document.getElementById('my-supply-requests');
+  if (!el) return;
+  el.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('get_my_supply_requests', { p_employee_code: session.employeeCode });
+    // 受渡完了(issued)は「支給履歴」に出るので、ここでは進行中(申請中/承認済み)＋却下のみ表示。
+    const active = (rows || []).filter((r) => r.status !== 'issued');
+    if (active.length === 0) { el.innerHTML = '<div class="hint">進行中の支給品申請はありません。</div>'; return; }
+    el.innerHTML = active.map((r) => {
+      const st = SUPPLY_REQ_STATE[r.status] || { label: r.status, cls: '' };
+      const sched = (r.status === 'approved' && r.scheduled_issue_date)
+        ? `<span class="elapsed">${new Date(r.scheduled_issue_date).toLocaleDateString('ja-JP')} 支給予定</span>`
+        : (r.status === 'approved' ? '<span class="elapsed">支給予定日は調整中です</span>' : '');
+      return `
+      <div class="supply-item">
+        <div class="row1"><span>${r.item_name}${r.size ? '(' + r.size + ')' : ''}</span><span>${r.quantity}個</span></div>
+        <div class="row2"><span class="mini-tag ${st.cls}">${st.label}</span>${sched}</div>
+        ${r.status === 'rejected' && r.reject_reason ? `<div class="row2">却下理由: ${r.reject_reason}</div>` : ''}
+      </div>`;
+    }).join('');
+  } catch (e) {
+    el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
 async function loadMySupply() {
   const session = getSession();
   loadMySupplyHoldings();
+  loadMySupplyRequests();
   const listEl = document.getElementById('my-supply-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
@@ -3529,6 +3635,7 @@ async function doAdminChangeAnonStatus() {
 // 外注日報タスクをタップしたときは、日報入力画面を開いてから「誰の日報を入力しますか」を
 // 外注作業員モードへ自動で切り替える(担当者が毎回手動でプルダウンを操作しなくて済むように)。
 async function navigateToTodayTask(nav, taskKey) {
+  if (!nav) return; // お休み・有給などの通知行はタップ先なし
   showScreen(nav);
   if (taskKey === 'subcontractor_daily_report' && nav === 'daily-report') {
     await resetDailyReportForm();
@@ -3804,13 +3911,19 @@ async function renderAdminTodayTasks(session) {
     }
     el.innerHTML = actionable.map((r) => {
       const color = r.severity === 'urgent' ? 'var(--danger)' : (r.severity === 'attention' ? 'var(--gold, #c9a227)' : 'var(--primary)');
-      return `<button type="button" class="history-item admin-today-task" data-nav="${r.nav_screen}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;border-left:3px solid ${color};">
+      return `<button type="button" class="history-item admin-today-task" data-nav="${r.nav_screen}" data-task-key="${r.task_key}" style="width:100%;text-align:left;display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;border-left:3px solid ${color};">
         <span style="flex:1;min-width:0;">${r.label}</span>
         <span style="font-weight:800;font-size:18px;color:${color};flex:none;">${r.cnt}</span>
         <span aria-hidden="true" style="color:var(--muted);flex:none;">›</span>
       </button>`;
     }).join('');
-    el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => showScreen(btn.dataset.nav)));
+    // 日報系: 未提出/配置未確認は対象者一覧へ。要確認(§3)は処理できる要確認一覧(確定/修正依頼/取消)へ。
+    const TASK_TO_PEOPLE = { daily_report_missing: 'missing', assignment_unconfirmed: 'unconfirmed' };
+    el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => {
+      if (btn.dataset.taskKey === 'daily_report_anomaly') { showScreen('daily-report-needs-review-admin'); return; }
+      const b = TASK_TO_PEOPLE[btn.dataset.taskKey];
+      if (b) openDailyReportPeople(b); else showScreen(btn.dataset.nav);
+    }));
   } catch (e) {
     // 集約が取れなくても下のカードは別途表示されるため、静かに隠す
     el.innerHTML = '';
@@ -4171,13 +4284,11 @@ async function loadMyQualifications() {
           <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.qualification_name}</span><span class="status-badge ${q.status === 'active' ? 'done' : (q.status === 'rejected' ? 'rejected' : '')}">${QUAL_STATUS_LABEL[q.status] || q.status}</span></div>
           <div class="row2">${expiryText}</div>
           <div class="row2">${q.qualification_number ? `番号: ${q.qualification_number}` : ''}</div>
-          <div style="margin-top:8px;">
-            ${q.certificate_photo_url ? `<a class="file-link" href="${q.certificate_photo_url}" target="_blank" rel="noopener">写真を見る</a>` : ''}
-            ${q.certificate_pdf_url ? `<a class="file-link" href="${q.certificate_pdf_url}" target="_blank" rel="noopener">PDFを見る</a>` : ''}
-          </div>
+          ${secureFileBlockHtml('qualification_photo', 'qualification_pdf', q.id, !!q.certificate_photo_url, !!q.certificate_pdf_url)}
         </div>
       `;
     }).join('');
+    hydrateSecureImages(listEl);
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -4210,10 +4321,7 @@ async function loadQualAdminList() {
           <div class="row2">${expiryText}</div>
           <div class="row2">${q.qualification_number ? `番号: ${q.qualification_number}` : ''}</div>
           ${q.note ? `<div class="row2">備考: ${q.note}</div>` : ''}
-          <div style="margin-top:8px;">
-            ${q.certificate_photo_url ? `<a class="file-link" href="${q.certificate_photo_url}" target="_blank" rel="noopener">写真を見る</a>` : ''}
-            ${q.certificate_pdf_url ? `<a class="file-link" href="${q.certificate_pdf_url}" target="_blank" rel="noopener">PDFを見る</a>` : ''}
-          </div>
+          ${secureFileBlockHtml('qualification_photo', 'qualification_pdf', q.id, !!q.certificate_photo_url, !!q.certificate_pdf_url)}
           ${q.status === 'pending_verification' ? `
             <div class="qual-verify-btns">
               <button type="button" class="approve-btn">有効化する</button>
@@ -4229,6 +4337,7 @@ async function loadQualAdminList() {
     listEl.querySelectorAll('.reject-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doVerifyQualification(e.target.closest('.qual-item').dataset.id, 'rejected'));
     });
+    hydrateSecureImages(listEl);
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -5362,12 +5471,25 @@ async function openEmployeeMonthlyDetail(code, name, year, month) {
         <div class="row1"><span>${r.vendor_name}</span><span>${yen(r.amount)}</span></div>
         <div class="row2">${r.site_name || '-'}・${r.purpose_category || '-'}・${isAdvance ? (PAY_LABEL[r.payment_status] || r.payment_status) : '会社経費(立替なし)'}${badge ? `・<span class="status-badge rejected">${badge}</span>` : ''}</div>
         <div class="row2">${r.document_date || ''}${r.rejection_reason ? `・却下理由: ${r.rejection_reason}` : ''}</div>
+        ${r.document_id ? `<img class="secure-proxy-thumb emd-receipt-thumb" data-secure-kind="receipt" data-secure-id="${r.document_id}" data-doc-id="${r.document_id}" alt="領収書" loading="lazy">` : ''}
         ${payBtn}
       </div>
     `;
     };
-    document.getElementById('emd-advance-list').innerHTML = advance.length === 0 ? '<div class="hint">この月の経費立替はありません。</div>' : advance.map((r) => expenseRow(r, true)).join('');
+    // この月の領収書(document_idつき)を1つのギャラリーへまとめる。
+    const monthReceipts = [...advance, ...company].filter((r) => r.document_id).map((r) => ({ document_id: r.document_id, vendor_name: r.vendor_name, amount: r.amount, document_date: r.document_date, purpose_category: r.purpose_category, expense_category: r.expense_category, site_name: r.site_name }));
+    const galleryBtnHtml = monthReceipts.length > 0
+      ? `<button type="button" class="secondary" id="emd-receipt-gallery-btn" style="margin-bottom:10px;">📷 この月の領収書をまとめて見る(${monthReceipts.length}枚)</button>` : '';
+    document.getElementById('emd-advance-list').innerHTML = galleryBtnHtml + (advance.length === 0 ? '<div class="hint">この月の経費立替はありません。</div>' : advance.map((r) => expenseRow(r, true)).join(''));
     document.getElementById('emd-company-list').innerHTML = company.length === 0 ? '<div class="hint">この月の会社経費はありません。</div>' : company.map((r) => expenseRow(r, false)).join('');
+    const galleryBtn = document.getElementById('emd-receipt-gallery-btn');
+    if (galleryBtn) galleryBtn.addEventListener('click', () => openReceiptGallery(monthReceipts, 0));
+    // 各行のサムネイルはプロキシで読み込み、タップでその位置からギャラリーを開く。
+    hydrateSecureImages(document.getElementById('emd-advance-list'));
+    hydrateSecureImages(document.getElementById('emd-company-list'));
+    document.querySelectorAll('.emd-receipt-thumb').forEach((img) => {
+      img.addEventListener('click', (e) => { e.stopPropagation(); const idx = monthReceipts.findIndex((x) => String(x.document_id) === String(img.dataset.docId)); openReceiptGallery(monthReceipts, idx < 0 ? 0 : idx); }, true);
+    });
 
     document.querySelectorAll('.emd-pay-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => {
@@ -5429,6 +5551,27 @@ async function openExpensePayment(requestId, employeeName, employeeCode) {
   } catch (e) {
     showError('ep-error', e.message || '状態の取得に失敗しました。');
   }
+  loadExpensePaymentSchedule(requestId);
+}
+
+// 精算予定日の現在値を表示する(承認済み→精算予定→精算完了の状態)。
+async function loadExpensePaymentSchedule(requestId) {
+  const session = getSession();
+  const el = document.getElementById('ep-schedule-current');
+  if (!el) return;
+  try {
+    const rows = await rpc('admin_get_expense_payment_schedule', { p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(requestId) });
+    const s = rows && rows[0];
+    if (!s) { el.textContent = ''; return; }
+    if (s.payment_status === 'paid') {
+      el.innerHTML = `<span class="status-badge done">精算完了${s.paid_at ? '（' + new Date(s.paid_at).toLocaleDateString('ja-JP') + '）' : ''}</span>`;
+    } else if (s.scheduled_payment_date) {
+      el.innerHTML = `現在の精算予定日: <strong>${new Date(s.scheduled_payment_date).toLocaleDateString('ja-JP')}</strong>`;
+      document.getElementById('ep-schedule-date').value = String(s.scheduled_payment_date).slice(0, 10);
+    } else {
+      el.textContent = '精算予定日は未設定です。';
+    }
+  } catch (e) { el.textContent = ''; }
 }
 
 async function doSubmitExpensePayment() {
@@ -5690,9 +5833,11 @@ async function loadEmployeeDetailQual() {
     listEl.innerHTML = mine.map((q) => `
       <div class="qual-item">
         <div class="row1"><span>${q.category === 'license' ? '<span class="mini-tag info">免許</span> ' : ''}${q.qualification_name}</span><span class="status-badge ${q.status === 'active' ? 'done' : (q.status === 'rejected' ? 'rejected' : '')}">${QUAL_STATUS_LABEL[q.status] || q.status}</span></div>
-        <div class="row2">${q.expiry_date ? `有効期限: ${new Date(q.expiry_date).toLocaleDateString('ja-JP')}` : ''}</div>
+        <div class="row2">${q.expiry_date ? `有効期限: ${new Date(q.expiry_date).toLocaleDateString('ja-JP')}${q.days_until_expiry != null ? `(残り${q.days_until_expiry}日)` : ''}` : '期限未登録'}</div>
+        ${secureFileBlockHtml('qualification_photo', 'qualification_pdf', q.id, !!q.certificate_photo_url, !!q.certificate_pdf_url)}
       </div>
     `).join('');
+    hydrateSecureImages(listEl);
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -6238,9 +6383,10 @@ async function loadMyHealthList() {
         <div class="row2">${h.institution || ''}</div>
         <div class="row2">${h.next_due_date ? `次回予定: ${new Date(h.next_due_date).toLocaleDateString('ja-JP')}` : ''}${h.needs_retest ? '・再検査あり' : ''}</div>
         <div class="row2">${h.note || ''}</div>
-        ${h.result_file_url ? `<a class="file-link" href="${h.result_file_url}" target="_blank" rel="noopener">結果を見る</a>` : ''}
+        ${secureFileBlockHtml('health', 'health', h.id, !!h.result_file_url, false)}
       </div>
     `).join('');
+    hydrateSecureImages(listEl);
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -7465,12 +7611,18 @@ async function loadDrScCompanies() {
   } catch (e) { drScCompanies = []; }
   return drScCompanies;
 }
+// §7: 1行 = 会社×現場 につき 終日/午前/午後 の人数を同時入力。人工 = 終日×1.0 + (午前+午後)×0.5。
 function updateDrScTotals() {
   let people = 0; let hc = 0;
   document.querySelectorAll('#dr-sc-list .dr-sc-entry').forEach((el) => {
-    const n = Number(el.querySelector('.dr-sc-headcount').value) || 0;
-    const wt = el.querySelector('.dr-sc-work-type').value;
-    people += n; hc += n * (wt === '終日' ? 1.0 : 0.5);
+    const fd = Number(el.querySelector('.dr-sc-fullday').value) || 0;
+    const am = Number(el.querySelector('.dr-sc-am').value) || 0;
+    const pm = Number(el.querySelector('.dr-sc-pm').value) || 0;
+    const rowPeople = fd + am + pm;
+    const rowHc = fd * 1.0 + (am + pm) * 0.5;
+    people += rowPeople; hc += rowHc;
+    const sum = el.querySelector('.dr-sc-row-summary');
+    if (sum) sum.textContent = `合計 ${rowPeople}名 / ${String(rowHc).replace(/\.0$/, '')}人工`;
   });
   const p = document.getElementById('dr-sc-total-people'); const h = document.getElementById('dr-sc-total-headcount');
   if (p) p.textContent = String(people);
@@ -7488,13 +7640,16 @@ async function addDailyReportSubcontractorLine(prefill) {
   const siteSearch = clone.querySelector('.dr-sc-site-search');
   populateSiteSelect(siteSel, '', false).then(() => { if (prefill && prefill.site_id) siteSel.value = String(prefill.site_id); });
   siteSearch.addEventListener('input', () => populateSiteSelect(siteSel, siteSearch.value.trim(), false));
-  const wt = clone.querySelector('.dr-sc-work-type');
-  if (prefill && prefill.work_type) wt.value = prefill.work_type;
-  const hcInput = clone.querySelector('.dr-sc-headcount');
-  if (prefill && prefill.headcount != null) hcInput.value = prefill.headcount;
+  const fdInput = clone.querySelector('.dr-sc-fullday');
+  const amInput = clone.querySelector('.dr-sc-am');
+  const pmInput = clone.querySelector('.dr-sc-pm');
+  if (prefill) {
+    if (prefill.fullday != null) fdInput.value = prefill.fullday;
+    if (prefill.am != null) amInput.value = prefill.am;
+    if (prefill.pm != null) pmInput.value = prefill.pm;
+  }
   if (prefill && prefill.notes) clone.querySelector('.dr-sc-notes').value = prefill.notes;
-  hcInput.addEventListener('input', updateDrScTotals);
-  wt.addEventListener('change', updateDrScTotals);
+  [fdInput, amInput, pmInput].forEach((inp) => inp.addEventListener('input', updateDrScTotals));
   clone.querySelector('.dr-sc-remove').addEventListener('click', () => { wrap.remove(); updateDrScTotals(); });
   document.getElementById('dr-sc-list').appendChild(clone);
   updateDrScTotals();
@@ -7502,8 +7657,9 @@ async function addDailyReportSubcontractorLine(prefill) {
 async function loadDrScSection(dateStr) {
   const card = document.getElementById('daily-report-subcontractor-card');
   if (!card) return;
-  // 外注人数は「自分の日報」入力時のみ表示(代理入力・外注作業員個別入力時は隠す)。
-  const showIt = (dailyReportTarget.type === 'self');
+  // §6: 外注（応援）は「誰の日報」で外注（応援）を選んだ時だけ表示する専用モード。
+  // 通常社員フォームは別途 setDailyReportMode で非表示にする(外注選択時は通常フォームを出さない)。
+  const showIt = (dailyReportTarget.type === 'subcontractor_support');
   card.style.display = showIt ? '' : 'none';
   if (!showIt) return;
   const list = document.getElementById('dr-sc-list');
@@ -7514,12 +7670,22 @@ async function loadDrScSection(dateStr) {
     const session = getSession();
     const rows = await rpc('get_my_subcontractor_headcount_report', { p_employee_code: session.employeeCode, p_report_date: dateStr });
     if (rows && rows.length > 0) {
+      // 既存(company×site×work_type別)を、会社×現場ごとに 終日/午前/午後 の1行へ集約してprefillする。
+      const grouped = new Map();
       for (const r of rows) {
+        const key = `${r.subcontractor_company_id}__${r.site_id}`;
+        if (!grouped.has(key)) grouped.set(key, { subcontractor_company_id: r.subcontractor_company_id, site_id: r.site_id, fullday: 0, am: 0, pm: 0, notes: r.notes });
+        const g = grouped.get(key);
+        const n = Number(r.subcontractor_headcount != null ? r.subcontractor_headcount : r.headcount) || 0;
+        if (r.work_type === '午前') g.am += n; else if (r.work_type === '午後') g.pm += n; else g.fullday += n;
+      }
+      for (const g of grouped.values()) {
         // eslint-disable-next-line no-await-in-loop
-        await addDailyReportSubcontractorLine({ subcontractor_company_id: r.subcontractor_company_id, site_id: r.site_id, work_type: r.work_type, headcount: r.headcount, notes: r.notes });
+        await addDailyReportSubcontractorLine(g);
       }
     }
   } catch (e) { /* 取得失敗でも新規追加は可能 */ }
+  if (document.querySelectorAll('#dr-sc-list .dr-sc-entry').length === 0) await addDailyReportSubcontractorLine();
   updateDrScTotals();
 }
 async function doSubmitSubcontractorHeadcount() {
@@ -7531,12 +7697,17 @@ async function doSubmitSubcontractorHeadcount() {
   for (const el of document.querySelectorAll('#dr-sc-list .dr-sc-entry')) {
     const companyId = el.querySelector('.dr-sc-company').value;
     const siteId = el.querySelector('.dr-sc-site-select').value;
-    const headcount = el.querySelector('.dr-sc-headcount').value;
-    const workType = el.querySelector('.dr-sc-work-type').value;
+    const notes = el.querySelector('.dr-sc-notes').value.trim() || null;
+    const fd = Number(el.querySelector('.dr-sc-fullday').value) || 0;
+    const am = Number(el.querySelector('.dr-sc-am').value) || 0;
+    const pm = Number(el.querySelector('.dr-sc-pm').value) || 0;
     if (!companyId) { showError('dr-sc-error', '外注会社を選択してください。'); return; }
     if (!siteId || siteId === '__new__') { showError('dr-sc-error', '外注の現場を選択してください。'); return; }
-    if (!headcount || Number(headcount) < 1) { showError('dr-sc-error', '人数を1以上で入力してください。'); return; }
-    entries.push({ company_id: companyId, headcount: String(headcount), site_id: siteId, work_type: workType, is_night_shift: false, notes: el.querySelector('.dr-sc-notes').value.trim() || null });
+    if (fd + am + pm < 1) { showError('dr-sc-error', '終日・午前・午後のいずれかに人数を入力してください。'); return; }
+    // §7/§8: 1行(会社×現場)を 終日/午前/午後 の勤務区分ごとに分けて保存する(人数>0のみ)。
+    if (fd > 0) entries.push({ company_id: companyId, headcount: String(fd), site_id: siteId, work_type: '終日', is_night_shift: false, notes });
+    if (am > 0) entries.push({ company_id: companyId, headcount: String(am), site_id: siteId, work_type: '午前', is_night_shift: false, notes });
+    if (pm > 0) entries.push({ company_id: companyId, headcount: String(pm), site_id: siteId, work_type: '午後', is_night_shift: false, notes });
   }
   if (entries.length === 0) { showError('dr-sc-error', '外注を1件以上追加してください。'); return; }
   const btn = document.getElementById('dr-sc-submit');
@@ -8028,8 +8199,7 @@ function onDailyReportCalDayClick(dateStr, info) {
   const reportBlock = (info && info.report_status)
     ? `<button type="button" data-open-detail="${dateStr}">この日の日報を確認する</button>`
     : `${leaveLine || '<div class="hint-inline">この日の日報はありません</div>'}
-       <button type="button" class="secondary" data-open-input="${dateStr}">日報を書く</button>
-       ${!info || !info.is_paid_leave ? `<button type="button" class="secondary" data-mark-rest="${dateStr}" style="margin-top:6px;">今日は休みとして登録する</button>` : ''}`;
+       <button type="button" class="secondary" data-open-input="${dateStr}">日報を書く</button>`;
 
   detailEl.innerHTML = `
     <div class="card">
@@ -8250,6 +8420,18 @@ async function loadMyDailyReports() {
     list.innerHTML = '';
     rows.forEach((r) => {
       const isCancelled = r.report_status === 'cancelled';
+      // 休日(システム自動登録): 本人が出していない休日日報。人工0・タップ詳細なしのお休み表示にする。
+      if (!isCancelled && r.is_system_holiday) {
+        const hdiv = document.createElement('div');
+        hdiv.className = 'history-item is-holiday-auto';
+        hdiv.innerHTML = `
+          <div class="row1"><span>${r.report_date}</span><span class="mini-tag muted">お休み</span></div>
+          <div class="row2">休日（システム自動登録）</div>
+          <div class="hint-inline">勤務予定がないため、システムが休日として記録しました</div>
+        `;
+        list.appendChild(hdiv);
+        return;
+      }
       const div = document.createElement('div');
       div.className = 'history-item' + (isCancelled ? ' is-cancelled' : '');
       div.style.cursor = 'pointer';
@@ -8462,48 +8644,69 @@ async function loadDailyReportNeedsReviewAdmin() {
       const wrap = document.createElement('div');
       wrap.className = 'card';
       wrap.style.marginBottom = '10px';
-      const memberLines = g.rows.map((r) => `
-        <div class="field-row">
-          <span>${r.employee_name}</span>
-          <span>${r.work_type}${r.overtime_hours != null ? ' 残業' + r.overtime_hours + 'h' : ''}${r.is_early_commute ? ' 通勤早出あり' : ''}${r.is_commute_overtime ? ' 通勤残業あり' : ''}</span>
-        </div>
-      `).join('');
-      const issueTexts = [...new Set(g.rows.flatMap((r) => (r.consistency_issues || []).map((iss) => iss.message)))];
-      wrap.innerHTML = `
-        <div class="row1"><span>${g.report_date}</span><span>${g.site_name || ''}</span></div>
-        ${memberLines}
-        ${issueTexts.map((t) => `<div class="mini-tag danger" style="display:block;margin-top:4px;">⚠ ${t}</div>`).join('')}
-        <div class="button-row" style="margin-top:10px;">
-          ${g.rows.map((r) => `<button type="button" class="secondary" data-ack-id="${r.id}">${r.employee_name}を確認済みにする</button>`).join('')}
-        </div>
-        <div class="button-row">
-          ${g.rows.map((r) => `<button type="button" class="link" data-correct-id="${r.id}">${r.employee_name}へ修正依頼</button>`).join('')}
-        </div>
-      `;
+      // §3: 判断に必要な情報(社員番号・対象日・日報現場・配置現場・勤務区分・人工・提出日時・理由)を
+      // 出し、各日報に【問題なしとして確定】【修正依頼】【日報を取消】を用意する。
+      const memberLines = g.rows.map((r) => {
+        const siteMismatch = r.assignment_site && r.site_name && r.assignment_site !== r.site_name;
+        return `
+        <div class="card" style="margin-top:8px;padding:10px;background:var(--surface-2,rgba(255,255,255,0.03));">
+          <div class="row1"><span style="font-weight:700;">${r.employee_name}</span><span class="mini-tag">${r.employee_code}</span></div>
+          <div class="field-row"><span>日報現場</span><span>${r.site_name || '(未設定)'}</span></div>
+          <div class="field-row"><span>配置現場</span><span>${r.assignment_site || '(配置なし)'}${siteMismatch ? ' <span class="mini-tag danger">不一致</span>' : ''}</span></div>
+          <div class="field-row"><span>勤務区分 / 人工</span><span>${r.work_type || '-'} / ${Number(r.headcount || 0)}人工${r.overtime_hours ? ' ・残業' + r.overtime_hours + 'h' : ''}</span></div>
+          <div class="field-row"><span>提出日時</span><span>${r.submitted_at ? new Date(r.submitted_at).toLocaleString('ja-JP') : '-'}</span></div>
+          <div class="mini-tag danger" style="display:block;margin-top:4px;">⚠ ${(r.consistency_issues || []).map((iss) => iss.message).join(' / ') || r.review_reason || '要確認'}</div>
+          <div class="button-row" style="margin-top:8px;">
+            <button type="button" class="secondary" data-ack-id="${r.id}">問題なしとして確定</button>
+            <button type="button" class="link" data-correct-id="${r.id}">修正依頼</button>
+            <button type="button" class="link" data-cancel-id="${r.id}" style="color:var(--danger);">日報を取消</button>
+          </div>
+        </div>`;
+      }).join('');
+      wrap.innerHTML = `<div class="row1"><span style="font-weight:700;">${g.report_date}</span><span>${g.site_name || ''}</span></div>${memberLines}`;
       list.appendChild(wrap);
     });
+    // 問題なしとして確定 → report_status=confirmed(要確認一覧から消える)。
     list.querySelectorAll('[data-ack-id]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
-          await rpc('admin_resolve_daily_report_review', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(btn.dataset.ackId), p_action: 'acknowledge', p_reason: null });
+          await rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: [Number(btn.dataset.ackId)], p_action: 'confirmed', p_reason: null });
           loadDailyReportNeedsReviewAdmin();
-        } catch (e) { btn.disabled = false; }
+        } catch (e) { alert(e.message || '確定に失敗しました。'); btn.disabled = false; }
       });
     });
+    // 修正依頼 → 本人へ差し戻し(rejected)。本人HOMEの「今日やること」へ表示され理由が通知される。
     list.querySelectorAll('[data-correct-id]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const reason = window.prompt('修正依頼の理由を入力してください。');
+        const reason = window.prompt('修正依頼の理由を入力してください（本人へ通知されます）。');
         if (!reason || !reason.trim()) return;
         btn.disabled = true;
         try {
           await rpc('admin_resolve_daily_report_review', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(btn.dataset.correctId), p_action: 'request_correction', p_reason: reason.trim() });
           loadDailyReportNeedsReviewAdmin();
-        } catch (e) { btn.disabled = false; }
+        } catch (e) { alert(e.message || '修正依頼に失敗しました。'); btn.disabled = false; }
+      });
+    });
+    // 日報を取消 → 論理取消(集計・人工・Spreadsheet反映の対象外、監査ログ保持)。
+    list.querySelectorAll('[data-cancel-id]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!window.confirm('この日報を取り消しますか？\n\n取消すと、集計・人工・Spreadsheet反映の対象から除外されます。\n履歴には「取消済み」として残ります。')) return;
+        const reason = window.prompt('取消理由を入力してください。');
+        if (reason === null) return;
+        if (!reason.trim()) { alert('取消理由を入力してください。'); return; }
+        btn.disabled = true;
+        try {
+          await rpc('admin_cancel_daily_report_by_id', { p_admin_employee_code: session.employeeCode, p_report_id: Number(btn.dataset.cancelId), p_reason: reason.trim() });
+          loadDailyReportNeedsReviewAdmin();
+        } catch (e) { alert(e.message || '取消に失敗しました。'); btn.disabled = false; }
       });
     });
   } catch (e) {
-    list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
+    // §4: 取得失敗と0件を混同しない。
+    list.innerHTML = '<div class="empty-state" style="color:var(--danger);">読み込みに失敗しました。</div><button type="button" class="secondary" id="nr-retry" style="margin-top:8px;">再読み込み</button>';
+    const rb = document.getElementById('nr-retry');
+    if (rb) rb.addEventListener('click', () => loadDailyReportNeedsReviewAdmin());
   }
 }
 
@@ -9021,21 +9224,60 @@ const DRM_SUMMARY_CARDS = [
   { key: 'pending_confirm_count', label: '確認待ち' },
   { key: 'rejected_count', label: '差し戻し' },
   { key: 'confirmed_count', label: '確認済み' },
+  { key: 'exempt_count', label: '日報対象外' },
 ];
+
+// 本日の社員を「提出対象(提出済み/未提出)」と「対象外(休日/有給/その他休暇/その他)」へ
+// 重複なく分類して表示する。各数字はタップで対象者一覧へ遷移する(誰なのかが分かる)。
+async function loadDrmBreakdown() {
+  const session = getSession();
+  const el = document.getElementById('drm-breakdown');
+  if (!el) return;
+  try {
+    const rows = await rpc('admin_daily_report_breakdown', { p_admin_employee_code: session.employeeCode, p_date: todayJST() });
+    const b = rows && rows[0];
+    if (!b) { el.innerHTML = ''; return; }
+    const num = (bucket, n, cls) => `<button type="button" class="drm-bd-num ${cls || ''}" data-bucket="${bucket}">${n}</button>`;
+    el.innerHTML = `
+      <div class="card drm-breakdown-card">
+        <div class="drm-bd-row drm-bd-total"><span>本日の社員</span><strong>${b.total_employees}名</strong></div>
+        <div class="drm-bd-row"><span>├ 日報提出対象</span><strong>${b.target_total}名</strong></div>
+        <div class="drm-bd-row drm-bd-sub"><span>│　├ 提出済み</span>${num('target_submitted', b.target_submitted + '名', 'good')}</div>
+        <div class="drm-bd-row drm-bd-sub"><span>│　└ 未提出</span>${num('missing', b.target_missing + '名', b.target_missing > 0 ? 'alert' : '')}</div>
+        <div class="drm-bd-row"><span>└ 日報対象外</span><strong>${b.exempt_total}名</strong></div>
+        <div class="drm-bd-row drm-bd-sub"><span>　├ 休日/勤務予定なし</span>${num('holiday', b.exempt_holiday + '名')}</div>
+        <div class="drm-bd-row drm-bd-sub"><span>　├ 有給</span>${num('paid_leave', b.exempt_paid_leave + '名')}</div>
+        <div class="drm-bd-row drm-bd-sub"><span>　├ その他休暇</span>${num('other_leave', b.exempt_other_leave + '名')}</div>
+        <div class="drm-bd-row drm-bd-sub"><span>　└ その他対象外</span>${num('other_exempt', b.exempt_other + '名')}</div>
+      </div>`;
+    el.querySelectorAll('.drm-bd-num').forEach((btn) => {
+      btn.addEventListener('click', () => openDailyReportPeople(btn.dataset.bucket));
+    });
+    return b;
+  } catch (e) {
+    // §4: 取得失敗は空表示にせず、古い件数も残さず、明示エラー+再読み込み。
+    el.innerHTML = '<div class="card drm-breakdown-card"><div class="hint" style="color:var(--danger);">内訳の読み込みに失敗しました。</div><button type="button" class="secondary" id="drm-bd-retry" style="margin-top:8px;">再読み込み</button></div>';
+    const rb = document.getElementById('drm-bd-retry');
+    if (rb) rb.addEventListener('click', () => loadDrmSummary());
+    return null;
+  }
+}
 
 async function loadDrmSummary() {
   const session = getSession();
   const grid = document.getElementById('drm-summary-grid');
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('admin_get_daily_report_summary', { p_admin_employee_code: session.employeeCode, p_date: todayJST() });
-    const d = rows && rows[0];
+    const [rows, bd] = await Promise.all([
+      rpc('admin_get_daily_report_summary', { p_admin_employee_code: session.employeeCode, p_date: todayJST() }),
+      loadDrmBreakdown(),
+    ]);
+    const d = Object.assign({}, rows && rows[0]);
+    if (bd) d.exempt_count = bd.exempt_total; // 対象外は breakdown から
     grid.innerHTML = DRM_SUMMARY_CARDS.map((c) => {
       const count = d ? (d[c.key] || 0) : 0;
-      // 数字カードはタップで本日のその状態だけに一覧を絞り込む(ユーザー要望: 提出/未提出/
-      // 確認待ち/差し戻し/確認済みの数字をタップして該当日報へ辿れるようにする)。
       return `
-        <button type="button" class="dash-card drm-summary-card" data-card="${c.key}" title="タップで${c.label}に絞り込み">
+        <button type="button" class="dash-card drm-summary-card" data-card="${c.key}" title="タップで${c.label}の対象者を表示">
           <span class="dash-card-top"><span class="dash-card-count ${count === 0 ? 'zero' : 'alert'}">${count}</span></span>
           <span class="dash-card-label">${c.label}</span>
         </button>
@@ -9045,7 +9287,52 @@ async function loadDrmSummary() {
       btn.addEventListener('click', () => applyDrmCardFilter(btn.dataset.card));
     });
   } catch (e) {
-    grid.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+    // §4: 取得失敗はカードの古い件数を残さず、明示エラー+再読み込み導線。
+    grid.innerHTML = '<div class="hint" style="color:var(--danger);">読み込みに失敗しました。</div><button type="button" class="secondary" id="drm-sum-retry" style="margin-top:8px;">再読み込み</button>';
+    const rb = document.getElementById('drm-sum-retry');
+    if (rb) rb.addEventListener('click', () => loadDrmSummary());
+  }
+}
+
+// 分類別の対象者一覧画面へ。bucket 例: missing/exempt/holiday/paid_leave/other_leave/other_exempt/
+// target_submitted/anomaly/unconfirmed。
+const DRP_TITLES = {
+  missing: '本日の未提出', target_submitted: '本日の提出', exempt: '日報対象外',
+  holiday: '休日 / 勤務予定なし', paid_leave: '有給', other_leave: 'その他休暇', other_exempt: 'その他対象外',
+  anomaly: '要確認の日報', unconfirmed: '配置を未確認の社員',
+};
+let dailyReportPeopleState = null;
+function openDailyReportPeople(bucket, title) {
+  dailyReportPeopleState = { bucket, title: title || DRP_TITLES[bucket] || '対象者一覧', date: todayJST() };
+  showScreen('daily-report-people');
+}
+async function loadDailyReportPeople() {
+  if (!dailyReportPeopleState) return;
+  const session = getSession();
+  const { bucket, title, date } = dailyReportPeopleState;
+  document.getElementById('drp-title').textContent = title;
+  const listEl = document.getElementById('drp-list');
+  const subEl = document.getElementById('drp-sub');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  subEl.textContent = '';
+  try {
+    const rows = await rpc('admin_list_daily_report_people', { p_admin_employee_code: session.employeeCode, p_date: date, p_bucket: bucket });
+    // §4: 取得成功して初めて件数を出す。0件は「対象者はいません」と明示(取得失敗と混同しない)。
+    subEl.textContent = `${(rows || []).length}名`;
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">対象者はいません。</div>'; return; }
+    listEl.innerHTML = rows.map((r) => `
+      <div class="history-item">
+        <div class="row1"><span>${r.employee_name}</span><span class="mini-tag">${r.employee_code}</span></div>
+        ${r.line1 ? `<div class="row2">${r.line1}</div>` : ''}
+        ${r.line2 ? `<div class="row2">${r.line2}</div>` : ''}
+      </div>
+    `).join('');
+  } catch (e) {
+    // §4: 取得失敗は 0件 と絶対に混同しない。古い件数も残さず、再読み込み導線を出す。
+    subEl.textContent = '取得エラー';
+    listEl.innerHTML = '<div class="hint" style="color:var(--danger);">読み込みに失敗しました。通信状況をご確認ください。</div><button type="button" class="secondary" id="drp-retry" style="margin-top:8px;">再読み込み</button>';
+    const rb = document.getElementById('drp-retry');
+    if (rb) rb.addEventListener('click', () => loadDailyReportPeople());
   }
 }
 
@@ -9059,16 +9346,9 @@ const DRM_CARD_TO_STATUS = {
 };
 function applyDrmCardFilter(cardKey) {
   const today = todayJST();
-  if (cardKey === 'missing_count') {
-    const el = document.getElementById('drm-missing-today-list');
-    if (el) {
-      el.style.display = 'block';
-      const tg = document.getElementById('drm-missing-toggle');
-      if (tg) tg.textContent = '未提出者を隠す';
-      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    return;
-  }
+  // 未提出/対象外は日報一覧(=提出済みの行)には出ないため、専用の対象者一覧へ遷移する。
+  if (cardKey === 'missing_count') { openDailyReportPeople('missing'); return; }
+  if (cardKey === 'exempt_count') { openDailyReportPeople('exempt'); return; }
   const status = DRM_CARD_TO_STATUS[cardKey] || '';
   // 本日分に日付を固定
   drmFilters.dateFrom = today; drmFilters.dateTo = today;
@@ -9145,6 +9425,20 @@ function sortDrmGroups(groupList) {
   return sorted;
 }
 
+// 日報一覧/詳細の担当者表示ラベル(§9: 「null(外注:)」を出さない)。外注は3モデルを吸収する:
+//  1) 応援(会社×現場×人数)モデル … 作業員名が無いので「外注（応援） 会社名」+ 人数/人工。
+//  2) 旧・作業員紐付けモデル … 作業員名(外注:会社名)。
+//  3) 社員 … 氏名。いずれの値も欠けたら (不明) を出し、null文字は絶対に出さない。
+function drmWorkerLabel(f) {
+  if (f && f.worker_type === 'subcontractor') {
+    const co = f.subcontractor_company_name || '(会社未設定)';
+    if (f.subcontractor_worker_name) return `${f.subcontractor_worker_name}(外注:${co})`;
+    const ppl = (f.subcontractor_headcount != null && f.subcontractor_headcount !== '') ? ` ${Number(f.subcontractor_headcount)}名` : '';
+    return `外注（応援） ${co}${ppl}`;
+  }
+  return (f && f.employee_name) || '(不明)';
+}
+
 function renderDrmAll() {
   // report_date + 対象者 でグループ化し、現場1/現場2を横に並べる(スプレッドシートの
   // 「1日=現場1行+現場2行」構造とも対応させやすいよう、スロット順に並べる)。
@@ -9170,7 +9464,7 @@ function renderDrmAll() {
 
   listEl.innerHTML = groupList.map((g) => {
     const f = g.first;
-    const personName = f.worker_type === 'subcontractor' ? `${f.subcontractor_worker_name}(外注:${f.subcontractor_company_name || ''})` : (f.employee_name || '(不明)');
+    const personName = drmWorkerLabel(f);
     const sites = g.rows.map((r) => `${r.site_name || '(現場不明)'}・${r.work_type || ''}`).join(' / ');
     const statusBadgeClass = f.report_status === 'confirmed' ? 'done' : (f.report_status === 'rejected' ? 'rejected' : '');
     return `
@@ -9238,7 +9532,9 @@ function renderDrmAll() {
 // 「原本(本人が提出した内容)」は表示専用、「スプレッドシートへ反映する内容」は
 // 管理者が調整できる(reflect_override_*)。既にloadDailyReportManagementListで
 // 取得済みのdrmRowsから該当グループを探すだけで、追加のRPC呼び出しは不要。
+let currentDrdGroupKey = null;
 async function openDailyReportDetail(groupKey) {
+  currentDrdGroupKey = groupKey;
   const rows = drmRows.filter((r) => drmGroupKey(r) === groupKey).sort((a, b) => (a.entry_slot || 0) - (b.entry_slot || 0));
   showScreen('daily-report-detail');
   if (rows.length === 0) {
@@ -9249,9 +9545,17 @@ async function openDailyReportDetail(groupKey) {
     return;
   }
   const f = rows[0];
-  const personName = f.worker_type === 'subcontractor' ? `${f.subcontractor_worker_name}(外注:${f.subcontractor_company_name || ''})` : (f.employee_name || '(不明)');
+  const personName = drmWorkerLabel(f);
   document.getElementById('drd-title').textContent = `${personName}・${f.report_date}`;
-  document.getElementById('drd-meta').textContent = `提出状況: ${DRM_STATUS_LABEL[f.report_status] || f.report_status}`;
+  // 外注(応援)は 合計人数・合計人工 を要約表示(§9)。取消済み行は合計から除外。
+  const activeRows = rows.filter((r) => r.report_status !== 'cancelled');
+  let metaText = `提出状況: ${DRM_STATUS_LABEL[f.report_status] || f.report_status}`;
+  if (f.worker_type === 'subcontractor') {
+    const totalPeople = activeRows.reduce((a, r) => a + (r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) : 0), 0);
+    const totalManDays = activeRows.reduce((a, r) => a + Number(r.headcount || 0), 0);
+    metaText = `外注（応援）｜合計 ${totalPeople}名 / ${totalManDays}人工　${metaText}`;
+  }
+  document.getElementById('drd-meta').textContent = metaText;
 
   document.getElementById('drd-slots').innerHTML = rows.map((r, idx) => {
     const effWorkType = r.reflect_override_work_type || r.work_type;
@@ -9261,11 +9565,19 @@ async function openDailyReportDetail(groupKey) {
       <div class="card" data-slot-id="${r.id}">
         <div class="form-title" style="font-size:15px;">現場${idx + 1}(スロット${r.entry_slot || idx + 1})</div>
         <div class="field-group">
-          <div class="field-row"><span class="field-label">【原本】現場</span><span class="field-value">${r.site_name || '-'}</span></div>
+          ${f.worker_type === 'subcontractor' ? `
+          <div class="field-row"><span class="field-label">外注会社</span><span class="field-value">${f.subcontractor_company_name || '(会社未設定)'}</span></div>` : ''}
+          <div class="field-row"><span class="field-label">【原本】現場</span><span class="field-value">${r.site_name || r.site_raw_name || '-'}</span></div>
           <div class="field-row"><span class="field-label">【原本】勤務区分</span><span class="field-value">${r.work_type || '-'}${r.is_leader ? '・リーダー' : ''}${r.is_night_shift ? '・夜勤' : ''}</span></div>
-          <div class="field-row"><span class="field-label">スプレッドシート反映</span><span class="field-value">${r.reflected_to_sheet_at ? `反映済み(${new Date(r.reflected_to_sheet_at).toLocaleString('ja-JP')})` : '未反映'}</span></div>
+          ${f.worker_type === 'subcontractor' ? `
+          <div class="field-row"><span class="field-label">人数</span><span class="field-value">${r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) + '名' : '-'}</span></div>` : ''}
+          <div class="field-row"><span class="field-label">人工</span><span class="field-value">${Number(r.headcount || 0)}人工</span></div>
+          <div class="field-row"><span class="field-label">スプレッドシート反映</span><span class="field-value">${r.report_status === 'cancelled' ? '対象外(取消済み)' : (r.reflected_to_sheet_at ? `反映済み(${new Date(r.reflected_to_sheet_at).toLocaleString('ja-JP')})` : '未反映')}</span></div>
           ${r.reflect_override_work_type ? `<div class="field-row"><span class="field-label">反映値を調整</span><span class="field-value">${r.reflect_override_by || ''} ${r.reflect_override_at ? new Date(r.reflect_override_at).toLocaleString('ja-JP') : ''}${r.reflect_override_reason ? `(${r.reflect_override_reason})` : ''}</span></div>` : ''}
         </div>
+        ${r.report_status === 'cancelled'
+          ? '<div class="mini-tag muted">この行は取消済みです(集計・人工・シート反映の対象外)</div>'
+          : `<button type="button" class="secondary drd-cancel-row" data-report-id="${r.id}" data-date="${r.report_date}" style="color:var(--danger);border-color:var(--danger);">この日報を取消する</button>`}
         <div class="form-title" style="font-size:14px;">スプレッドシートへ反映する内容</div>
         <label>現場</label>
         <input type="text" class="drd-site-search" data-slot-id="${r.id}" placeholder="現場名で検索" value="${r.reflect_override_site_name || r.site_name || ''}">
@@ -9306,6 +9618,31 @@ async function openDailyReportDetail(groupKey) {
 
 function wireDailyReportDetailSlots(rows) {
   const slotsEl = document.getElementById('drd-slots');
+  // §10: 管理者が誤登録の日報行(外注含む)を id 指定で論理取消する。取消後は集計・人工・
+  // Spreadsheet 反映対象から除外され、監査ログが残る。
+  slotsEl.querySelectorAll('.drd-cancel-row').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const reportId = Number(btn.dataset.reportId);
+      if (!window.confirm('この日報を取り消しますか？\n\n取消すと、出勤・人工・給与・Spreadsheet反映の集計対象から除外されます。\n履歴には「取消済み」として残ります。')) return;
+      const reason = window.prompt('取消理由を入力してください（例: 誤って登録した / 会社・人数を間違えた など）');
+      if (reason === null) return;
+      if (!reason.trim()) { alert('取消理由を入力してください。'); return; }
+      btn.disabled = true;
+      try {
+        const session = getSession();
+        const res = await rpc('admin_cancel_daily_report_by_id', { p_admin_employee_code: session.employeeCode, p_report_id: reportId, p_reason: reason.trim() });
+        const hadReflected = Array.isArray(res) && res[0] && res[0].out_had_reflected;
+        alert('この日報を取消しました。集計・人工・Spreadsheet反映の対象から除外されます。' + (hadReflected ? '\n\n※既にシート反映済みだったため、次回の反映処理で訂正されます。' : ''));
+        // 一覧(drmRows)を再取得してから同じ詳細を開き直す(取消済み表示に更新)。
+        await loadDailyReportManagementList();
+        if (currentDrdGroupKey) openDailyReportDetail(currentDrdGroupKey);
+        else showScreen('daily-report-management');
+      } catch (e) {
+        alert(e.message || '取消に失敗しました。');
+        btn.disabled = false;
+      }
+    });
+  });
   slotsEl.querySelectorAll('.drd-worktype').forEach((row) => {
     row.querySelectorAll('.filter-chip').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -11079,12 +11416,22 @@ function init() {
     const type = e.target.value;
     document.getElementById('daily-report-target-employee-wrap').style.display = type === 'employee' ? 'block' : 'none';
     document.getElementById('daily-report-target-worker-wrap').style.display = type === 'subcontractor' ? 'block' : 'none';
+    // §6: 外注（応援）モードでは通常の社員日報フォームを完全に非表示にし、外注専用フォームだけ出す。
+    const isSupport = type === 'subcontractor_support';
+    const normalForm = document.getElementById('daily-report-normal-form');
+    if (normalForm) normalForm.style.display = isSupport ? 'none' : '';
+    if (isSupport) {
+      dailyReportTarget = { type: 'subcontractor_support', employeeCode: null, employeeName: null, subcontractorWorkerId: null, workerName: null };
+      loadDrScSection(document.getElementById('daily-report-date').value);
+      return;
+    }
     if (type === 'self') {
       dailyReportTarget = { type: 'self', employeeCode: session.employeeCode, employeeName: session.employeeName, subcontractorWorkerId: null, workerName: null };
       loadDailyReportForDate(document.getElementById('daily-report-date').value);
     } else {
       dailyReportTarget = { type, employeeCode: null, employeeName: null, subcontractorWorkerId: null, workerName: null };
     }
+    loadDrScSection(document.getElementById('daily-report-date').value);
   });
   document.getElementById('daily-report-target-employee-search').addEventListener('input', async (e) => {
     const q = e.target.value.trim();
@@ -11174,6 +11521,15 @@ function init() {
   const closeImageZoom = () => imageZoomOverlay.classList.remove('open');
   imageZoomOverlay.addEventListener('click', closeImageZoom);
   document.getElementById('image-zoom-close').addEventListener('click', (e) => { e.stopPropagation(); closeImageZoom(); });
+  // 領収書ギャラリー操作(前/次/閉じる/スワイプ)
+  document.getElementById('rg-close').addEventListener('click', (e) => { e.stopPropagation(); closeReceiptGallery(); });
+  document.getElementById('rg-prev').addEventListener('click', (e) => { e.stopPropagation(); rgStep(-1); });
+  document.getElementById('rg-next').addEventListener('click', (e) => { e.stopPropagation(); rgStep(1); });
+  (() => {
+    const stage = document.getElementById('rg-stage'); let sx = null;
+    stage.addEventListener('touchstart', (e) => { sx = e.changedTouches[0].clientX; }, { passive: true });
+    stage.addEventListener('touchend', (e) => { if (sx == null) return; const dx = e.changedTouches[0].clientX - sx; if (Math.abs(dx) > 40) rgStep(dx < 0 ? 1 : -1); sx = null; }, { passive: true });
+  })();
 
   document.getElementById('ai-guide-fab').addEventListener('click', openAiGuidePanel);
   document.getElementById('ai-guide-close').addEventListener('click', closeAiGuidePanel);
@@ -11365,6 +11721,17 @@ function init() {
   });
   document.getElementById('employee-detail-leave-method').addEventListener('change', updateEmployeeDetailStatutoryHint);
   document.getElementById('ep-submit').addEventListener('click', doSubmitExpensePayment);
+  document.getElementById('ep-schedule-save').addEventListener('click', async () => {
+    const session = getSession();
+    if (!expensePaymentTarget) return;
+    const d = document.getElementById('ep-schedule-date').value;
+    if (!d) { showError('ep-error', '精算予定日を入力してください。'); return; }
+    hideError('ep-error');
+    try {
+      await rpc('admin_set_expense_payment_schedule', { p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(expensePaymentTarget.requestId), p_scheduled_payment_date: d });
+      await loadExpensePaymentSchedule(expensePaymentTarget.requestId);
+    } catch (e) { showError('ep-error', e.message || '精算予定日の設定に失敗しました。'); }
+  });
 
   document.getElementById('expense-bulk-receipts-input').addEventListener('change', (e) => {
     handleBulkReceiptFiles(e.target.files);
@@ -11649,6 +12016,10 @@ function init() {
   SCREEN_ENTER_HOOKS['daily-report-management'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportManagement();
+  };
+  SCREEN_ENTER_HOOKS['daily-report-people'] = async () => {
+    if (!(await isNippoAdmin())) { enterMenu(); return; }
+    loadDailyReportPeople();
   };
   SCREEN_ENTER_HOOKS['request-detail'] = () => { loadRequestDetailContent(); };
   SCREEN_ENTER_HOOKS['my-request-detail'] = () => { loadMyRequestDetailContent(); };

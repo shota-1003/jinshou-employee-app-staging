@@ -789,5 +789,15 @@
 .ac-memrow .ac-rtag.ac-role-own-haul   { background: #c7e7df; color: #0f5b4d; }
 .ac-memrow .ac-rtag.ac-role-sub-field  { background: #f0dcc0; color: #7a4510; }
 .ac-memrow .ac-rtag.ac-role-sub-haul   { background: #e6d3b4; color: #6b4a14; }
+/* コピー元の候補日。日付と「何現場・何人」を2段で出し、狭い画面でも
+   どの日から持ってくるのかが分かるようにする。 */
+.ac-copydates { max-height: 132px; overflow-y: auto; }
+.ac-copydates .ac-token {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  line-height: 1.25; padding: 5px 9px;
+}
+.ac-copyday { font-size: 13px; font-weight: 800; }
+.ac-copymeta { font-size: 10.5px; font-weight: 600; opacity: .75; }
+
 /* 種別管理のプルダウン(枠の選択肢を隠さない) */
 .ac-catopts select.ac-input, .ac-catadd select.ac-input { flex: 1 1 auto; min-width: 130px; height: 34px; }

@@ -1344,7 +1344,7 @@
                 // 2026-09-01 権限仕様: コピー・履歴・LINE共有は社員誰でも使える。
                 // 一斉通知と予実照合は影響範囲が大きいので管理者のみに残す。
                 const items = [
-                    ['前日・別の日からコピー', '現場を選んでコピーできます（1現場だけ／複数）', () => { api.close(); openCopySheet(); }],
+                    ['別の日からコピー', '前日に限らず、配置がある日から選べます（1現場だけ／複数）', () => { api.close(); openCopySheet(); }],
                     ['LINE共有用のテキスト', '全体LINEへ貼り付ける文面を作ります', () => { api.close(); openLineSheet(); }],
                     ['この日の変更履歴', '誰が・いつ・何を変えたか（社員も見られます）', () => { api.close(); openHistorySheet(); }],
                 ];
@@ -2667,11 +2667,65 @@
 
                 const dateRow = el('div', 'ac-field');
                 dateRow.append(el('div', 'ac-label', 'どの日からコピーするか'));
+                // 実際に配置が入っている日を候補として並べる。
+                // 以前は前日が既定で、他の日を選ぶには日付欄を手で操作するしかなく、
+                // 前日に配置が無いと「前日からしかコピーできない」ように見えていた。
+                // 過去だけでなく先の日も候補に出す(先に組んだ予定を流用することがある)。
+                const quick = el('div', 'ac-tokens ac-copydates');
+                dateRow.append(quick);
                 const dateInput = el('input', 'ac-input');
                 dateInput.type = 'date';
                 dateInput.value = from;
+                dateRow.append(el('div', 'ac-schedmeta', '候補に無い日は、下の日付欄から直接選べます。'));
                 dateRow.append(dateInput);
                 box.append(dateRow);
+
+                function drawDates(dates) {
+                    quick.innerHTML = '';
+                    if (!dates.length) {
+                        quick.append(el('div', 'ac-schedmeta', 'コピーできる配置がある日が見つかりませんでした。'));
+                        return;
+                    }
+                    for (const d of dates) {
+                        const t = el('button', 'ac-token' + (d.date === from ? ' ac-on' : ''));
+                        const dd = parseYmd(d.date);
+                        t.append(el('span', 'ac-copyday',
+                            `${dd.getMonth() + 1}/${dd.getDate()}(${DOW_JP[dd.getDay()]})`));
+                        t.append(el('span', 'ac-copymeta', `${d.site_count}現場 ${d.member_count}人`));
+                        t.title = labelDate(d.date)
+                            + (d.direction === 'future' ? '（先の予定）' : '')
+                            + ` ${d.site_count}現場 ${d.member_count}人`;
+                        t.addEventListener('click', () => {
+                            if (d.date === from) return;
+                            from = d.date;
+                            dateInput.value = from;
+                            selected.clear();
+                            drawDates(dates);
+                            reload();
+                        });
+                        quick.append(t);
+                    }
+                }
+
+                // 候補日の取得。前日に配置が無ければ、いちばん近い過去の日を初期値にする。
+                (async () => {
+                    let dates = [];
+                    try {
+                        dates = await rpc('assignment_list_copy_dates',
+                            { p_employee_code: me, p_to_date: state.selected, p_limit: 14 }) || [];
+                    } catch (e) { quick.append(el('div', 'ac-schedmeta', '候補日を取得できませんでした。')); return; }
+                    if (!dates.some((d) => d.date === from)) {
+                        const past = dates.filter((d) => d.direction === 'past');
+                        const pick = (past[0] || dates[0]);
+                        if (pick) {
+                            from = pick.date;
+                            dateInput.value = from;
+                            selected.clear();
+                            reload();
+                        }
+                    }
+                    drawDates(dates);
+                })();
 
                 const listWrap = el('div');
                 box.append(listWrap);

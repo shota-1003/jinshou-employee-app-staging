@@ -410,7 +410,20 @@ button.link {
 /* 経費承認画面などで領収書原本(Edge Function receipt-image 経由)をサムネイル表示する。
    読み込み完了までは薄い枠のプレースホルダーを見せ、タップで拡大(openImageZoom)する。 */
 .receipt-thumb-wrap { margin-top: 8px; }
-.receipt-proxy-thumb {
+/* 日報管理: 本日の社員の分類内訳(提出対象/対象外)。数字はタップで対象者一覧へ。 */
+.drm-breakdown-card { padding: 12px 14px; }
+.drm-bd-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
+.drm-bd-total { font-size: 15px; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 4px; }
+.drm-bd-sub { color: var(--text-muted); font-size: 13px; }
+.drm-bd-num {
+  -webkit-appearance: none; appearance: none; background: var(--surface-2, rgba(128,128,128,0.1));
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 12px; font-weight: 800; font-size: 13.5px;
+  color: var(--text); cursor: pointer; min-width: 56px; text-align: center;
+}
+.drm-bd-num.alert { color: var(--danger); border-color: var(--danger); }
+.drm-bd-num.good { color: var(--success); }
+.drm-bd-num:active { transform: translateY(1px); }
+.receipt-proxy-thumb, .secure-proxy-thumb {
   width: 88px; height: 88px; object-fit: cover; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--surface-2, rgba(128,128,128,0.12));
   display: inline-block; vertical-align: top; min-width: 88px;
@@ -480,6 +493,22 @@ button.link {
   background: rgba(255,255,255,.15); color: #fff; display: flex; align-items: center; justify-content: center; border: none;
 }
 
+/* 領収書ギャラリー(前/次/スワイプ/拡大 + 申請情報) */
+.receipt-gallery-overlay { cursor: default; flex-direction: column; }
+.receipt-gallery-overlay .rg-stage { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
+.receipt-gallery-overlay #rg-img { max-width: 100%; max-height: 68vh; object-fit: contain; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); transition: opacity .12s; }
+.receipt-gallery-overlay .rg-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); width: 44px; height: 64px; border: none;
+  background: rgba(255,255,255,.14); color: #fff; font-size: 30px; line-height: 1; border-radius: 10px; z-index: 2;
+}
+.receipt-gallery-overlay .rg-prev { left: 8px; } .receipt-gallery-overlay .rg-next { right: 8px; }
+.receipt-gallery-overlay .rg-info {
+  width: 100%; max-width: 520px; color: #fff; padding: 12px 14px 4px; text-align: center;
+}
+.receipt-gallery-overlay .rg-info-head { font-size: 12px; color: rgba(255,255,255,.65); }
+.receipt-gallery-overlay .rg-info-main { font-size: 16px; margin-top: 2px; }
+.receipt-gallery-overlay .rg-info-sub { font-size: 12.5px; color: rgba(255,255,255,.8); margin-top: 2px; }
+.emd-receipt-thumb { cursor: zoom-in; }
 .mrd-item-card { padding: 14px 16px; border-radius: var(--radius-md); background: var(--card-bg); border: 1px solid var(--border); margin-bottom: 10px; }
 .mrd-item-approval-badge { display: inline-flex; align-items: center; font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: var(--radius-pill); margin-left: 6px; }
 .mrd-item-approval-badge.approved { background: var(--success-bg); color: var(--success); }

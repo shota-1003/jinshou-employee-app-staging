@@ -11,7 +11,7 @@
 // 配置カレンダーが互いのキャッシュを消し合ってしまう。どちらも自分の接頭辞の
 // 古い版だけを消すようにしてある(../sw.js側も同じ方針に揃えてある)。
 const CACHE_PREFIX = 'jinshou-assignment-calendar';
-const CACHE_NAME = `${CACHE_PREFIX}-v16-staging`;
+const CACHE_NAME = `${CACHE_PREFIX}-v24-staging`;
 
 // このSWが実際に配信できるのはスコープ(/calendar/)配下だけ。
 // ../assignment-calendar.js などの共有ファイルは社員ポータル側のSWが持つ。
