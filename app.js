@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v105-staging';
-const BUILD_DEPLOYED_AT = '2026-09-02T08:41:45.516Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v113-staging';
+const BUILD_DEPLOYED_AT = '2026-09-02T14:41:54.644Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -37,6 +37,18 @@ const REMEMBERED_CODE_KEY = 'jinshou_remembered_employee_code'; // localStorage(
 const DEVICE_AUTH_KEY = 'jinshou_device_auth'; // localStorage({employeeCode, token}、この端末の実際の認証情報)
 
 let currentDeviceToken = null; // このタブで現在有効な端末トークン(rpc()が毎回ヘッダーへ載せる)
+
+// 2026-09-02(ユーザー指示: Production障害の可視化マップ検知、共通モジュール化・重複禁止)。
+// 実装は共通webapp/lib/client-error-reporter.js(index.htmlでこのファイルより前に読込済み)へ
+// 集約し、画面ごとの複製をしない。
+const EMPLOYEE_APP_AGENT_NAME = 'jinshou-employee-app-agent';
+window.ClientErrorReporter.init({
+  supabaseUrl: SUPABASE_URL,
+  supabaseAnonKey: SUPABASE_ANON_KEY,
+  agentName: EMPLOYEE_APP_AGENT_NAME,
+  getEmployeeCode: () => { const s = getSession(); return (s && s.employeeCode) || null; },
+  getDeviceToken: () => currentDeviceToken,
+});
 
 async function rpc(name, params) {
   const headers = {
@@ -66,6 +78,10 @@ async function rpc(name, params) {
         showScreen('login');
         showError('login-error', message === 'このアカウントは現在ご利用いただけません' ? message : 'ログイン状態が無効になりました。もう一度ログインしてください。');
       }
+    } else {
+      // 2026-09-02: セッション失効(想定内の通常フロー)以外は、可視化マップが検知できるよう
+      // 実際のProductionエラーとして報告する。
+      window.ClientErrorReporter.reportHttpError(`rpc/${name}`, res.status, message);
     }
     throw new Error(message);
   }
@@ -951,10 +967,18 @@ async function renderHomeAssignmentCard(session) {
       const time = r.time_label || (r.is_allday ? '終日' : '');
       const meet = r.meeting_time ? `集合${r.meeting_time}` : '';
       const haul = r.assignment_kind === 'haul' ? '🚚 ' : '';
-      return `<div class="home-assignment-row" data-date="${r.date}" role="button" tabindex="0"
-        style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 2px;border-top:1px solid var(--line,rgba(128,128,128,0.2));cursor:pointer;">
-        <span class="row2" style="flex:1;min-width:0;">${when}: ${haul}${safeText(r.label, '現場未設定')}${time ? `　${time}` : ''}${meet ? `　${meet}` : ''}</span>
-        <span aria-hidden="true" style="color:var(--muted);font-size:18px;line-height:1;flex:none;">›</span>
+      // 配置確認: HOMEから1タップで正式な配置確認(assignment_confirm_my_assignment, member_id指定)を行う。
+      // 確認済みは confirmed_at で判定。既読(read_at)とは別。連打しても二重登録しない(idempotent)。
+      const confirmUi = r.confirmed_at
+        ? '<span class="mini-tag info" style="flex:none;">✓ 確認済み</span>'
+        : (r.member_id ? `<button type="button" class="secondary home-assign-confirm-btn" data-member-id="${r.member_id}" style="flex:none;padding:6px 10px;font-size:13px;">配置を確認する</button>` : '');
+      return `<div class="home-assignment-row-wrap" style="border-top:1px solid var(--line,rgba(128,128,128,0.2));padding:8px 2px;">
+        <div class="home-assignment-row" data-date="${r.date}" role="button" tabindex="0"
+          style="display:flex;align-items:center;justify-content:space-between;gap:8px;cursor:pointer;">
+          <span class="row2" style="flex:1;min-width:0;">${when}: ${haul}${safeText(r.label, '現場未設定')}${time ? `　${time}` : ''}${meet ? `　${meet}` : ''}</span>
+          <span aria-hidden="true" style="color:var(--muted);font-size:18px;line-height:1;flex:none;">›</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:4px;">${confirmUi}</div>
       </div>`;
     };
     card.style.display = '';
@@ -963,6 +987,17 @@ async function renderHomeAssignmentCard(session) {
       const go = () => openAssignmentCalendarAt(rowEl.dataset.date);
       rowEl.addEventListener('click', go);
       rowEl.addEventListener('keydown', (ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); go(); } });
+    });
+    // HOMEから1タップで正式な配置確認(member_id指定)。管理者カレンダーの確認数へ即時反映。
+    card.querySelectorAll('.home-assign-confirm-btn').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        btn.disabled = true; btn.textContent = '確認中...';
+        try {
+          await rpc('assignment_confirm_my_assignment', { p_employee_code: session.employeeCode, p_member_id: Number(btn.dataset.memberId) });
+          renderHomeAssignmentCard(session); // 再取得して「確認済み」表示へ
+        } catch (e2) { btn.disabled = false; btn.textContent = '配置を確認する'; alert(e2.message || '配置の確認に失敗しました。'); }
+      });
     });
   } catch (e) {
     // 配置テーブルがまだ無い環境(Production等)ではRPCが無くエラーになる。カードを隠すだけ。
@@ -2804,6 +2839,24 @@ async function loadMyRequestDetailContent() {
       img.addEventListener('click', () => openImageZoom(img.dataset.zoom));
     });
 
+    // item16: 承認前の有給申請は本人が取り消せる(承認済み/支払済み/却下/取消済みは不可)。
+    const leaveCancelable = head.request_type === 'paid_leave'
+      && ['draft', 'waiting_employee_info', 'ready_for_review', 'needs_review', 'stopped', 'waiting_approval', 'on_hold'].includes(head.status);
+    if (leaveCancelable) {
+      document.getElementById('mrd-items').insertAdjacentHTML('beforeend',
+        '<button type="button" class="secondary" id="mrd-cancel-leave" style="margin-top:14px;color:var(--danger);border-color:var(--danger);">この有給申請を取り消す</button>');
+      document.getElementById('mrd-cancel-leave').addEventListener('click', async () => {
+        if (!window.confirm('この有給申請を取り消しますか？\n\n承認前のため取り消せます。取消後は承認待ちから外れます（有給残数には影響しません）。')) return;
+        const reason = window.prompt('取消理由（任意）') || null;
+        const session2 = getSession();
+        try {
+          await rpc('cancel_my_paid_leave_request', { p_employee_code: session2.employeeCode, p_employee_request_id: requestId, p_reason: reason });
+          alert('有給申請を取り消しました。');
+          showScreen(returnTo || 'history');
+        } catch (e2) { alert(e2.message || '取消に失敗しました。'); }
+      });
+    }
+
     // 経費立替のみ支払状況(未払い/受取確認待ち/支払済み)を表示する。承認額そのものが
     // 無い(=承認済み明細がまだ無い)申請は支払カードを出さない。
     if (head.request_type === 'expense_reimbursement' && head.approved_total != null) {
@@ -3277,10 +3330,17 @@ async function isNippoAdmin() {
 async function loadAdminEmployeeSelects() {
   const session = getSession();
   const rows = await rpc('list_active_employees', { p_admin_employee_code: session.employeeCode });
-  const options = rows.map((e) => `<option value="${e.employee_code}">${e.employee_code} ${e.employee_name}</option>`).join('');
+  const options = rows.map((e) => `<option value="${e.employee_code}" data-id="${e.id != null ? e.id : ''}">${e.employee_code} ${e.employee_name}</option>`).join('');
   document.getElementById('admin-employee-select').innerHTML = options;
   document.getElementById('admin-issue-employee').innerHTML = options;
   await loadAdminIssueMasterSelect();
+  // item4: PINリセット通知等から来た場合、対象社員を自動選択して詳細(PINリセット導線)を出す。
+  if (pendingAdminPreselectEmployeeId != null) {
+    const sel = document.getElementById('admin-employee-select');
+    const opt = Array.from(sel.options).find((o) => String(o.dataset.id) === String(pendingAdminPreselectEmployeeId));
+    if (opt) { sel.value = opt.value; loadAdminEmployeeDetail(); }
+    pendingAdminPreselectEmployeeId = null;
+  }
 }
 
 async function loadAdminIssueMasterSelect() {
@@ -3701,7 +3761,9 @@ async function loadAnnounceBanner() {
     // ここで重複表示しない(2026-08-28、ユーザー指摘: 「会社からのお知らせ」と「今日やること」で
     // 実質同じ内容が重複表示される)。
     const importantOnes = (rows || [])
-      .filter((a) => (a.importance === 'important' || a.importance === 'critical') && shouldShowOnHome(a) && a.related_type !== 'daily_reports')
+      // item5: 配置(assignment_member)は毎日発生する日常通知。「重要なお知らせ」には積まず、
+      // 「配置予定」カードと「今日やること」に集約する(日報の自動通知 daily_reports も同様に除外)。
+      .filter((a) => (a.importance === 'important' || a.importance === 'critical') && shouldShowOnHome(a) && a.related_type !== 'daily_reports' && a.related_type !== 'assignment_member')
       .sort((a, b) => (a.importance === b.importance ? 0 : a.importance === 'critical' ? -1 : 1) || new Date(b.created_at) - new Date(a.created_at));
     if (importantOnes.length === 0) return;
     // ホームが重要お知らせだけで埋まらないよう表示は3件まで(最重要優先・新しい順は上のsort済み)。
@@ -3757,8 +3819,17 @@ async function announceDeepLink(announcementId) {
     openMyRequestDetail(t.target_id, 'announcements');
     return;
   }
+  // item4: 暗証番号再設定依頼(related_type='employees')は、管理者の社員管理(PINリセット)画面へ直接遷移し、
+  // 対象社員を自動選択する。管理者は本人確認のうえ「この社員の暗証番号をリセットする」を実行できる。
+  if (t.related_type === 'employees' && t.target_id) {
+    pendingAdminPreselectEmployeeId = Number(t.target_id);
+    showScreen('admin');
+    return;
+  }
   showScreen('announcements');
 }
+// item4: PINリセット通知等から管理者社員管理へ来たとき、対象社員を自動選択するための保留id。
+let pendingAdminPreselectEmployeeId = null;
 
 // お知らせがホーム画面に表示され続けてよいかどうかの判定(共通)。
 // ルール: 未読は常に表示する。既読の場合は、display_modeがpersist_after_readなら表示し続け、
@@ -3770,6 +3841,9 @@ function shouldShowOnHome(a) {
   // ホームに表示され続けてしまっていた)。
   if (a.display_mode === 'until_date' && a.display_until && new Date(a.display_until) < new Date()) return false;
   if (!a.is_read) return true;
+  // item6: 「既読」と「処理済み」を分ける。配置(assignment_member)等のアクション付き日常通知は、
+  // 本人が確認(acknowledged_at=操作完了)したらHOMEから消す。会社告知等はread後も残す(persist)。
+  if (a.related_type === 'assignment_member' && a.acknowledged_at) return false;
   if (a.display_mode === 'persist_after_read') return true;
   if (a.display_mode === 'until_date' && a.display_until) {
     return new Date(a.display_until) >= new Date();
@@ -3798,6 +3872,7 @@ async function loadAnnouncements(includeArchived) {
         <div class="body">${a.body}${a.attachment_url ? `<br><a href="${a.attachment_url}" target="_blank" rel="noopener">添付ファイルを開く</a>` : ''}</div>
         ${a.related_type === 'employee_requests' ? `<button type="button" class="secondary announce-detail-btn" data-request-id="${a.related_id}">この申請の詳細を見る</button>` : ''}
         ${a.related_type === 'assignment_member' ? `<button type="button" class="secondary announce-assign-btn">配置を確認する</button>` : ''}
+        ${a.related_type === 'employees' ? `<button type="button" class="secondary announce-admin-btn">社員管理で対応する</button>` : ''}
         ${a.importance !== 'normal' ? `
           <div class="announce-ack-row">
             ${a.acknowledged_at
@@ -3810,7 +3885,7 @@ async function loadAnnouncements(includeArchived) {
     hydrateIcons(listEl);
     listEl.querySelectorAll('.announce-item').forEach((el) => {
       el.addEventListener('click', async (e) => {
-        if (e.target.closest('.announce-ack-btn') || e.target.closest('.announce-detail-btn') || e.target.closest('.announce-assign-btn') || e.target.closest('a')) return;
+        if (e.target.closest('.announce-ack-btn') || e.target.closest('.announce-detail-btn') || e.target.closest('.announce-assign-btn') || e.target.closest('.announce-admin-btn') || e.target.closest('a')) return;
         const wasUnread = el.classList.contains('unread');
         el.classList.toggle('expanded');
         if (wasUnread) {
@@ -3833,8 +3908,9 @@ async function loadAnnouncements(includeArchived) {
         openMyRequestDetail(btn.dataset.requestId, 'announcements');
       });
     });
-    listEl.querySelectorAll('.announce-assign-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
+    // item4: PIN再設定依頼等(related_type='employees')→ 管理者社員管理へdeep link(対象社員選択済み)。
+    listEl.querySelectorAll('.announce-admin-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
         e.stopPropagation();
         const item = btn.closest('.announce-item');
         if (item && item.classList.contains('unread')) {
@@ -3842,6 +3918,30 @@ async function loadAnnouncements(includeArchived) {
           try { rpc('mark_announcement_read', { p_employee_code: session.employeeCode, p_announcement_id: Number(item.dataset.id) }); } catch (e2) { /* 無視 */ }
         }
         announceDeepLink(Number(item.dataset.id));
+      });
+    });
+    listEl.querySelectorAll('.announce-assign-btn').forEach((btn) => {
+      // item2: 「配置を確認する」で、対象の配置(assignment_member)を直接『確認済み』にする。
+      // notificationの既読だけで終わらせず、本人のassignment acknowledgement(confirmed_at)を保存し、
+      // 管理者の「本日の配置を社員がまだ確認していない」件数から除外され、通知カードも確認済みになる。
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const item = btn.closest('.announce-item');
+        const annId = Number(item.dataset.id);
+        btn.disabled = true;
+        try {
+          const rows = await rpc('get_announcement_target', { p_employee_code: session.employeeCode, p_announcement_id: annId });
+          const t = rows && rows[0];
+          if (t && t.related_type === 'assignment_member' && t.target_id) {
+            await rpc('assignment_confirm_my_assignment', { p_employee_code: session.employeeCode, p_member_id: Number(t.target_id) });
+          }
+          await rpc('mark_announcement_read', { p_employee_code: session.employeeCode, p_announcement_id: annId });
+          await rpc('acknowledge_announcement', { p_employee_code: session.employeeCode, p_announcement_id: annId }).catch(() => {});
+          loadAnnouncements();
+        } catch (e2) {
+          btn.disabled = false;
+          alert(e2.message || '配置の確認に失敗しました。もう一度お試しください。');
+        }
       });
     });
     listEl.querySelectorAll('.announce-ack-btn').forEach((btn) => {
@@ -3921,6 +4021,11 @@ async function renderAdminTodayTasks(session) {
     const TASK_TO_PEOPLE = { daily_report_missing: 'missing', assignment_unconfirmed: 'unconfirmed' };
     el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => {
       if (btn.dataset.taskKey === 'daily_report_anomaly') { showScreen('daily-report-needs-review-admin'); return; }
+      // 有給P0: 「有給申請の承認待ち」→ 申請管理を 種類=有給・状態=承認待ち で絞り込んで直接表示。
+      if (btn.dataset.taskKey === 'approval_leave') { openAdminRequestsFiltered('paid_leave', 'pending'); return; }
+      // 各専用承認は種類フィルタ付きで申請管理へ(その他に有給等が混ざらない導線)。
+      if (btn.dataset.taskKey === 'approval_expense') { openAdminRequestsFiltered('expense_reimbursement', 'pending'); return; }
+      if (btn.dataset.taskKey === 'approval_meeting') { openAdminRequestsFiltered('meeting', 'pending'); return; }
       const b = TASK_TO_PEOPLE[btn.dataset.taskKey];
       if (b) openDailyReportPeople(b); else showScreen(btn.dataset.nav);
     }));
@@ -3978,6 +4083,15 @@ function openAdminRequestList(filter) {
   const found = DASH_CARDS.find((c) => c.filter === filter);
   document.getElementById('admin-request-list-title').textContent = found ? found.label : '一覧';
   showScreen('admin-request-list');
+}
+
+// 有給P0: 申請管理を「種類×状態」で絞り込んで開く(HOME件数と一覧を同一データソース admin_search_requests で一致させる)。
+function openAdminRequestsFiltered(type, status) {
+  areqFilters = { type: type || '', status: status || '', name: '', dateFrom: '', dateTo: '', site: '', partner: '' };
+  showScreen('admin-all-requests');
+  document.querySelectorAll('#areq-type-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.type === areqFilters.type));
+  document.querySelectorAll('#areq-status-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.status === areqFilters.status));
+  if (typeof loadAdminAllRequests === 'function') loadAdminAllRequests();
 }
 
 async function loadAdminRequestList() {
@@ -4148,11 +4262,24 @@ async function loadAnnounceAdminList() {
       <div class="announce-admin-item" data-id="${a.id}" data-title="${a.title.replace(/"/g, '&quot;')}">
         <div class="row1"><span>${a.importance === 'important' ? `<span class="icon-slot" data-icon="alert-triangle"></span> ` : ''}${a.title}</span><span>${a.read_count}/${a.recipient_count} 既読</span></div>
         <div class="row2">${new Date(a.created_at).toLocaleString('ja-JP')}${a.source_system && a.source_system !== 'admin_manual' ? `・自動通知(${safeText(a.source_system, '不明')})` : ''}${a.importance === 'important' ? `・確認済み${safeText(a.acknowledged_count, 0)}/${safeText(a.recipient_count, 0)}` : ''}</div>
+        <button type="button" class="link announce-hide-btn" data-id="${a.id}" style="color:var(--danger);margin-top:4px;">このお知らせを削除(非公開)する</button>
       </div>
     `).join('');
     hydrateIcons(listEl);
     listEl.querySelectorAll('.announce-admin-item').forEach((el) => {
-      el.addEventListener('click', () => openAnnounceStatus(Number(el.dataset.id), el.dataset.title));
+      el.addEventListener('click', (e) => { if (e.target.closest('.announce-hide-btn')) return; openAnnounceStatus(Number(el.dataset.id), el.dataset.title); });
+    });
+    // item8: 会社お知らせの削除(論理非公開)。社員側お知らせから消える(履歴・監査は残す)。
+    listEl.querySelectorAll('.announce-hide-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        if (!window.confirm('このお知らせを削除(非公開)しますか？\n\n社員のお知らせから消えます。履歴・監査には残ります。')) return;
+        btn.disabled = true;
+        try {
+          await rpc('admin_hide_announcement', { p_admin_employee_code: session.employeeCode, p_announcement_id: Number(btn.dataset.id), p_reason: null });
+          loadAnnounceAdminList();
+        } catch (e2) { alert(e2.message || '削除に失敗しました。'); btn.disabled = false; }
+      });
     });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
@@ -7117,7 +7244,8 @@ async function loadSiteAdminList() {
       return `
       <div class="qual-item" data-id="${s.id}">
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"></div>
-        <div class="row2">${new Date(s.created_at).toLocaleString('ja-JP')}</div>
+        <div class="row2">申請者: ${s.proposed_by_name ? `${s.proposed_by_name}(${s.proposed_by_code || '—'})` : '申請者不明'}</div>
+        <div class="row2">申請日時: ${new Date(s.created_at).toLocaleString('ja-JP')}</div>
         ${candidatesHtml}
         <div class="qual-verify-btns">
           <button type="button" class="approve-btn">新規現場として承認する</button>
@@ -9174,6 +9302,98 @@ async function doRevokeAdminRole(employeeCode, roleType) {
 // ---------- 日報管理(管理者/日報担当) ----------
 
 let drmFilters = { name: '', workerType: '', status: '', dateFrom: '', dateTo: '', site: null, companyId: '' };
+let drmSelectedDate = null; // 日報管理で選択中の1日(YYYY-MM-DD)。日付ナビで前後移動する。
+
+// 日報管理の日付ナビ(＜ 2026年9月2日(水) ＞ 今日)。選択日を1日だけ表示する主軸。
+function renderDrmDateNav() {
+  const nav = document.getElementById('drm-date-nav');
+  if (!nav) return;
+  const today = todayJST();
+  const shift = (days) => { const d = new Date(drmSelectedDate + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  nav.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+      <button type="button" class="secondary" id="drm-date-prev" style="flex:none;width:auto;padding:8px 14px;">‹</button>
+      <div style="flex:1;min-width:0;text-align:center;font-weight:700;font-size:16px;">${formatJpDateWithDow(drmSelectedDate)}</div>
+      <button type="button" class="secondary" id="drm-date-next" style="flex:none;width:auto;padding:8px 14px;">›</button>
+    </div>
+    <div style="display:flex;justify-content:center;margin-top:6px;">
+      <button type="button" class="link" id="drm-date-today" ${drmSelectedDate === today ? 'disabled' : ''}>今日</button>
+    </div>`;
+  // 日付切替時は、選択日のすべての集計(件数要約・内訳バケット・サマリーカード・未提出バナー・一覧)を
+  // 選択日で再取得する。renderだけ日付を変えて中身が本日固定のまま、という状態を作らない。
+  const setDate = (d) => { drmSelectedDate = d; drmFilters.dateFrom = d; drmFilters.dateTo = d; document.getElementById('drm-date-from').value = d; document.getElementById('drm-date-to').value = d; renderDrmDateNav(); loadDrmSummary(); loadDrmMissingBanner(); loadDailyReportManagementList(); };
+  document.getElementById('drm-date-prev').addEventListener('click', () => setDate(shift(-1)));
+  document.getElementById('drm-date-next').addEventListener('click', () => setDate(shift(1)));
+  const todayBtn = document.getElementById('drm-date-today');
+  if (todayBtn) todayBtn.addEventListener('click', () => setDate(today));
+}
+
+// 選択日が今日なら「本日」、過去/未来日なら「9月1日」のように表示する接頭辞。
+// 過去日を見ているのに「本日の社員/本日の未提出」と表示される矛盾をなくす。
+function drmDayPrefix() {
+  if (drmSelectedDate === todayJST()) return '本日';
+  const d = new Date(drmSelectedDate + 'T00:00:00');
+  return `${d.getMonth() + 1}月${d.getDate()}日`;
+}
+
+// 未提出バナー(選択日)。日付切替でも選択日で再取得する。
+async function loadDrmMissingBanner() {
+  const session = getSession();
+  const missingEl = document.getElementById('drm-missing-today-list');
+  const bannerCount = document.getElementById('drm-missing-count');
+  const pfx = drmDayPrefix();
+  if (bannerCount) bannerCount.textContent = `${pfx}の未提出 -`;
+  try {
+    const missing = await rpc('admin_get_daily_report_missing', { p_admin_employee_code: session.employeeCode, p_date: drmSelectedDate });
+    if (bannerCount) bannerCount.textContent = `${pfx}の未提出 ${missing.length}名`;
+    if (missingEl) missingEl.innerHTML = missing.length === 0
+      ? `<div class="hint">${pfx}は全員提出済みです。</div>`
+      : missing.map((m) => `<span class="mini-tag danger" style="display:inline-block;margin:2px 4px 2px 0;">${m.employee_name}</span>`).join('');
+  } catch (e) {
+    if (missingEl) missingEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+// 選択日「その1日だけ」の件数要約(合計・社員・外注・提出済み・差し戻し・下書き・取消)。
+// 過去/未来日が混ざって数字が変動する状態をなくす。カード(=会社×現場×勤務区分/社員×日)単位で数える。
+async function renderDrmDaySummary() {
+  const el = document.getElementById('drm-day-summary');
+  if (!el) return;
+  const session = getSession();
+  try {
+    // 内訳バケット(admin_daily_report_breakdown)を単一の正として、社員の「提出済み(対象内)」件数を得る。
+    const [rows, bdRows] = await Promise.all([
+      rpc('admin_search_daily_reports', {
+        p_admin_employee_code: session.employeeCode, p_date_from: drmSelectedDate, p_date_to: drmSelectedDate,
+        p_employee_code: null, p_site_id: null, p_validation_status: null,
+        p_worker_type: null, p_subcontractor_company_id: null, p_report_status: null,
+      }),
+      rpc('admin_daily_report_breakdown', { p_admin_employee_code: session.employeeCode, p_date: drmSelectedDate }).catch(() => []),
+    ]);
+    const bd = (bdRows && bdRows[0]) || {};
+    // 社員は「同一社員×同一日=1名」で数える(drmGroupKeyが社員は date|employee|employee_code)。
+    const groups = new Map();
+    rows.forEach((r) => { const k = drmGroupKey(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); });
+    const cards = Array.from(groups.values()).map((g) => ({ worker: g[0].worker_type, status: (g.every((r) => r.report_status === 'cancelled') ? 'cancelled' : (g.find((r) => r.report_status !== 'cancelled') || g[0]).report_status) }));
+    const active = cards.filter((c) => c.status !== 'cancelled');
+    const emp = active.filter((c) => c.worker === 'employee');
+    const sc = active.filter((c) => c.worker === 'subcontractor');
+    // 通常提出=submitted/confirmed(通常日報は自動確定するため二重定義しない)。差し戻しは要確認側。
+    const empSubmitted = emp.filter((c) => c.status === 'submitted' || c.status === 'confirmed').length;
+    const empRejected = emp.filter((c) => c.status === 'rejected').length;
+    const empDraft = emp.filter((c) => c.status === 'draft').length;
+    // 配置外(要確認)= 提出したが日報提出対象(配置あり)でない社員 = 提出者 − 対象内提出(bucket)。
+    const offAssign = Math.max(0, empSubmitted - Number(bd.target_submitted || 0));
+    el.innerHTML = `
+      <div style="font-weight:700;margin-bottom:6px;">合計 ${active.length}件（社員 ${emp.length}名 / 外注 ${sc.length}件）</div>
+      <div class="drm-day-sum-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:4px 14px;font-size:14px;overflow-wrap:anywhere;">
+        <span>社員 提出済み ${empSubmitted}名</span><span>外注 ${sc.length}件</span>
+        ${offAssign > 0 ? `<span style="color:var(--warning,#e0a021);">└ うち配置外(要確認) ${offAssign}名</span><span></span>` : ''}
+        <span>差し戻し ${empRejected}名</span><span>下書き ${empDraft}名</span>
+        <span>取消 ${cards.length - active.length}件</span>
+      </div>`;
+  } catch (e) { el.innerHTML = ''; }
+}
 let drmRows = [];
 let drmSelected = new Set(); // 選択中のグループキー(report_date|personKey)
 let drmSort = { col: 'report_date', dir: 'desc' };
@@ -9182,32 +9402,25 @@ const DRM_STATUS_LABEL = { draft: '下書き', submitted: '提出済み', confir
 
 async function loadDailyReportManagement() {
   const session = getSession();
-  drmFilters = { name: '', workerType: '', status: '', dateFrom: '', dateTo: '', site: null, companyId: '' };
+  // 日報管理は「日付」を主軸に。既定は本日の1日だけを表示(過去・未来日は日付ナビで移動)。
+  const today = todayJST();
+  drmSelectedDate = drmSelectedDate || today;
+  drmFilters = { name: '', workerType: '', status: '', dateFrom: drmSelectedDate, dateTo: drmSelectedDate, site: null, companyId: '' };
   drmSelected.clear();
   document.getElementById('drm-search-name').value = '';
   document.getElementById('drm-search-site').value = '';
   document.getElementById('drm-selected-site-label').style.display = 'none';
   document.getElementById('drm-site-candidates').innerHTML = '';
-  document.getElementById('drm-date-from').value = '';
-  document.getElementById('drm-date-to').value = '';
+  document.getElementById('drm-date-from').value = drmSelectedDate;
+  document.getElementById('drm-date-to').value = drmSelectedDate;
+  renderDrmDateNav();
   document.getElementById('drm-advanced').style.display = 'none';
   document.getElementById('drm-missing-today-list').style.display = 'none';
   document.getElementById('drm-missing-toggle').textContent = '未提出者を表示する';
   document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
   document.querySelectorAll('#drm-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
 
-  const missingEl = document.getElementById('drm-missing-today-list');
-  const bannerCount = document.getElementById('drm-missing-count');
-  bannerCount.textContent = '本日の未提出 -';
-  try {
-    const missing = await rpc('admin_get_daily_report_missing', { p_admin_employee_code: session.employeeCode, p_date: todayJST() });
-    bannerCount.textContent = `本日の未提出 ${missing.length}名`;
-    missingEl.innerHTML = missing.length === 0
-      ? '<div class="hint">本日は全員提出済みです。</div>'
-      : missing.map((m) => `<span class="mini-tag danger" style="display:inline-block;margin:2px 4px 2px 0;">${m.employee_name}</span>`).join('');
-  } catch (e) {
-    missingEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-  }
+  loadDrmMissingBanner();
 
   try {
     const companies = await rpc('admin_list_subcontractor_companies', { p_admin_employee_code: session.employeeCode, p_include_inactive: false });
@@ -9234,13 +9447,13 @@ async function loadDrmBreakdown() {
   const el = document.getElementById('drm-breakdown');
   if (!el) return;
   try {
-    const rows = await rpc('admin_daily_report_breakdown', { p_admin_employee_code: session.employeeCode, p_date: todayJST() });
+    const rows = await rpc('admin_daily_report_breakdown', { p_admin_employee_code: session.employeeCode, p_date: drmSelectedDate });
     const b = rows && rows[0];
     if (!b) { el.innerHTML = ''; return; }
     const num = (bucket, n, cls) => `<button type="button" class="drm-bd-num ${cls || ''}" data-bucket="${bucket}">${n}</button>`;
     el.innerHTML = `
       <div class="card drm-breakdown-card">
-        <div class="drm-bd-row drm-bd-total"><span>本日の社員</span><strong>${b.total_employees}名</strong></div>
+        <div class="drm-bd-row drm-bd-total"><span>${drmDayPrefix()}の社員</span><strong>${b.total_employees}名</strong></div>
         <div class="drm-bd-row"><span>├ 日報提出対象</span><strong>${b.target_total}名</strong></div>
         <div class="drm-bd-row drm-bd-sub"><span>│　├ 提出済み</span>${num('target_submitted', b.target_submitted + '名', 'good')}</div>
         <div class="drm-bd-row drm-bd-sub"><span>│　└ 未提出</span>${num('missing', b.target_missing + '名', b.target_missing > 0 ? 'alert' : '')}</div>
@@ -9269,17 +9482,19 @@ async function loadDrmSummary() {
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const [rows, bd] = await Promise.all([
-      rpc('admin_get_daily_report_summary', { p_admin_employee_code: session.employeeCode, p_date: todayJST() }),
+      rpc('admin_get_daily_report_summary', { p_admin_employee_code: session.employeeCode, p_date: drmSelectedDate }),
       loadDrmBreakdown(),
     ]);
     const d = Object.assign({}, rows && rows[0]);
     if (bd) d.exempt_count = bd.exempt_total; // 対象外は breakdown から
+    const pfx = drmDayPrefix();
     grid.innerHTML = DRM_SUMMARY_CARDS.map((c) => {
       const count = d ? (d[c.key] || 0) : 0;
+      const label = c.label.replace('本日', pfx); // 過去日を見ている時は「9月1日の提出」等
       return `
-        <button type="button" class="dash-card drm-summary-card" data-card="${c.key}" title="タップで${c.label}の対象者を表示">
+        <button type="button" class="dash-card drm-summary-card" data-card="${c.key}" title="タップで${label}の対象者を表示">
           <span class="dash-card-top"><span class="dash-card-count ${count === 0 ? 'zero' : 'alert'}">${count}</span></span>
-          <span class="dash-card-label">${c.label}</span>
+          <span class="dash-card-label">${label}</span>
         </button>
       `;
     }).join('');
@@ -9303,7 +9518,9 @@ const DRP_TITLES = {
 };
 let dailyReportPeopleState = null;
 function openDailyReportPeople(bucket, title) {
-  dailyReportPeopleState = { bucket, title: title || DRP_TITLES[bucket] || '対象者一覧', date: todayJST() };
+  // 対象者一覧も選択日で取得する(本日固定にしない)。過去日なら見出しも「9月1日の…」にする。
+  const t = (title || DRP_TITLES[bucket] || '対象者一覧').replace('本日', drmDayPrefix());
+  dailyReportPeopleState = { bucket, title: t, date: drmSelectedDate };
   showScreen('daily-report-people');
 }
 async function loadDailyReportPeople() {
@@ -9368,7 +9585,10 @@ function applyDrmCardFilter(cardKey) {
 }
 
 function drmGroupKey(r) {
-  return `${r.report_date}|${r.worker_type}|${r.employee_code || r.subcontractor_worker_name}`;
+  // 外注(応援)は作業員名を持たないため、従来キー(worker_name)だと同日の別会社・別現場が
+  // 1カードに束ねられていた。外注は日報行(id)ごとに独立カードにし、会社×現場×勤務区分を分ける。
+  if (r.worker_type === 'subcontractor') return `${r.report_date}|sc|${r.id}`;
+  return `${r.report_date}|${r.worker_type}|${r.employee_code}`;
 }
 
 async function loadDailyReportManagementList() {
@@ -9393,6 +9613,7 @@ async function loadDailyReportManagementList() {
     }
     countEl.textContent = `${drmRows.length}件`;
     renderDrmAll();
+    renderDrmDaySummary();
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -9429,9 +9650,20 @@ function sortDrmGroups(groupList) {
 //  1) 応援(会社×現場×人数)モデル … 作業員名が無いので「外注（応援） 会社名」+ 人数/人工。
 //  2) 旧・作業員紐付けモデル … 作業員名(外注:会社名)。
 //  3) 社員 … 氏名。いずれの値も欠けたら (不明) を出し、null文字は絶対に出さない。
+// item12: 'YYYY-MM-DD' → '2026年9月2日(火)' (詳細の日付を明確化)。
+function formatJpDateWithDow(dateStr) {
+  if (!dateStr) return '';
+  const m = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return String(dateStr);
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const dow = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+  return `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日(${dow})`;
+}
+
 function drmWorkerLabel(f) {
   if (f && f.worker_type === 'subcontractor') {
-    const co = f.subcontractor_company_name || '(会社未設定)';
+    // 会社未設定(subcontractor_company_id NULL)の既存データは「会社未設定・要修正」と明示(推測しない)。
+    const co = f.subcontractor_company_name || '会社未設定・要修正';
     if (f.subcontractor_worker_name) return `${f.subcontractor_worker_name}(外注:${co})`;
     const ppl = (f.subcontractor_headcount != null && f.subcontractor_headcount !== '') ? ` ${Number(f.subcontractor_headcount)}名` : '';
     return `外注（応援） ${co}${ppl}`;
@@ -9452,6 +9684,11 @@ function renderDrmAll() {
     rows.sort((a, b) => (a.entry_slot || 0) - (b.entry_slot || 0));
     return { key, rows, first: rows[0] };
   });
+  // item13: 通常一覧では「全スロットが取消済み」の日報グループを除外する(集計・人工・シート反映の
+  // 対象外なので一覧にも残さない)。「取消」タブを選んだ時だけ取消済みを表示する。監査履歴はDBに残る。
+  if (drmFilters.status !== 'cancelled') {
+    groupList = groupList.filter((g) => g.rows.some((r) => r.report_status !== 'cancelled'));
+  }
   groupList = sortDrmGroups(groupList);
 
   document.querySelectorAll('#screen-daily-report-management .areq-table th[data-sort]').forEach((th) => {
@@ -9533,6 +9770,49 @@ function renderDrmAll() {
 // 管理者が調整できる(reflect_override_*)。既にloadDailyReportManagementListで
 // 取得済みのdrmRowsから該当グループを探すだけで、追加のRPC呼び出しは不要。
 let currentDrdGroupKey = null;
+// 日報詳細の「原本」表示: 社員が入力した給与・勤怠・手当に必要な全項目をグループ表示する。
+// 給与判定に直結するP0項目(現場/勤務区分/人工/リーダー/夜勤/残業/出張/100km/通勤/早出)は
+// false/0でも「あり/なし」を明示して未登録と区別する。副次項目は値がある時のみ表示する。
+function drdFieldRow(label, value) {
+  return `<div class="field-row"><span class="field-label">${label}</span><span class="field-value">${value}</span></div>`;
+}
+function drdEmployeeOriginalHtml(r, effWorkType, effLeader, effNight) {
+  const yn = (v) => (v ? 'あり' : 'なし');
+  const num = (v) => (v == null ? 0 : Number(v));
+  const site = r.site_name || r.site_raw_name || '-';
+  // 【勤務情報】P0: 常に表示
+  const work = [
+    drdFieldRow('現場', site),
+    drdFieldRow('勤務区分', (r.work_type || '-') + (r.is_leader ? '・リーダー' : '') + (r.is_night_shift ? '・夜勤' : '')),
+    drdFieldRow('人工', num(r.headcount) + '人工'),
+    drdFieldRow('リーダー/職長', yn(r.is_leader)),
+    drdFieldRow('夜勤', yn(r.is_night_shift)),
+    drdFieldRow('残業時間', num(r.overtime_hours) > 0 ? num(r.overtime_hours) + '時間' : 'なし'),
+  ].join('');
+  // 【勤怠・手当】P0 + 副次(値ありのみ)
+  const attend = [];
+  attend.push(drdFieldRow('早出', num(r.early_commute_hours) > 0 ? num(r.early_commute_hours) + '時間' : 'なし'));
+  attend.push(drdFieldRow('通勤時間外', num(r.commute_overtime_hours) > 0 ? num(r.commute_overtime_hours) + '時間' : 'なし'));
+  attend.push(drdFieldRow('100km以上', yn(r.is_over_100km)));
+  attend.push(drdFieldRow('出張', r.is_business_trip ? ('あり' + (r.is_overnight ? `（${num(r.overnight_nights)}泊）` : '')) : 'なし'));
+  if (r.is_business_trip && (r.business_trip_allowance_eligible || num(r.business_trip_allowance_amount) > 0)) {
+    attend.push(drdFieldRow('出張手当', (r.business_trip_allowance_eligible ? '対象' : '対象外') + (num(r.business_trip_allowance_amount) > 0 ? `（${num(r.business_trip_allowance_amount).toLocaleString()}円）` : '')));
+  }
+  if (r.is_transport) attend.push(drdFieldRow('運搬/交通', 'あり'));
+  if (r.is_field_duty) attend.push(drdFieldRow('現場作業', 'あり'));
+  if (r.is_sales) attend.push(drdFieldRow('営業', 'あり'));
+  if (r.is_out_of_prefecture || r.prefecture) attend.push(drdFieldRow('県外', r.prefecture || 'あり'));
+  if (r.is_absence) attend.push(drdFieldRow('欠勤', 'あり'));
+  // 【作業内容】
+  const content = [];
+  const memo = r.notes || r.note;
+  if (memo) content.push(drdFieldRow('備考', String(memo).replace(/</g, '&lt;')));
+  return `
+    <div class="field-subgroup"><div class="field-subhead">勤務情報</div>${work}</div>
+    <div class="field-subgroup"><div class="field-subhead">勤怠・手当</div>${attend.join('')}</div>
+    ${content.length ? `<div class="field-subgroup"><div class="field-subhead">作業内容</div>${content.join('')}</div>` : ''}`;
+}
+
 async function openDailyReportDetail(groupKey) {
   currentDrdGroupKey = groupKey;
   const rows = drmRows.filter((r) => drmGroupKey(r) === groupKey).sort((a, b) => (a.entry_slot || 0) - (b.entry_slot || 0));
@@ -9546,10 +9826,12 @@ async function openDailyReportDetail(groupKey) {
   }
   const f = rows[0];
   const personName = drmWorkerLabel(f);
-  document.getElementById('drd-title').textContent = `${personName}・${f.report_date}`;
+  // item12: 詳細上部に必ず「年月日(曜日)」を大きく表示。氏名・社員番号/外注・状態も併記。
+  const idLabel = f.worker_type === 'subcontractor' ? '外注' : (f.employee_code ? `社員番号 ${f.employee_code}` : '');
+  document.getElementById('drd-title').textContent = formatJpDateWithDow(f.report_date);
   // 外注(応援)は 合計人数・合計人工 を要約表示(§9)。取消済み行は合計から除外。
   const activeRows = rows.filter((r) => r.report_status !== 'cancelled');
-  let metaText = `提出状況: ${DRM_STATUS_LABEL[f.report_status] || f.report_status}`;
+  let metaText = `${personName}${idLabel ? '（' + idLabel + '）' : ''} ・ 提出状況: ${DRM_STATUS_LABEL[f.report_status] || f.report_status}`;
   if (f.worker_type === 'subcontractor') {
     const totalPeople = activeRows.reduce((a, r) => a + (r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) : 0), 0);
     const totalManDays = activeRows.reduce((a, r) => a + Number(r.headcount || 0), 0);
@@ -9563,15 +9845,16 @@ async function openDailyReportDetail(groupKey) {
     const effNight = r.reflect_override_work_type ? r.reflect_override_is_night_shift : r.is_night_shift;
     return `
       <div class="card" data-slot-id="${r.id}">
-        <div class="form-title" style="font-size:15px;">現場${idx + 1}(スロット${r.entry_slot || idx + 1})</div>
+        <div class="form-title" style="font-size:15px;">現場${idx + 1}${rows.length > 1 ? `（${idx + 1}件目 / 全${rows.length}件）` : ''}</div>
         <div class="field-group">
           ${f.worker_type === 'subcontractor' ? `
-          <div class="field-row"><span class="field-label">外注会社</span><span class="field-value">${f.subcontractor_company_name || '(会社未設定)'}</span></div>` : ''}
-          <div class="field-row"><span class="field-label">【原本】現場</span><span class="field-value">${r.site_name || r.site_raw_name || '-'}</span></div>
-          <div class="field-row"><span class="field-label">【原本】勤務区分</span><span class="field-value">${r.work_type || '-'}${r.is_leader ? '・リーダー' : ''}${r.is_night_shift ? '・夜勤' : ''}</span></div>
-          ${f.worker_type === 'subcontractor' ? `
-          <div class="field-row"><span class="field-label">人数</span><span class="field-value">${r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) + '名' : '-'}</span></div>` : ''}
+          <div class="field-row"><span class="field-label">外注会社</span><span class="field-value">${f.subcontractor_company_name || '(会社未設定)'}</span></div>
+          <div class="field-row"><span class="field-label">現場</span><span class="field-value">${r.site_name || r.site_raw_name || '-'}</span></div>
+          <div class="field-row"><span class="field-label">勤務区分</span><span class="field-value">${r.work_type || '-'}${r.is_night_shift ? '・夜勤' : ''}</span></div>
+          <div class="field-row"><span class="field-label">人数</span><span class="field-value">${r.subcontractor_headcount != null ? Number(r.subcontractor_headcount) + '名' : '-'}</span></div>
           <div class="field-row"><span class="field-label">人工</span><span class="field-value">${Number(r.headcount || 0)}人工</span></div>
+          ${r.notes || r.note ? `<div class="field-row"><span class="field-label">備考</span><span class="field-value">${String(r.notes || r.note).replace(/</g, '&lt;')}</span></div>` : ''}
+          ` : drdEmployeeOriginalHtml(r, effWorkType, effLeader, effNight)}
           <div class="field-row"><span class="field-label">スプレッドシート反映</span><span class="field-value">${r.report_status === 'cancelled' ? '対象外(取消済み)' : (r.reflected_to_sheet_at ? `反映済み(${new Date(r.reflected_to_sheet_at).toLocaleString('ja-JP')})` : '未反映')}</span></div>
           ${r.reflect_override_work_type ? `<div class="field-row"><span class="field-label">反映値を調整</span><span class="field-value">${r.reflect_override_by || ''} ${r.reflect_override_at ? new Date(r.reflect_override_at).toLocaleString('ja-JP') : ''}${r.reflect_override_reason ? `(${r.reflect_override_reason})` : ''}</span></div>` : ''}
         </div>

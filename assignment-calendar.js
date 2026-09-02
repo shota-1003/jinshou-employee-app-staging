@@ -73,6 +73,7 @@
         craft: { key: 'own-field', label: '職人' },
         office: { key: 'own-office', label: '事務' },
         sales: { key: 'own-sales', label: '営業' },
+        doba: { key: 'own-doba', label: '土場' },
         haul: { key: 'own-haul', label: '運搬' },
         other: { key: 'own-other', label: 'その他' },
     };
@@ -761,6 +762,7 @@
                 put('ac-hc-craft', '職人', h.craft, '自社の職人。同じ人が複数現場に入っていても1人として数えます。');
                 put('ac-hc-office', '事務', h.office, '事務・総務・経理など、現場に出ない社員。');
                 put('ac-hc-sales', '営業', h.sales, '営業の社員、またはその日ずっと営業活動だった社員。');
+                put('ac-hc-doba', '土場', h.doba, '土場担当の社員、またはその日は土場に入った社員。');
                 put('ac-hc-sub', '外注', h.sub, '外注の作業人数。会社まとめの行は登録された人数で数えます。');
                 put('ac-hc-haul', '運搬', h.haul, '運搬だけを担当した人の数(自社＋外注)。運んでそのまま現場で働く人は職人として数えます。');
                 // 「その他」は押すと内訳(研修・健康診断など、種別ごと)が開く。
@@ -1237,20 +1239,83 @@
         // -----------------------------------------------------------
         // 月の延べ人工。「月間売上 ÷ 月間人工」で1人工あたりの出来高を出すための数字。
         // 同じ社員が20日働けば20人工。1日の中で複数現場・作業+運搬でも、その日は1人工。
+        // 月間集計。役割別・人別・外注別・現場別の4つの切り口をタブで切り替える。
+        // スマホで横スクロールにならないよう、どの切り口も「名前 + 人工」の1行リストにし、
+        // 多い順に並べて長さの棒を添える(ランキングとして流し見できるようにする)。
+        const MONTH_TABS = [['role', '役割別'], ['employee', '人別'], ['company', '外注別'], ['site', '現場別']];
+        let monthTab = 'role';
+
+        // 1行 = 名前 / 棒 / 数値。4つの切り口すべてで同じ形にする。
+        function rankRow(name, value, unit, max, cls, sub) {
+            const it = el('div', 'ac-listitem ac-rank');
+            const head = el('div', 'ac-rankhead');
+            head.append(el('div', 'ac-rankname', name));
+            head.append(el('div', 'ac-dstrong', `${value} ${unit}`));
+            it.append(head);
+            const bar = el('div', 'ac-rankbar');
+            const fill = el('div', 'ac-rankfill' + (cls ? ' ' + cls : ''));
+            fill.style.width = `${max > 0 ? Math.max(2, Math.round((Number(value) / max) * 100)) : 0}%`;
+            bar.append(fill);
+            it.append(bar);
+            if (sub) it.append(el('div', 'ac-sub2', sub));
+            return it;
+        }
+
         async function openMonthTotalSheet() {
-            let d = null;
+            let head = null;
             try {
-                d = await rpc('assignment_get_month_headcount',
+                head = await rpc('assignment_get_month_headcount',
                     { p_employee_code: me, p_year: state.year, p_month: state.month });
             } catch (e) { fail(e); return; }
 
             sheet(`${state.year}年${state.month}月 の月間集計`, (box) => {
+                const tabs = el('div', 'ac-tabs');
+                const body = el('div');
+                box.append(tabs, body);
+
+                function drawTabs() {
+                    tabs.innerHTML = '';
+                    for (const [key, label] of MONTH_TABS) {
+                        const t = el('button', 'ac-tab' + (monthTab === key ? ' ac-on' : ''), label);
+                        t.addEventListener('click', () => {
+                            if (monthTab === key) return;
+                            monthTab = key; drawTabs(); draw();
+                        });
+                        tabs.append(t);
+                    }
+                }
+
+                async function draw() {
+                    body.innerHTML = '';
+                    if (monthTab === 'role') { drawRole(body); return; }
+                    body.append(el('div', 'ac-empty', '読み込み中...'));
+                    let rows = [];
+                    try {
+                        rows = await rpc('assignment_get_month_breakdown', {
+                            p_employee_code: me, p_year: state.year,
+                            p_month: state.month, p_kind: monthTab,
+                        }) || [];
+                    } catch (e) { body.innerHTML = ''; fail(e); return; }
+                    body.innerHTML = '';
+                    if (monthTab === 'employee') drawEmployee(body, rows);
+                    else if (monthTab === 'company') drawCompany(body, rows);
+                    else drawSite(body, rows);
+                }
+
+                drawTabs();
+                draw();
+            });
+
+            // ---------------- 役割別 ----------------
+            function drawRole(box) {
+                const d = head;
                 box.append(el('div', 'ac-schedmeta',
                     '延べ人工です。同じ人が20日働けば20人工、同じ日に何現場入っても1人工として数えます。'));
                 const rows = [
                     ['職人', d.craft, 'ac-hc-craft'],
                     ['事務', d.office, 'ac-hc-office'],
                     ['営業', d.sales, 'ac-hc-sales'],
+                    ['土場', d.doba, 'ac-hc-doba'],
                     ['外注', d.sub, 'ac-hc-sub'],
                     ['運搬', d.haul, 'ac-hc-haul'],
                     ['その他', d.other, 'ac-hc-other'],
@@ -1261,8 +1326,7 @@
                     const nm = el('div', 'ac-mrowname');
                     nm.append(el('span', `ac-hc ${cls}`, label));
                     it.append(nm);
-                    it.append(el('div', 'ac-dstrong', `${n} 人工`));
-                    // その他は内訳、外注は通常/下請けの内訳を出す
+                    it.append(el('div', 'ac-dstrong', `${n || 0} 人工`));
                     if (label === 'その他' && Number(n) > 0) {
                         it.classList.add('ac-tappable');
                         it.append(el('span', 'ac-chevron', '▾'));
@@ -1297,6 +1361,143 @@
                 box.append(el('div', 'ac-schedmeta',
                     `参考: この月に1日でも配置された社員は ${d.unique_employees} 人`
                     + `／配置のあった日は ${d.worked_days} 日`));
+            }
+
+            // ---------------- 人別 ----------------
+            function drawEmployee(box, rows) {
+                box.append(el('div', 'ac-schedmeta',
+                    '社員ごとの延べ人工です。同じ日に何現場へ行っても1人工として数えます。'
+                    + '名前を押すと、その人がどの日にどこへ行ったかを見られます。'));
+                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
+                const max = Math.max(...rows.map((r) => Number(r.manday)));
+                const list = el('div', 'ac-list');
+                for (const r of rows) {
+                    const tag = ROLE_LABELS[r.bucket] || ROLE_LABELS.craft;
+                    const it = rankRow(r.name, r.manday, '人工', max, 'ac-fill-' + tag.key,
+                        `おもな区分: ${tag.label}`);
+                    it.classList.add('ac-tappable');
+                    it.addEventListener('click', () => openMonthDetailSheet('employee', r));
+                    list.append(it);
+                }
+                box.append(list);
+            }
+
+            // ---------------- 外注別 ----------------
+            function drawCompany(box, rows) {
+                box.append(el('div', 'ac-schedmeta',
+                    '協力会社ごとの延べ人工です。下請け請負は人数を把握していないため人工には入れず、'
+                    + '「○現場日」として別に数えます。会社名を押すと内訳を見られます。'));
+                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の外注はありません')); return; }
+                const max = Math.max(...rows.map((r) => Number(r.manday)), 1);
+                const list = el('div', 'ac-list');
+                for (const r of rows) {
+                    const parts = [];
+                    if (Number(r.manday_normal)) parts.push(`通常外注 ${r.manday_normal} 人工`);
+                    if (Number(r.manday_support)) parts.push(`下請け応援 ${r.manday_support} 人工`);
+                    if (Number(r.contract_site_days)) parts.push(`下請け請負 ${r.contract_site_days} 現場日`);
+                    const it = rankRow(r.name, r.manday, '人工', max, 'ac-fill-sub-field',
+                        parts.join('／') || null);
+                    it.classList.add('ac-tappable');
+                    it.addEventListener('click', () => openMonthDetailSheet('company', r));
+                    list.append(it);
+                }
+                box.append(list);
+            }
+
+            // ---------------- 現場別 ----------------
+            function drawSite(box, rows) {
+                box.append(el('div', 'ac-schedmeta',
+                    '現場ごとの延べ人工です。同じ人が1日に2現場へ行った場合は、時間の長さで'
+                    + '現場へ振り分けます(1人の1日は現場をまたいで合計1人工。二重には数えません)。'));
+                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
+                const max = Math.max(...rows.map((r) => Number(r.total)), 1);
+                const list = el('div', 'ac-list');
+                for (const r of rows) {
+                    const parts = [`自社 ${r.own} 人工`, `外注 ${r.sub} 人工`];
+                    if (Number(r.contract_site_days)) parts.push(`下請け請負 ${r.contract_site_days} 現場日`);
+                    const it = rankRow(r.name, r.total, '人工', max, 'ac-fill-own-field', parts.join('／'));
+                    if (r.key !== null && r.key !== undefined) {
+                        it.classList.add('ac-tappable');
+                        it.addEventListener('click', () => openMonthDetailSheet('site', r));
+                    }
+                    list.append(it);
+                }
+                box.append(list);
+            }
+        }
+
+        // 月間集計の内訳(人別・外注別・現場別で共通の入口)
+        async function openMonthDetailSheet(kind, row) {
+            let d = null;
+            try {
+                d = await rpc('assignment_get_month_detail', {
+                    p_employee_code: me, p_year: state.year, p_month: state.month,
+                    p_kind: kind, p_key: row.key,
+                });
+            } catch (e) { fail(e); return; }
+
+            sheet(`${row.name}（${state.month}月）`, (box) => {
+                const list = el('div', 'ac-list');
+                if (kind === 'employee') {
+                    box.append(el('div', 'ac-schedmeta',
+                        `${row.manday} 人工。配置のあった日だけを並べています。`));
+                    for (const r of d) {
+                        const tag = ROLE_LABELS[r.bucket] || ROLE_LABELS.craft;
+                        const it = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        nm.append(el('span', 'ac-rtag ac-role-' + tag.key, tag.label));
+                        nm.append(el('span', 'ac-menutitle', labelDate(r.date)));
+                        it.append(nm);
+                        it.append(el('div', 'ac-sub2', r.sites || '(現場名なし)'));
+                        list.append(it);
+                    }
+                } else if (kind === 'company') {
+                    box.append(el('div', 'ac-schedmeta',
+                        `${row.manday} 人工。どの日にどの現場へ何人入ったかです。`));
+                    for (const r of d) {
+                        const it = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const mi = WORK_MODES[r.work_mode] || WORK_MODES.normal;
+                        if (mi.short) {
+                            const b = el('span', 'ac-badge ac-subcbadge ' + mi.cls, mi.label);
+                            b.style.background = mi.color;
+                            b.style.borderColor = mi.color;
+                            nm.append(b);
+                        }
+                        nm.append(el('span', 'ac-menutitle', labelDate(r.date)));
+                        it.append(nm);
+                        it.append(el('div', 'ac-sub2',
+                            `${r.site}／${r.headcount === null ? '人数未把握' : r.headcount + '人'}`));
+                        list.append(it);
+                    }
+                } else {
+                    box.append(el('div', 'ac-schedmeta',
+                        `自社 ${row.own} 人工／外注 ${row.sub} 人工／計 ${row.total} 人工。`));
+                    box.append(el('div', 'ac-label', '区分ごとの自社人工'));
+                    const bl = el('div', 'ac-list');
+                    for (const b of (d.buckets || [])) {
+                        const tag = ROLE_LABELS[b.bucket] || ROLE_LABELS.craft;
+                        const it = el('div', 'ac-listitem ac-mrow');
+                        const nm = el('div', 'ac-mrowname');
+                        nm.append(el('span', 'ac-hc ac-hc-' + b.bucket, tag.label));
+                        it.append(nm);
+                        it.append(el('div', 'ac-dstrong', `${b.manday} 人工`));
+                        bl.append(it);
+                    }
+                    if (!(d.buckets || []).length) bl.append(el('div', 'ac-empty', '自社の配置はありません'));
+                    box.append(bl);
+                    box.append(el('div', 'ac-label', '日別の推移'));
+                    for (const r of (d.daily || [])) {
+                        const it = el('div', 'ac-listitem ac-memrow');
+                        it.append(el('div', 'ac-mrowname', labelDate(r.date)));
+                        const parts = [`自社 ${r.own}`, `外注 ${r.sub}`];
+                        if (Number(r.contract_sites)) parts.push(`下請け請負 ${r.contract_sites}現場`);
+                        it.append(el('div', 'ac-sub2', parts.join('／')));
+                        list.append(it);
+                    }
+                }
+                if (!list.children.length) list.append(el('div', 'ac-empty', '内訳はありません'));
+                box.append(list);
             });
         }
 
@@ -1488,6 +1689,7 @@
                     ['craft', '職人', '現場作業として数えます'],
                     ['office', '事務', '事務仕事として数えます'],
                     ['sales', '営業', '営業として数えます'],
+                    ['doba', '土場', '土場作業として数えます'],
                     ['haul', '運搬', '運搬として数えます'],
                 ];
                 const list = el('div', 'ac-list');
@@ -2941,12 +3143,91 @@
             });
         }
 
+        // 社員ごとの基本役割。社員を配置したときの当日役割の初期値になる。
+        // 事務員を現場の予定へ入れても事務のまま数えられるようにするための設定で、
+        // 「その日だけ職人」といった例外は当日の役割変更で上書きする。
+        const BASE_ROLES = [
+            { v: '', label: '自動（部署から判定）' },
+            { v: 'craft', label: '職人' },
+            { v: 'office', label: '事務' },
+            { v: 'sales', label: '営業' },
+            { v: 'doba', label: '土場' },
+            { v: 'haul', label: '運搬' },
+            { v: 'other', label: 'その他' },
+        ];
+        function openBaseRoleSheet() {
+            sheet('社員の基本役割', async (box) => {
+                box.append(el('div', 'ac-schedmeta',
+                    'その社員がふだん何として数えられるかです。配置したときの当日役割の初期値になります'
+                    + '（例: 基本役割が「事務」の人は、現場の予定に入れてもその日は事務として数えます）。'
+                    + 'その日だけ変えたい場合は、日別画面で名前を押して「当日の役割を変える」を使ってください。'));
+                box.append(el('div', 'ac-schedmeta',
+                    '未設定の社員は、これまでどおり部署名からの判定で動きます（勝手に職人へ固定しません）。'
+                    + '現在どう判定されているかは各行に出しています。'));
+                let rows = [];
+                try { rows = await rpc('assignment_list_employee_base_roles', { p_employee_code: me }); }
+                catch (e) { fail(e); return; }
+
+                const filt = el('input', 'ac-input');
+                filt.placeholder = '社員名で絞り込み';
+                box.append(filt);
+                const list = el('div', 'ac-list');
+                list.style.maxHeight = 'none';
+                box.append(list);
+
+                function draw() {
+                    list.innerHTML = '';
+                    const q = filt.value.trim();
+                    for (const r of rows) {
+                        if (q && !(r.employee_name || '').includes(q)) continue;
+                        const it = el('div', 'ac-listitem ac-memrow');
+                        const nm = el('div', 'ac-mrowname');
+                        const eff = ROLE_LABELS[r.effective_role] || ROLE_LABELS.craft;
+                        nm.append(el('span', 'ac-rtag ac-role-' + eff.key, eff.label));
+                        nm.append(el('span', 'ac-menutitle', r.employee_name));
+                        it.append(nm);
+                        const sel = el('select', 'ac-input');
+                        for (const g of BASE_ROLES) {
+                            const o = el('option', null, g.label);
+                            o.value = g.v;
+                            sel.append(o);
+                        }
+                        sel.value = r.base_role || '';
+                        sel.addEventListener('change', async () => {
+                            try {
+                                const res = await rpc('assignment_set_employee_base_role', {
+                                    p_employee_code: me, p_target_employee_code: r.employee_code,
+                                    p_role: sel.value || null,
+                                });
+                                r.base_role = res.base_role;
+                                r.effective_role = res.effective_role;
+                                toast(`${r.employee_name} の基本役割を保存しました`);
+                                await Promise.all([loadMonth(), loadDay()]);
+                                render();
+                                draw();
+                            } catch (e) { fail(e); }
+                        });
+                        it.append(sel);
+                        if (!r.base_role) {
+                            it.append(el('div', 'ac-sub2',
+                                `未設定（いまは ${eff.label} として判定・部署: ${r.department || '未登録'}）`));
+                        }
+                        list.append(it);
+                    }
+                    if (!list.children.length) list.append(el('div', 'ac-empty', '該当する社員がいません'));
+                }
+                filt.addEventListener('input', draw);
+                draw();
+            });
+        }
+
         // 人数集計グループの選択肢。ここで選んだ枠が、上部の人数サマリー・
         // 月集計・当日の役割の初期値のすべてに効く(1か所で決まる)。
         const HEADCOUNT_GROUPS = [
             { v: 'craft', label: '職人', deploy: true },
             { v: 'office', label: '事務', deploy: true },
             { v: 'sales', label: '営業', deploy: true },
+            { v: 'doba', label: '土場', deploy: true },
             { v: 'haul', label: '運搬', deploy: true },
             { v: 'other', label: 'その他', deploy: true },
             { v: '', label: '人数集計対象外', deploy: false },
@@ -3154,6 +3435,7 @@
         function openSettingsSheet() {
             sheet('カレンダー設定', (box, api) => {
                 const items = [
+                    ['社員の基本役割', '事務・土場・営業など、その社員がふだん何として数えられるか', () => { api.close(); openBaseRoleSheet(); }],
                     ['種別・カテゴリー管理', '色・並び順・人数集計の対象かどうか。新しい種別の追加もここ', () => { api.close(); openCategorySheet(); }],
                     ['外注会社の表示略称', '月表示で「人手3」のように短く出すための略称', () => { api.close(); openCompanyShortNameSheet(); }],
                     ['メールから抽出された予定候補', 'メール秘書AIが見つけた日付を候補として取り込む', () => { api.close(); openMailCandidateSheet(); }],

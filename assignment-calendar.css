@@ -789,6 +789,43 @@
 .ac-memrow .ac-rtag.ac-role-own-haul   { background: #c7e7df; color: #0f5b4d; }
 .ac-memrow .ac-rtag.ac-role-sub-field  { background: #f0dcc0; color: #7a4510; }
 .ac-memrow .ac-rtag.ac-role-sub-haul   { background: #e6d3b4; color: #6b4a14; }
+/* 土場。職人(青)・事務(紫)・営業(橙)・運搬(緑)と重ならない茶系にする。 */
+.ac-hc-doba { background: #f0e6dd; border-color: #c9a98d; color: #6b4423; }
+.ac-mem.ac-role-own-doba .ac-rtag,
+.ac-memrow .ac-rtag.ac-role-own-doba { background: #ecdcc9; color: #6b4423; }
+
+/* 月間集計のタブ。4つを1行に収め、横スクロールさせない。 */
+.ac-tabs {
+  display: flex; gap: 4px; margin: 0 0 8px;
+  position: sticky; top: 0; background: #fff; z-index: 2; padding-bottom: 4px;
+}
+.ac-tab {
+  flex: 1 1 0; min-width: 0; padding: 8px 2px; border: 1px solid var(--ac-line);
+  border-radius: 6px; background: #fff; color: var(--ac-fg);
+  font-size: 13px; font-weight: 700; cursor: pointer; white-space: nowrap;
+}
+.ac-tab.ac-on { background: var(--ac-accent); border-color: var(--ac-accent); color: #fff; }
+
+/* ランキング行。名前と人工を1行目に、長さの棒を2行目に置く。 */
+.ac-rank { display: block; }
+.ac-rankhead { display: flex; align-items: baseline; gap: 8px; }
+.ac-rankname {
+  flex: 1 1 auto; min-width: 0; font-size: 14px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ac-rankbar { height: 6px; border-radius: 3px; background: #eef1f5; margin-top: 5px; overflow: hidden; }
+.ac-rankfill { height: 100%; border-radius: 3px; background: var(--ac-accent); }
+.ac-rankfill.ac-fill-own-field  { background: #1a73e8; }
+.ac-rankfill.ac-fill-own-office { background: #7e57c2; }
+.ac-rankfill.ac-fill-own-sales  { background: #ff8f00; }
+.ac-rankfill.ac-fill-own-doba   { background: #8d6e63; }
+.ac-rankfill.ac-fill-own-haul   { background: #00695c; }
+.ac-rankfill.ac-fill-own-other  { background: #8a8f98; }
+.ac-rankfill.ac-fill-sub-field  { background: #b8762a; }
+
+/* 社員の基本役割の一覧。名前の右にプルダウンを置く。 */
+.ac-memrow select.ac-input { flex: 0 0 auto; width: 148px; height: 34px; }
+
 /* コピー元の候補日。日付と「何現場・何人」を2段で出し、狭い画面でも
    どの日から持ってくるのかが分かるようにする。 */
 .ac-copydates { max-height: 132px; overflow-y: auto; }

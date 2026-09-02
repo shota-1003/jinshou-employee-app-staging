@@ -686,6 +686,10 @@
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">日報管理</div>
 
+    <!-- 日付主軸: 選択した1日だけを表示。前後移動・今日・その日の件数要約。 -->
+    <div class="card" id="drm-date-nav" style="margin-bottom:10px;"></div>
+    <div class="card" id="drm-day-summary" style="margin-bottom:14px;"></div>
+
     <div id="drm-breakdown" style="margin-bottom:14px;"></div>
     <div class="dash-card-grid" id="drm-summary-grid" style="margin-bottom:14px;"></div>
 
@@ -746,6 +750,7 @@
       <button type="button" class="filter-chip" data-status="confirmed">確認済み</button>
       <button type="button" class="filter-chip" data-status="rejected">差し戻し</button>
       <button type="button" class="filter-chip" data-status="draft">下書き</button>
+      <button type="button" class="filter-chip" data-status="cancelled">取消済み</button>
     </div>
     <button type="button" class="link" id="drm-toggle-advanced">詳細検索(期間・現場・外注会社)</button>
     <div id="drm-advanced" style="display:none;">
@@ -1684,7 +1689,7 @@
 
   <!-- 管理者ダッシュボード -->
   <section id="screen-admin-dashboard" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
     <div class="form-title">管理者ダッシュボード</div>
     <div class="hint" style="margin-bottom:12px;">今すぐ対応が必要なことをまとめて表示しています。件数をタップすると一覧に移動します。</div>
 
@@ -3400,6 +3405,7 @@
   </div>
 </div>
 
+<script src="client-error-reporter.js"></script>
 <script src="icons.js"></script>
 <!-- 配置カレンダーは window.AssignmentCalendar / window.Rokuyou だけを公開する。
      app.js より先に読み込む(app.js の初期化時点で mount() を呼べるようにするため)。 -->
