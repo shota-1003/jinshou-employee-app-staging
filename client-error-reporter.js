@@ -143,11 +143,38 @@
       { channel: channelName, reason: reason }, fingerprint, 2);
   }
 
+  // 2026-09-02追加(ユーザー指示■6「fetch timeout→warning/critical判定→retry→recovery」):
+  // 一過性(timeout/429/5xx)の失敗だけを対象に指数バックオフで再試行する。401/403/404等
+  // (再試行しても直らない種類のエラー)はここでは再試行せず、呼び出し元へ即座に返す。
+  // 全ての再試行が尽きた場合のみ、呼び出し元がreportHttpError/reportFetchFailureで報告する
+  // (このヘルパー自体はレポートしない。「取得の仕組み」と「報告の仕組み」を分離したままにする)。
+  var RETRYABLE_STATUSES = [408, 429, 500, 502, 503, 504];
+  function fetchWithRetry(url, options, retryOpts) {
+    retryOpts = retryOpts || {};
+    var maxRetries = retryOpts.maxRetries != null ? retryOpts.maxRetries : 2;
+    var baseDelayMs = retryOpts.baseDelayMs != null ? retryOpts.baseDelayMs : 500;
+    function wait(ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); }
+    function attempt(n) {
+      return fetch(url, options).then(function (res) {
+        if (!res.ok && RETRYABLE_STATUSES.indexOf(res.status) !== -1 && n < maxRetries) {
+          return wait(baseDelayMs * Math.pow(2, n)).then(function () { return attempt(n + 1); });
+        }
+        return res;
+      }).catch(function (err) {
+        // ネットワーク断・timeout例外(fetch自体が例外を投げるケース)も同様に再試行対象とする。
+        if (n < maxRetries) return wait(baseDelayMs * Math.pow(2, n)).then(function () { return attempt(n + 1); });
+        throw err;
+      });
+    }
+    return attempt(0);
+  }
+
   global.ClientErrorReporter = {
     init: init,
     reportHttpError: reportHttpError,
     reportFetchFailure: reportFetchFailure,
     reportRuntimeError: reportRuntimeError,
     reportRealtimeDisconnect: reportRealtimeDisconnect,
+    fetchWithRetry: fetchWithRetry,
   };
 })(window);

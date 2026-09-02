@@ -1268,6 +1268,8 @@
                     { p_employee_code: me, p_year: state.year, p_month: state.month });
             } catch (e) { fail(e); return; }
 
+            // 合計はシートの足元に固定して、一覧をスクロールしても見えたままにする。
+            const totalBar = el('div', 'ac-sheettotal');
             sheet(`${state.year}年${state.month}月 の月間集計`, (box) => {
                 const tabs = el('div', 'ac-tabs');
                 const body = el('div');
@@ -1304,7 +1306,13 @@
 
                 drawTabs();
                 draw();
-            });
+            }, [totalBar], { tall: true });
+
+            function setTotal(main, sub) {
+                totalBar.innerHTML = '';
+                totalBar.append(el('span', 'ac-sheettotal-main', main));
+                if (sub) totalBar.append(el('span', 'ac-sheettotal-sub', sub));
+            }
 
             // ---------------- 役割別 ----------------
             function drawRole(box) {
@@ -1351,12 +1359,10 @@
                         '現場を丸ごと協力会社へ渡しているため人数は把握していません。人工には含めず件数で数えます。'));
                     list.append(sc);
                 }
+                list.classList.add('ac-listfull');
                 box.append(list);
-
-                const total = el('div', 'ac-listitem');
-                total.append(el('div', 'ac-menutitle', '計'));
-                total.append(el('div', 'ac-dstrong', `${d.total} 人工`));
-                box.append(total);
+                setTotal(`計 ${d.total} 人工`,
+                    `自社 ${d.own_total} 人工／外注 ${d.sub} 人工`);
 
                 box.append(el('div', 'ac-schedmeta',
                     `参考: この月に1日でも配置された社員は ${d.unique_employees} 人`
@@ -1368,9 +1374,11 @@
                 box.append(el('div', 'ac-schedmeta',
                     '社員ごとの延べ人工です。同じ日に何現場へ行っても1人工として数えます。'
                     + '名前を押すと、その人がどの日にどこへ行ったかを見られます。'));
-                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
+                if (!rows.length) { setTotal('0 人'); box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
                 const max = Math.max(...rows.map((r) => Number(r.manday)));
-                const list = el('div', 'ac-list');
+                setTotal(`${rows.length} 人`,
+                    `合計 ${rows.reduce((a, r) => a + Number(r.manday), 0)} 人工`);
+                const list = el('div', 'ac-list ac-listfull');
                 for (const r of rows) {
                     const tag = ROLE_LABELS[r.bucket] || ROLE_LABELS.craft;
                     const it = rankRow(r.name, r.manday, '人工', max, 'ac-fill-' + tag.key,
@@ -1387,9 +1395,13 @@
                 box.append(el('div', 'ac-schedmeta',
                     '協力会社ごとの延べ人工です。下請け請負は人数を把握していないため人工には入れず、'
                     + '「○現場日」として別に数えます。会社名を押すと内訳を見られます。'));
-                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の外注はありません')); return; }
+                if (!rows.length) { setTotal('0 社'); box.append(el('div', 'ac-empty', 'この月の外注はありません')); return; }
                 const max = Math.max(...rows.map((r) => Number(r.manday)), 1);
-                const list = el('div', 'ac-list');
+                const days = rows.reduce((a, r) => a + Number(r.contract_site_days), 0);
+                setTotal(`${rows.length} 社`,
+                    `合計 ${rows.reduce((a, r) => a + Number(r.manday), 0)} 人工`
+                    + (days ? `／下請け請負 ${days} 現場日` : ''));
+                const list = el('div', 'ac-list ac-listfull');
                 for (const r of rows) {
                     const parts = [];
                     if (Number(r.manday_normal)) parts.push(`通常外注 ${r.manday_normal} 人工`);
@@ -1409,9 +1421,12 @@
                 box.append(el('div', 'ac-schedmeta',
                     '現場ごとの延べ人工です。同じ人が1日に2現場へ行った場合は、時間の長さで'
                     + '現場へ振り分けます(1人の1日は現場をまたいで合計1人工。二重には数えません)。'));
-                if (!rows.length) { box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
+                if (!rows.length) { setTotal('0 現場'); box.append(el('div', 'ac-empty', 'この月の配置はありません')); return; }
                 const max = Math.max(...rows.map((r) => Number(r.total)), 1);
-                const list = el('div', 'ac-list');
+                setTotal(`${rows.length} 現場`,
+                    `自社 ${rows.reduce((a, r) => a + Number(r.own), 0).toFixed(1)} 人工`
+                    + `／外注 ${rows.reduce((a, r) => a + Number(r.sub), 0)} 人工`);
+                const list = el('div', 'ac-list ac-listfull');
                 for (const r of rows) {
                     const parts = [`自社 ${r.own} 人工`, `外注 ${r.sub} 人工`];
                     if (Number(r.contract_site_days)) parts.push(`下請け請負 ${r.contract_site_days} 現場日`);
@@ -1437,7 +1452,7 @@
             } catch (e) { fail(e); return; }
 
             sheet(`${row.name}（${state.month}月）`, (box) => {
-                const list = el('div', 'ac-list');
+                const list = el('div', 'ac-list ac-listfull');
                 if (kind === 'employee') {
                     box.append(el('div', 'ac-schedmeta',
                         `${row.manday} 人工。配置のあった日だけを並べています。`));
@@ -1474,7 +1489,7 @@
                     box.append(el('div', 'ac-schedmeta',
                         `自社 ${row.own} 人工／外注 ${row.sub} 人工／計 ${row.total} 人工。`));
                     box.append(el('div', 'ac-label', '区分ごとの自社人工'));
-                    const bl = el('div', 'ac-list');
+                    const bl = el('div', 'ac-list ac-listfull');
                     for (const b of (d.buckets || [])) {
                         const tag = ROLE_LABELS[b.bucket] || ROLE_LABELS.craft;
                         const it = el('div', 'ac-listitem ac-mrow');
@@ -1498,7 +1513,7 @@
                 }
                 if (!list.children.length) list.append(el('div', 'ac-empty', '内訳はありません'));
                 box.append(list);
-            });
+            }, null, { tall: true });
         }
 
         function openMonthOtherSheet(d) {
@@ -1641,6 +1656,8 @@
                 const items = [
                     ['当日の役割を変える', dayRoleText(member),
                         () => { api.close(); openDayRoleSheet(member, fromSchedule, returnTo); }],
+                    ['基本役割を確認する', 'ふだんの役割（' + baseRoleLabel(member) + '）を見る／変える',
+                        () => { api.close(); openBaseRoleInfoSheet(member, returnTo); }],
                     ['配置メンバー一覧を見る', 'この現場の全員を並べて、続けて直せます',
                         () => { api.close(); back(); }],
                     ['別の現場へ移す', 'この日の他の現場へ移します',
@@ -1662,6 +1679,57 @@
                     list.append(it);
                 }
                 box.append(list);
+            });
+        }
+
+        // 社員マスターの基本役割(通常時)。当日の役割とは別物なので必ず別の言葉で書く。
+        function baseRoleLabel(m) {
+            const r = ROLE_LABELS[m.base_role];
+            if (!r) return '未設定';
+            return r.label + (m.base_role_set === false ? '（自動判定）' : '');
+        }
+
+        // 「基本役割(通常時)」と「その日だけの役割」を並べて見せる。
+        // どちらを触っているのか分からなくなる事故を防ぐため、必ず両方を出す。
+        function openBaseRoleInfoSheet(member, returnTo) {
+            sheet(member.name + ' の役割', (box, api) => {
+                const rows = [
+                    ['基本役割（通常時）', baseRoleLabel(member),
+                        'ふだんの役割です。配置したときの当日役割の初期値になります。'
+                        + '社員マスターの設定なので、変えると翌日以降もこの役割になります。'],
+                    ['この日の役割', (ROLE_LABELS[member.row_role || member.day_role] || ROLE_LABELS.craft).label
+                        + (member.headcount_role ? '（この日だけ変更済み）' : '（基本役割・種別のとおり）'),
+                        'この日・この配置だけの扱いです。社員マスターは変わりません。'],
+                ];
+                for (const [label, value, desc] of rows) {
+                    const it = el('div', 'ac-listitem');
+                    it.append(el('div', 'ac-label', label));
+                    it.append(el('div', 'ac-dstrong', value));
+                    it.append(el('div', 'ac-sub2', desc));
+                    box.append(it);
+                }
+                if (state.isAdmin) {
+                    const b = el('button', 'ac-btn ac-primary', '基本役割を変える（社員マスター）');
+                    b.style.width = '100%';
+                    b.style.marginTop = '8px';
+                    b.addEventListener('click', () => {
+                        api.close();
+                        // 統合先(社員ポータル)が社員編集への入口を渡していればそちらへ。
+                        // 無ければカレンダー内の基本役割一覧を、その社員で絞って開く。
+                        if (typeof ctx.onOpenEmployee === 'function') ctx.onOpenEmployee(member.employee_code);
+                        else openBaseRoleSheet(member.name);
+                    });
+                    box.append(b);
+                    box.append(el('div', 'ac-schedmeta',
+                        '社員ポータルの「社員一覧 → 社員を選択 → 編集 → 基本役割（通常時）」からも同じ設定を変えられます。'));
+                } else {
+                    box.append(el('div', 'ac-schedmeta', '基本役割の変更は管理者のみです。'));
+                }
+                const back = el('button', 'ac-btn', '配置メンバー一覧へ戻る');
+                back.style.width = '100%';
+                back.style.marginTop = '6px';
+                back.addEventListener('click', () => { api.close(); if (returnTo) returnTo(); });
+                box.append(back);
             });
         }
 
@@ -2002,9 +2070,12 @@
         // -----------------------------------------------------------
         // シートの共通部分
         // -----------------------------------------------------------
-        function sheet(title, buildBody, footerButtons) {
+        // opts.tall: 一覧を何行も見比べたいシート(月間集計など)を、内容量に関わらず
+        // 最初から画面の高さいっぱいで開く。内容でシート高が決まると、実機では
+        // 2〜3行しか見えず切り替えて比べられない(実機指摘 2026-09-03)。
+        function sheet(title, buildBody, footerButtons, opts) {
             const back = el('div', 'ac-sheet');
-            const body = el('div', 'ac-sheetbody');
+            const body = el('div', 'ac-sheetbody' + (opts && opts.tall ? ' ac-tall' : ''));
             const head = el('div', 'ac-sheethead');
             const h = el('h3', null, title);
             const close = el('button', 'ac-hbtn ac-icon', '✕');
@@ -3155,7 +3226,7 @@
             { v: 'haul', label: '運搬' },
             { v: 'other', label: 'その他' },
         ];
-        function openBaseRoleSheet() {
+        function openBaseRoleSheet(initialFilter) {
             sheet('社員の基本役割', async (box) => {
                 box.append(el('div', 'ac-schedmeta',
                     'その社員がふだん何として数えられるかです。配置したときの当日役割の初期値になります'
@@ -3170,9 +3241,9 @@
 
                 const filt = el('input', 'ac-input');
                 filt.placeholder = '社員名で絞り込み';
+                if (initialFilter) filt.value = initialFilter;
                 box.append(filt);
-                const list = el('div', 'ac-list');
-                list.style.maxHeight = 'none';
+                const list = el('div', 'ac-list ac-listfull');
                 box.append(list);
 
                 function draw() {

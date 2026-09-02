@@ -794,6 +794,21 @@
 .ac-mem.ac-role-own-doba .ac-rtag,
 .ac-memrow .ac-rtag.ac-role-own-doba { background: #ecdcc9; color: #6b4423; }
 
+/* 一覧を何行も見比べたいシート(月間集計・その内訳)は、内容の量に関わらず
+   最初から画面の高さいっぱいで開く。内容でシート高が決まる作りだと、実機では
+   2〜3行しか見えず「役割別/人別/外注別/現場別」を切り替えて比べられない。
+   ヘッダー(タイトル・✕)と足元の合計は固定し、一覧だけをスクロールさせる。 */
+.ac-sheetbody.ac-tall { height: 88vh; height: 88dvh; }
+.ac-sheetbody.ac-tall .ac-sheetscroll { flex: 1 1 auto; min-height: 0; }
+/* シート内の一覧は既定で168px(約3行)に抑えているが、上のシートでは全部使う。 */
+.ac-list.ac-listfull { max-height: none; overflow-y: visible; }
+/* 足元に固定する合計。閉じるボタン(ヘッダー)と同じく常に見える位置に置く。 */
+.ac-sheettotal {
+  display: flex; align-items: baseline; gap: 10px; width: 100%;
+  font-size: 15px; font-weight: 800;
+}
+.ac-sheettotal-sub { font-size: 12px; font-weight: 700; color: var(--ac-muted); }
+
 /* 月間集計のタブ。4つを1行に収め、横スクロールさせない。 */
 .ac-tabs {
   display: flex; gap: 4px; margin: 0 0 8px;

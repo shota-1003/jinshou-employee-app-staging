@@ -747,7 +747,6 @@
     <div class="filter-row" id="drm-status-filter">
       <button type="button" class="filter-chip active" data-status="">すべての状態</button>
       <button type="button" class="filter-chip" data-status="submitted">提出済み</button>
-      <button type="button" class="filter-chip" data-status="confirmed">確認済み</button>
       <button type="button" class="filter-chip" data-status="rejected">差し戻し</button>
       <button type="button" class="filter-chip" data-status="draft">下書き</button>
       <button type="button" class="filter-chip" data-status="cancelled">取消済み</button>
@@ -2908,7 +2907,7 @@
       <label for="employee-edit-department">所属/役割</label>
       <input type="text" id="employee-edit-department">
 
-      <label for="employee-edit-headcount-category">基本役割(人数集計区分)</label>
+      <label for="employee-edit-headcount-category">基本役割（通常時）</label>
       <select id="employee-edit-headcount-category">
         <option value="">自動判定(所属から推測)</option>
         <option value="craft">職人</option>
@@ -2918,7 +2917,7 @@
         <option value="haul">運搬</option>
         <option value="other">その他</option>
       </select>
-      <div class="hint-inline">その社員がふだん何として数えられるかです。配置カレンダーで配置したときの当日役割の初期値になり、上部の人数(職人/事務/営業/土場/運搬/…)にもここで決めた区分で入ります。1日の売上を実働人数で割る指標に使うため、所属名の推測ではなくここで決めます。事務仕事・営業活動・運搬・土場のように役割が決まっている種別で配置した日は、その種別が優先されます。その日だけ変えたい場合は、配置カレンダーの日別画面で名前を押して「当日の役割を変える」を使ってください(社員マスターは変わりません)。この設定は配置カレンダーの「⚙カレンダー設定 → 社員の基本役割」と同じ社員マスターを見ています。</div>
+      <div class="hint-inline"><b>通常時の役割です。当日の配置画面から、その日だけ別の役割へ変更できます。</b>ここで決めた役割が、配置カレンダーで配置したときの当日役割の初期値になり、上部の人数(職人/事務/営業/土場/運搬/…)にもこの区分で入ります。1日の売上を実働人数で割る指標に使うため、所属名の推測ではなくここで決めます。事務仕事・営業活動・運搬・土場のように役割が決まっている種別で配置した日は、その種別が優先されます。その日だけ変えたい場合は、配置カレンダーの日別画面で社員名を押して「当日の役割を変える」を使ってください(社員マスターは変わりません)。この設定は配置カレンダーの「⚙カレンダー設定 → 社員の基本役割」と同じ社員マスターを見ています。</div>
 
       <div class="section-title">日報の入力項目(対象者だけに表示されます)</div>
       <div class="hint-inline">氏名ではなくこの設定で対象者を判定します。ここで許可した社員だけ、日報にその項目が表示されます。</div>
