@@ -853,3 +853,98 @@
 
 /* 種別管理のプルダウン(枠の選択肢を隠さない) */
 .ac-catopts select.ac-input, .ac-catadd select.ac-input { flex: 1 1 auto; min-width: 130px; height: 34px; }
+
+/* ============================================================
+   画面幅ごとのレイアウト(2026-09-03)
+
+   スマホ(〜767px)はこれまでどおり。1画面に入る情報量を優先した縦積みで、
+   月表示 → 日別詳細 の順に並び、スクロール領域は .ac-bodywrap ひとつだけ。
+
+   PC(1200px〜)は、スマホUIを横へ引き伸ばすのをやめ、
+     左 62% = 月カレンダー / 右 38% = 選択日の配置一覧
+   の2カラムにする。日付を押しても右側だけが変わり、
+   画面全体を上下に動かさずに配置を確認・編集できる。
+   カラムはそれぞれ独立してスクロールする。
+
+   レイアウトの判定はビューポートではなく、このモジュールが実際に使える幅
+   (root.clientWidth)をJS側で測って data-layout へ入れている。社員ポータルへ
+   埋め込んでも単体URLでも同じ判定になり、将来サイドバーが付いても崩れない。
+   ============================================================ */
+
+/* ---------------- タブレット(768〜1199px) ---------------- */
+/* 1カラムのまま、文字と余白だけ少しゆるめる。 */
+.ac-root[data-layout="tab"] .ac-chip { height: 15px; line-height: 15px; font-size: 11px; }
+.ac-root[data-layout="tab"] .ac-schedname { font-size: 17px; }
+.ac-root[data-layout="tab"] .ac-hc { font-size: 13px; }
+.ac-root[data-layout="tab"] .ac-bodywrap { max-width: 900px; margin: 0 auto; width: 100%; }
+
+/* ---------------- PC(1200px〜) ---------------- */
+.ac-root[data-layout="wide"] .ac-bodywrap {
+  display: grid;
+  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
+  gap: 14px;
+  padding: 14px;
+  /* 2560px級のモニターでも横へ間延びさせない。 */
+  max-width: 1760px; width: 100%; margin: 0 auto;
+  /* スクロールは各カラムが受け持つ。 */
+  overflow: hidden;
+  align-items: stretch;
+}
+.ac-root[data-layout="wide"] .ac-monthwrap,
+.ac-root[data-layout="wide"] .ac-day {
+  min-height: 0; overflow-y: auto; overscroll-behavior: contain;
+  border: 1px solid var(--ac-line); border-radius: 8px; background: #fff;
+}
+.ac-root[data-layout="wide"] .ac-day { padding-bottom: 12px; }
+/* 曜日行はカラムの中で吸着させる。 */
+.ac-root[data-layout="wide"] .ac-dow div { font-size: 12px; padding: 4px 0; }
+
+/* 月カレンダー: 横幅があるぶん、日付も現場名も大きくする。 */
+.ac-root[data-layout="wide"] .ac-num { font-size: 14px; }
+.ac-root[data-layout="wide"] .ac-chip {
+  height: 19px; line-height: 19px; margin-top: 2px; border-radius: 3px;
+  font-size: 12px; padding: 0 5px; letter-spacing: 0;
+}
+.ac-root[data-layout="wide"] .ac-cell { padding: 2px 3px; }
+.ac-root[data-layout="wide"] .ac-more { font-size: 11px; }
+
+/* 選択日の人数サマリー: 一目で読める大きさにする。 */
+.ac-root[data-layout="wide"] .ac-daytitle { font-size: 19px; }
+.ac-root[data-layout="wide"] .ac-hc {
+  font-size: 15px; padding: 5px 10px; border-radius: 6px;
+}
+.ac-root[data-layout="wide"] .ac-hcrow { gap: 6px; }
+
+/* 現場カード: 余白と文字を広げる。詰め込みはしない。 */
+.ac-root[data-layout="wide"] .ac-sched { padding: 10px 12px; border-left-width: 12px; }
+.ac-root[data-layout="wide"] .ac-schedname { font-size: 18px; }
+.ac-root[data-layout="wide"] .ac-sitecount { font-size: 16px; }
+.ac-root[data-layout="wide"] .ac-mem { font-size: 14px; padding: 6px 9px; }
+.ac-root[data-layout="wide"] .ac-schedmeta { font-size: 12px; }
+.ac-root[data-layout="wide"] .ac-badge { font-size: 12px; }
+
+/* シートはPCでは画面中央の大きなモーダルにする(下から出る必要がない)。 */
+.ac-root[data-layout="wide"] .ac-sheet { align-items: center; }
+.ac-root[data-layout="wide"] .ac-sheetbody {
+  max-width: 1040px; width: calc(100% - 80px);
+  border-radius: 12px; max-height: 85vh;
+}
+.ac-root[data-layout="wide"] .ac-sheetbody.ac-tall { height: 82vh; }
+.ac-root[data-layout="wide"] .ac-sheethead h3 { font-size: 17px; }
+.ac-root[data-layout="wide"] .ac-tab { font-size: 15px; padding: 10px 4px; }
+
+/* 月間集計はPCでは横方向も使い、表のように読ませる。
+   DOMは変えず、gridの領域指定だけで「名前 / 内訳 / 数値」の3列にする。 */
+.ac-root[data-layout="wide"] .ac-rank {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr) 132px;
+  grid-template-areas: "name sub val" "bar bar bar";
+  align-items: center; column-gap: 16px; padding: 12px 14px;
+}
+.ac-root[data-layout="wide"] .ac-rankhead { display: contents; }
+.ac-root[data-layout="wide"] .ac-rankname { grid-area: name; font-size: 15px; }
+.ac-root[data-layout="wide"] .ac-rankhead .ac-dstrong { grid-area: val; text-align: right; font-size: 16px; }
+.ac-root[data-layout="wide"] .ac-rank > .ac-sub2 { grid-area: sub; font-size: 12px; }
+.ac-root[data-layout="wide"] .ac-rank > .ac-rankbar { grid-area: bar; margin-top: 8px; }
+.ac-root[data-layout="wide"] .ac-listitem { padding: 12px 14px; font-size: 15px; }
+.ac-root[data-layout="wide"] .ac-sheettotal { font-size: 17px; }

@@ -490,8 +490,26 @@
 
         // 月グリッドが画面外へ出たら週ストリップを出す(同じカレンダーが縮んで残るイメージ)。
         // 出したり消したりが細かく起きないよう、境界に少し幅を持たせている。
+        // 画面幅ごとのレイアウト。ビューポートではなく「このモジュールが実際に
+        // 使える幅」で決める(社員ポータルへ埋め込んでも、単体URLでも同じ判定になる)。
+        //   phone 〜767px / tab 768〜1199px / wide 1200px〜
+        function layoutMode() {
+            const w = root.clientWidth || window.innerWidth || 375;
+            if (w >= 1200) return 'wide';
+            if (w >= 768) return 'tab';
+            return 'phone';
+        }
+        function syncLayoutMode() {
+            const m = layoutMode();
+            if (root.dataset.layout === m) return false;
+            root.dataset.layout = m;
+            return true;
+        }
+        function isWide() { return root.dataset.layout === 'wide'; }
+
         function syncWeekStripVisibility() {
-            if (state.view === 'me') { elWeekNav.style.display = 'none'; return; }
+            // PCは月カレンダーが常に左側に出ているので、縮小版の週ストリップは要らない。
+            if (state.view === 'me' || isWide()) { elWeekNav.style.display = 'none'; return; }
             const wrapEl = elBody.querySelector('.ac-monthwrap');
             if (!wrapEl) { elWeekNav.style.display = 'none'; return; }
             const bottom = wrapEl.getBoundingClientRect().bottom - elBody.getBoundingClientRect().top;
@@ -610,15 +628,24 @@
         // 描画済みのグリッドの位置を実測して割り当てる。
         // LifeBearと同じく、既定では月表示に画面をいっぱい使い、
         // 日別詳細はその下に置く(日をタップすると自動でそこへスクロールする)。
-        const CHIP_ROW = 13;   // チップ12px + 上マージン1px
+        // チップ1行ぶんの高さ。CSS側の .ac-chip の高さと必ず対で変える。
+        // PCは横幅に余裕があるぶん文字を大きくするので、行も高くなる。
+        const CHIP_ROW = 13;      // チップ12px + 上マージン1px
         const DAYNUM_H = 14;
+        const CHIP_ROW_WIDE = 21; // チップ19px + 上マージン2px
+        const DAYNUM_H_WIDE = 22;
         function computeLayout(weeks, gridTop) {
             // 画面の高さではなく「スクロール領域の高さ」を基準にする。
             // 上部が固定になったぶん、月表示に使える高さはここで決まる。
-            const h = elBody.clientHeight || window.innerHeight || 800;
+            const wide = isWide();
+            const row = wide ? CHIP_ROW_WIDE : CHIP_ROW;
+            const num = wide ? DAYNUM_H_WIDE : DAYNUM_H;
+            // PCは月カレンダーが左カラムを丸ごと使えるので、そちらの高さを基準にする。
+            const colEl = wide ? elBody.querySelector('.ac-monthwrap') : null;
+            const h = (colEl && colEl.clientHeight) || elBody.clientHeight || window.innerHeight || 800;
             const available = Math.max(240, h - (gridTop || 0));
-            const cell = Math.max(72, Math.min(170, Math.floor(available / weeks)));
-            const chips = Math.max(3, Math.floor((cell - DAYNUM_H) / CHIP_ROW));
+            const cell = Math.max(wide ? 96 : 72, Math.min(wide ? 220 : 170, Math.floor(available / weeks)));
+            const chips = Math.max(3, Math.floor((cell - num) / row));
             return { cell, chips };
         }
 
@@ -907,6 +934,8 @@
         // 日をタップしたら、月グリッドを丸ごとスクロールさせずに日別詳細まで自動で送る
         // (毎回自分でスクロールさせると、翌日の配置を確認する操作が1手増える)。
         function scrollToDayPanel() {
+            // PCは右カラムに日別詳細が常に出ているので動かす必要がない。
+            if (isWide()) return;
             const panel = elBody.querySelector('.ac-day');
             if (!panel) return;
             // スクロールするのは .ac-bodywrap だけ(ヘッダーと日付バーはその外にある)
@@ -3612,6 +3641,12 @@
         function render(opts) {
             const keep = !(opts && opts.resetScroll);
             const prev = keep ? elBody.scrollTop : 0;
+            // PCは月カレンダーと日別詳細が別々にスクロールするので、両方とも保つ。
+            const prevCols = keep && isWide() ? {
+                month: (elBody.querySelector('.ac-monthwrap') || {}).scrollTop || 0,
+                day: (elBody.querySelector('.ac-day') || {}).scrollTop || 0,
+            } : null;
+            syncLayoutMode();
             renderHeader();
             syncHostOffset();
             syncHeaderHeight();
@@ -3625,6 +3660,12 @@
                 reflowMonthIfNeeded();
             }
             if (prev > 0) elBody.scrollTop = prev;
+            if (prevCols) {
+                const mw = elBody.querySelector('.ac-monthwrap');
+                const dw = elBody.querySelector('.ac-day');
+                if (mw && prevCols.month) mw.scrollTop = prevCols.month;
+                if (dw && prevCols.day) dw.scrollTop = prevCols.day;
+            }
             if (state.view !== 'me') syncWeekStripVisibility();
         }
 
@@ -3644,7 +3685,12 @@
         let resizeTimer = null;
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => { if (state.view === 'month') render(); }, 200);
+            resizeTimer = setTimeout(() => {
+                // 幅が変わってレイアウトが切り替わる場合は、月表示以外でも組み直す。
+                const changed = syncLayoutMode();
+                if (changed) lastGridTop = null;
+                if (changed || state.view === 'month') render();
+            }, 200);
         });
         // iOS Safariはスクロール中にツールバーが伸縮して表示領域の高さが変わる。
         // window.resize が飛ばないことがあるため visualViewport でも追従する。
@@ -3657,6 +3703,7 @@
 
         // 初期ロード。管理者かどうかはサーバーの判定(is_assignment_admin)を正とする。
         (async function init() {
+            syncLayoutMode();
             await loadMonth();
             if (!state.canEdit && !ctx.defaultView) state.view = 'me';
             if (state.view === 'me') await loadMine(); else await loadDay();

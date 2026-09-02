@@ -523,15 +523,7 @@
         <input type="checkbox" class="dr-is-business-trip">
         <label>出張(通常の通勤圏外での勤務)</label>
       </div>
-      <div class="dr-overnight-wrap" style="display:none;">
-        <div class="checkbox-row">
-          <input type="checkbox" class="dr-is-overnight">
-          <label>宿泊あり(日帰りの場合はチェックしない)</label>
-        </div>
-        <div class="dr-overnight-nights-wrap" style="display:none;">
-          <input type="number" class="dr-overnight-nights" min="1" step="1" placeholder="宿泊日数(例: 2)">
-        </div>
-      </div>
+      <!-- 出張は日次フラグ(あり/なし)のみ。宿泊日数は日報では入力しない(月次側で必要なら集計)。 -->
       <div class="dr-other-duty-group" style="display:none;">
         <div class="section-title" style="margin-top:0;">現場作業・営業・運搬(職人以外の方)</div>
         <div class="dr-site-duty-wrap" style="display:none;">
