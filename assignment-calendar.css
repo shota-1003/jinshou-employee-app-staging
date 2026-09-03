@@ -158,23 +158,30 @@
 .ac-wcell:last-child { border-right: none; }
 .ac-wcell.ac-today { background: var(--ac-today); }
 .ac-wcell.ac-holiday { background: #fdf0f0; }
+/* 選択日は色だけに頼らず、日付を濃い座布団に白抜きで置いて形でも分かるようにする。 */
 .ac-wcell.ac-on { box-shadow: inset 0 0 0 2px var(--ac-selected); }
-.ac-wnum {
-  display: flex; align-items: baseline; gap: 2px; font-size: 12px; font-weight: 800;
-  line-height: 1.05; height: 13px;
+.ac-wcell.ac-on .ac-wnum {
+  background: var(--ac-selected); color: #fff; border-radius: 3px;
+  padding: 0 3px; margin: 0 -1px; font-weight: 900;
 }
-.ac-wdow { font-size: 9px; font-weight: 700; color: var(--ac-muted); }
+.ac-wcell.ac-on .ac-wdow, .ac-wcell.ac-on .ac-wcount { color: #fff; }
+.ac-wnum {
+  display: flex; align-items: baseline; gap: 2px; font-size: 13px; font-weight: 800;
+  line-height: 1.15; height: 16px;
+}
+.ac-wdow { font-size: 10px; font-weight: 700; color: var(--ac-muted); }
 .ac-wcell.ac-sat .ac-wdow, .ac-wcell.ac-sat .ac-wnum { color: var(--ac-sat); }
 .ac-wcell.ac-sun .ac-wdow, .ac-wcell.ac-sun .ac-wnum,
 .ac-wcell.ac-holiday .ac-wdow, .ac-wcell.ac-holiday .ac-wnum { color: var(--ac-sun); }
-.ac-wcount { margin-left: auto; font-size: 9px; font-weight: 700; color: var(--ac-muted); }
+.ac-wcount { margin-left: auto; font-size: 10px; font-weight: 700; color: var(--ac-muted); }
 /* 月表示と同じ色のチップ。現場名が読めることを優先し、余白は最小にする。 */
+/* 予定チップ。1行=13px+上マージン2px=15px(JS側の WEEK_CHIP_ROW と対) */
 .ac-wchip {
-  height: 11px; line-height: 11px; margin-top: 1px; border-radius: 2px;
-  font-size: 9px; font-weight: 700; color: #fff; padding: 0 2px;
+  height: 13px; line-height: 13px; margin-top: 2px; border-radius: 2px;
+  font-size: 10px; font-weight: 700; color: #fff; padding: 0 3px;
   white-space: nowrap; overflow: hidden; text-overflow: clip;
 }
-.ac-wmore { font-size: 9px; font-weight: 800; color: var(--ac-muted); line-height: 11px; margin-top: 1px; }
+.ac-wmore { font-size: 10px; font-weight: 800; color: var(--ac-muted); line-height: 12px; margin-top: 1px; }
 
 /* ---------------- 月グリッド ---------------- */
 /* 曜日行のstickyを月グリッドの範囲に閉じ込めるための入れ物 */
@@ -870,6 +877,15 @@
    (root.clientWidth)をJS側で測って data-layout へ入れている。社員ポータルへ
    埋め込んでも単体URLでも同じ判定になり、将来サイドバーが付いても崩れない。
    ============================================================ */
+
+/* スマホ/タブレットでは、配置が少ない日でも月グリッドを画面外へ送りきれるだけの
+   高さを日別パネルに持たせる。これが無いと「週表示から日付を選んだのに月が
+   画面へ戻ってくる」状態になる(2026-09-04 実機指摘)。余白は最終行の下に出るだけ。 */
+.ac-root[data-layout="phone"] .ac-day,
+.ac-root[data-layout="tab"] .ac-day {
+  min-height: calc(100vh - var(--ac-stick-h, 88px));
+  min-height: calc(100dvh - var(--ac-stick-h, 88px));
+}
 
 /* ---------------- タブレット(768〜1199px) ---------------- */
 /* 1カラムのまま、文字と余白だけ少しゆるめる。 */

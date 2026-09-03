@@ -296,8 +296,11 @@
         // 作り直す(ふだんのスワイプは純粋な横スクロールで、DOMは動かさない)。
         const WEEK_SPAN = 4;                   // 中心の前後に何週ぶん作るか
         const WEEK_PANES = WEEK_SPAN * 2 + 1;
-        const WEEK_CHIP_ROW = 12;
-        const WEEK_DAYNUM_H = 13;
+        // 週ストリップ1行ぶんの寸法。CSSの .ac-wchip / .ac-wnum / .ac-wmore と対で変える。
+        const WEEK_CHIP_ROW = 15;   // チップ13px + 上マージン2px
+        const WEEK_DAYNUM_H = 16;
+        const WEEK_MORE_H = 12;     // 「+3」の行。常に確保して高さを安定させる
+        const WEEK_CHIPS_TARGET = 5;
         let weekBase = null;      // トラックの中心にある週(月曜)
         let weekCentering = false;
 
@@ -307,20 +310,27 @@
         }
 
         // 週ストリップに使える高さ。固定領域が画面の30%を超えないように決める。
+        // 週ストリップの高さ。
+        //
+        // 以前は「画面の30% − ヘッダー − 日別ヘッダー」で決めていたが、日別ヘッダーが
+        // 人数サマリー2段+操作バーで高くなったぶん、実機では50px程度まで潰れて
+        // 予定が2件しか見えず「その日に何があるか」が読めなかった(2026-09-04 実機指摘)。
+        // 引き算で決めるのをやめ、「曜日+日付 / 予定5件 / +N」が入る高さを基準にする。
+        // 上部が画面を占領しないよう、画面の35%を上限にする。
         function weekStripHeight() {
             const vh = window.innerHeight || 700;
-            const headerH = Math.round(elHeader.getBoundingClientRect().height) || 38;
-            const dayHead = elBody.querySelector('.ac-dayhead');
-            const dayH = dayHead ? Math.round(dayHead.getBoundingClientRect().height) : 86;
-            // 割り切れて30%ちょうどになると要件の境界に当たるので2px引いておく。
-            return Math.max(52, Math.min(120, Math.floor(vh * 0.30) - headerH - dayH - 2));
+            const want = WEEK_DAYNUM_H + (WEEK_CHIP_ROW * WEEK_CHIPS_TARGET) + WEEK_MORE_H + 4;
+            return Math.max(72, Math.min(want, Math.floor(vh * 0.35)));
+        }
+        function weekChipCount(h) {
+            return Math.max(2, Math.floor((h - WEEK_DAYNUM_H - WEEK_MORE_H - 4) / WEEK_CHIP_ROW));
         }
 
         // トラックを weekBase を中心に作り直し、中央の週を表示位置にする。
         function buildWeekTrack(base) {
             weekBase = base;
             const h = weekStripHeight();
-            const chips = Math.max(1, Math.floor((h - WEEK_DAYNUM_H - 4) / WEEK_CHIP_ROW));
+            const chips = weekChipCount(h);
             elWeekTrack.style.height = `${h}px`;
             elWeekTrack.innerHTML = '';
             for (let w = -WEEK_SPAN; w <= WEEK_SPAN; w += 1) {
@@ -347,7 +357,7 @@
             if (!weekBase || elWeekNav.style.display === 'none') return;
             const keep = elWeekTrack.scrollLeft;
             const h = weekStripHeight();
-            const chips = Math.max(1, Math.floor((h - WEEK_DAYNUM_H - 4) / WEEK_CHIP_ROW));
+            const chips = weekChipCount(h);
             elWeekTrack.style.height = `${h}px`;
             for (const pane of elWeekTrack.children) {
                 const startDate = pane.dataset.start;
@@ -515,7 +525,11 @@
             const bottom = wrapEl.getBoundingClientRect().bottom - elBody.getBoundingClientRect().top;
             const shown = elWeekNav.style.display !== 'none';
             const threshold = shown ? 24 : 0;
-            const want = bottom <= threshold;
+            // 配置の少ない日は、月グリッドを画面外へ送りきれるだけの高さが無い。
+            // 「月が見えたら消す」だけの判定だと、週表示から日付を選んだ瞬間に
+            // 週表示が消えて月まで戻ってしまう(2026-09-04 実機指摘)。
+            // 一度出したら、先頭まで戻したときだけ月表示へ戻す。
+            const want = bottom <= threshold || (shown && elBody.scrollTop > 4);
             if (want === shown) return;
             elWeekNav.style.display = want ? '' : 'none';
             if (want) {
