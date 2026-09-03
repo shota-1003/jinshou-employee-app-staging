@@ -110,14 +110,18 @@
   .star-flare.on{ animation:flareAnim 1.2s cubic-bezier(.2,1.2,.3,1) forwards; }
   .starspk{ position:absolute; top:50%; left:50%; z-index:7; color:#ffe9a8; opacity:0; pointer-events:none; text-shadow:0 0 12px #ffcf5c; }
 
-  /* リザルト */
-  .lucky-stage{ display:none; position:relative; z-index:9; padding:0 18px; }
+  /* リザルト — 結果表示フェーズ: 中央を暗幕(scrim)で少し暗くし、金額を最前面で読ませる */
+  .result-scrim{ position:absolute; inset:0; z-index:9; opacity:0; pointer-events:none;
+    background:radial-gradient(ellipse 92% 56% at 50% 44%, rgba(0,0,0,.76) 0%, rgba(0,0,0,.52) 38%, rgba(0,0,0,.14) 62%, transparent 78%); transition:opacity .3s ease; }
+  .lucky-overlay.reveal .result-scrim{ opacity:1; }
+  .lucky-stage{ display:none; position:relative; z-index:12; padding:0 18px; }
   .lucky-overlay.reveal .lucky-stage{ display:block; animation:luckyPop .55s cubic-bezier(.2,1.35,.35,1) both; }
-  .lucky-badge{ font-size:27px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 18px rgba(0,0,0,.5); }
-  .lucky-amount{ font-size:62px; font-weight:900; line-height:1.05; margin:2px 0 6px; text-shadow:0 3px 22px rgba(0,0,0,.55); }
-  .lucky-amount.small{ font-size:36px; }
-  .lucky-winner{ font-size:19px; font-weight:800; margin-top:2px; }
-  .lucky-sub{ font-size:13px; color:rgba(255,255,255,.85); margin-top:12px; }
+  .lucky-badge{ font-size:27px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 6px #000, 0 3px 18px rgba(0,0,0,.7); }
+  .lucky-amount{ font-size:66px; font-weight:900; line-height:1.05; margin:2px 0 6px; color:#fff;
+    text-shadow:0 2px 4px #000, 0 5px 22px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9); }
+  .lucky-amount.small{ font-size:38px; }
+  .lucky-winner{ font-size:19px; font-weight:800; margin-top:2px; text-shadow:0 2px 6px #000; }
+  .lucky-sub{ font-size:13px; color:rgba(255,255,255,.9); margin-top:12px; text-shadow:0 1px 4px #000; }
   .lucky-overlay.reveal{ transition:background .35s ease; }
   .lucky-overlay.reveal.theme-blue{ background:radial-gradient(circle at 50% 38%,#3f78e0,#0a1c40 72%); }
   .lucky-overlay.reveal.theme-green{ background:radial-gradient(circle at 50% 38%,#17b877,#063a26 72%); }
@@ -157,7 +161,7 @@
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r8</b> ／ 虹の雷はレインボー(白飛びなし) ／ 色名テキスト無し ／ ホテル星型キラーン</div>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r9</b> ／ 結果表示で雷を引かせ金額を最前面で読める ／ 虹雷レインボー ／ 色名無し</div>
   <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。色名の文字は出さず、雷だけで段階が上がります。</b>青→緑→赤→金→<b>虹（レインボーの雷）</b>→黒×金。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋扉が開いた後は星型の「キラァァン！」祝福。<b>音ON＋マナーモード解除で迫力。</b></p>
 
   <div class="soundbar">
@@ -220,6 +224,7 @@
   <div class="cut-label" id="cutLabel"></div>
   <div class="cut-white" id="cutWhite"></div>
   <div class="lucky-confetti" id="confetti"></div>
+  <div class="result-scrim" id="scrim"></div>
   <div class="lucky-actions">
     <button class="lucky-btn" id="replay">もう一度</button>
     <button class="lucky-btn primary" id="close">閉じる</button>
@@ -373,9 +378,13 @@
   function showStage(bd,amt,win,sb,small){ badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
     winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
   function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; }
-  function reveal(theme,amt,bd,sb,small,cols,coin,big){ ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
-    cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
-    showStage(bd,amt,WINNER,sb,small); impact(0,big); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:130, coin); }
+  function reveal(theme,amt,bd,sb,small,cols,coin,big){
+    // 抽選演出フェーズ → 結果表示フェーズへ。雷・粒子・閃光を消し、暗幕の上に金額を最前面で出す。
+    ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
+    bolt.style.opacity=0; bolt.setAttribute('class','bolt'); cutWhite.className='cut-white';
+    Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();});
+    showStage(bd,amt,WINNER,sb,small); impact(0,big);
+    confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?150:110, coin); }
 
   var BEATS=[500,1350,2200,3050], SIL_MARK=3450, SIL=5500, STEP=1050;
 
@@ -435,8 +444,11 @@
     var burst=doorOpen+2500;
     at(burst,function(){ goldBlessing(); at(160,function(){ chime(); }); vibe([0,240,80,180]); });
     at(burst+1000,function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
+      // 結果表示フェーズ: 星型フレア・光線・粒子を消し、暗幕の上に賞名を最前面で読ませる。
+      bolt.style.opacity=0; starFlare.className='star-flare'; rays.className='rays';
+      Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();});
       showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉', true);
-      spawnStars(10); confettiBurst(THEME_COLS.hotel,120,true); fanfare(.1); }); }
+      confettiBurst(THEME_COLS.hotel,45,true); fanfare(.1); }); }
 
   function goldPoint(xvw,yvh){ var s=document.createElement('span'); s.className='spark'; s.style.background='#ffe9a8'; s.style.boxShadow='0 0 16px #ffcf5c'; s.style.width='9px'; s.style.height='9px';
     s.style.transform='translate(calc(-50% + '+xvw+'vw),calc(-50% + '+yvh+'vh)) scale(0)'; inner.appendChild(s);
