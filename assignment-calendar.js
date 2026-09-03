@@ -1301,7 +1301,7 @@
             const table = el('table', 'ac-mxtable');
 
             const thead = el('thead');
-            const hr = el('tr');
+            const hr = el('tr', 'ac-mx-headrow');
             hr.append(el('th', 'ac-mx-name', MATRIX_HEAD[kind] || ''));
             for (const d of days) {
                 const th = el('th', 'ac-mx-day' + dayClass(d));
@@ -1312,6 +1312,22 @@
             }
             hr.append(el('th', 'ac-mx-total', '合計'));
             thead.append(hr);
+
+            // 日付ヘッダーのすぐ下に「日別合計」を固定する。
+            // 値は表に出ているマスをそのまま足したもの。人別は1人1日1人工が
+            // 上限なので、同じ日に2現場入っていてもここでは1として数える。
+            const dayTotals = days.map((d) => rows.reduce(
+                (a, r) => a + Number(((r.cells || {})[d.date] || {}).n || 0), 0));
+            const grand = dayTotals.reduce((a, n) => a + n, 0);
+            const sr = el('tr', 'ac-mx-sumrow');
+            sr.append(el('th', 'ac-mx-name', '日別合計'));
+            for (let i = 0; i < days.length; i += 1) {
+                const td = el('th', 'ac-mx-day ac-mx-sum' + dayClass(days[i]),
+                    dayTotals[i] > 0 ? fmtNum(dayTotals[i]) : '');
+                sr.append(td);
+            }
+            sr.append(el('th', 'ac-mx-total', `${fmtNum(grand)} ${MATRIX_UNIT[kind]}`));
+            thead.append(sr);
             table.append(thead);
 
             const tb = el('tbody');
@@ -1348,6 +1364,17 @@
             table.append(tb);
             wrap.append(table);
             box.append(wrap);
+
+            // 日別合計の吸着位置は日付ヘッダーの実高さで決める。
+            // 決め打ちにすると、PC/スマホや文字サイズの違いで1行ぶんずれる。
+            const place = () => {
+                const h = hr.getBoundingClientRect().height;
+                if (!h) return;
+                sr.querySelectorAll('th').forEach((th) => { th.style.top = `${Math.round(h)}px`; });
+            };
+            place();
+            requestAnimationFrame(place);
+            return { dayTotals, grand };
         }
 
         // 表の1マスを押したときの内訳。
@@ -1462,7 +1489,9 @@
                 box.classList.add('ac-mxmode');
                 box.append(el('div', 'ac-schedmeta', '横にスクロールすると月末まで見られます。'
                     + 'マスを押すとその日の内訳が出ます。'));
-                renderMatrix(box, data, kind);
+                const host = el('div', 'ac-mxhost');
+                box.append(host);
+                renderMatrix(host, data, kind);
             }, null, { tall: true });
         }
 
@@ -1526,16 +1555,18 @@
                     }
                     box.append(sw);
                 }
-                function matrixTotal(data, kind) {
-                    const sum = (data.rows || []).reduce((a, r) => a + Number(r.total), 0);
+                // 月合計は「表に出ている日別合計の総和」をそのまま出す。
+                // 別経路で計算すると、丸めの差で画面上の数字と合計が食い違う。
+                function matrixTotal(data, kind, sums) {
                     const days = (data.rows || []).reduce((a, r) => a + Number(r.total_sub ? parseInt(r.total_sub, 10) || 0 : 0), 0);
                     const unit = MATRIX_UNIT[kind];
                     setTotal(`${(data.rows || []).length} ${kind === 'employee' ? '人' : (kind === 'company' ? '社' : (kind === 'site' ? '現場' : '区分'))}`,
-                        `合計 ${fmtNum(sum)} ${unit}` + (days ? `／下請け請負 ${days} 現場日` : ''));
+                        `合計 ${fmtNum(sums ? sums.grand : 0)} ${unit}` + (days ? `／下請け請負 ${days} 現場日` : ''));
                 }
 
                 async function draw() {
                     body.innerHTML = '';
+                    body.className = '';
                     const useMatrix = isWide() && !(monthTab === 'role' && roleView === 'summary');
                     box.classList.toggle('ac-mxmode', useMatrix);
                     if (monthTab === 'role' && !useMatrix) {
@@ -1553,9 +1584,10 @@
                             });
                         } catch (e) { body.innerHTML = ''; fail(e); return; }
                         body.innerHTML = '';
+                        body.classList.add('ac-mxhost');
                         if (monthTab === 'role') drawRoleSwitch(body);
-                        renderMatrix(body, data, monthTab);
-                        matrixTotal(data, monthTab);
+                        const sums = renderMatrix(body, data, monthTab);
+                        matrixTotal(data, monthTab, sums);
                         return;
                     }
                     let rows = [];

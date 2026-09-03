@@ -965,7 +965,11 @@
 .ac-sheetscroll.ac-mxmode > .ac-tabs,
 .ac-sheetscroll.ac-mxmode > .ac-schedmeta,
 .ac-sheetscroll.ac-mxmode > .ac-roleswitch { flex: 0 0 auto; }
-.ac-sheetscroll.ac-mxmode > div:last-child { min-height: 0; }
+.ac-sheetscroll.ac-mxmode > .ac-mxhost { flex: 1 1 auto; min-height: 0; }
+/* .ac-mx が高さを持つには、親も高さの決まった flex コンテナである必要がある。
+   ここが普通のブロックだと表が content 高さのまま伸び、overflow:auto が
+   働かず最下行へ到達できない(2026-09-03 実機指摘の原因)。 */
+.ac-mxhost { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; }
 .ac-mx {
   flex: 1 1 auto; min-height: 0; width: 100%;
   overflow: auto; -webkit-overflow-scrolling: touch;
@@ -998,6 +1002,20 @@
 .ac-mx-rowname { font-size: 13px; font-weight: 700; line-height: 1.25;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ac-mx-rowsub { font-size: 10.5px; color: var(--ac-muted); line-height: 1.2; }
+/* 日付ヘッダーのすぐ下に固定する日別合計。top はJS側が実測して入れる
+   (文字サイズや画面幅でヘッダー高さが変わるため決め打ちにしない)。 */
+.ac-mxtable thead tr.ac-mx-sumrow th {
+  position: sticky; z-index: 3;
+  background: #dfe6ef; color: #16202e;
+  font-size: 12px; font-weight: 800; text-align: center;
+  border-bottom: 2px solid var(--ac-line-strong); padding: 3px 0;
+}
+.ac-mxtable thead tr.ac-mx-sumrow th.ac-mx-name {
+  z-index: 6; text-align: left; font-size: 12px; padding: 3px 8px;
+}
+.ac-mxtable thead tr.ac-mx-sumrow th.ac-mx-total { z-index: 6; text-align: right; padding: 3px 10px; }
+.ac-mxtable thead tr.ac-mx-sumrow th.ac-sat { color: var(--ac-sat); }
+.ac-mxtable thead tr.ac-mx-sumrow th.ac-sun { color: var(--ac-sun); }
 /* 右端の合計列(横スクロールしても残す) */
 .ac-mxtable .ac-mx-total {
   position: sticky; right: 0; z-index: 4;
