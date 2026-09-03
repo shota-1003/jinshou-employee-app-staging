@@ -174,6 +174,13 @@
             // 日別配置の連続タイムライン用。日付ごとのデータを貯めて使い回す。
             days: new Map(),
             tl: { from: null, to: null },
+            // スマホ/タブレットの表示状態(2026-09-05)。
+            //   month = 1か月のカレンダー全体
+            //   day   = 週間固定 + 日別配置の連続スクロール
+            // 月表示で日付を押すと day へ入り、週間表示の「∨ 月表示」で month へ戻る。
+            mobileMode: 'month',
+            // 手元にある月データがどの年月のものか(月表示へ戻るときの読み直し判定)
+            monthLoaded: null,
         };
 
         root.classList.add('ac-root');
@@ -200,7 +207,17 @@
         elWeekNext.setAttribute('aria-label', '次の7日へ');
         elWeekPrev.addEventListener('click', () => shiftWeek(-1));
         elWeekNext.addEventListener('click', () => shiftWeek(1));
-        elWeekNav.append(elWeekPrev, elWeekTrack, elWeekNext);
+        // 週間表示の上に「月全体へ戻る」操作を1つ置く(2026-09-05)。
+        // 週間表示に入ると1週間ぶんしか見えず、月全体へ戻る手段が無かった。
+        const elWeekBar = el('div', 'ac-weekbar');
+        const elWeekBack = el('button', 'ac-weekback', '∨ 月表示');
+        elWeekBack.setAttribute('aria-label', '月全体のカレンダーへ戻る');
+        elWeekBack.addEventListener('click', () => backToMonth());
+        const elWeekLabel = el('div', 'ac-weeklabel');
+        elWeekBar.append(elWeekBack, elWeekLabel);
+        const elWeekRow = el('div', 'ac-weekrow');
+        elWeekRow.append(elWeekPrev, elWeekTrack, elWeekNext);
+        elWeekNav.append(elWeekBar, elWeekRow);
         elWeekNav.style.display = 'none';
         const elOffline = el('div', 'ac-offline', '通信できないため、端末に保存された最後の内容を表示しています');
         elOffline.style.display = 'none';
@@ -258,7 +275,9 @@
             if (m > 12) { m = 1; y += 1; }
             state.year = y; state.month = m;
             syncSelectedToMonth();
-            Promise.all([loadMonth(), loadDay()]).then(render);
+            // 月を切り替える操作なので、スマホでは月全体表示に戻して見せる。
+            if (!isWide() && state.view !== 'me') state.mobileMode = 'month';
+            Promise.all([loadMonth(), loadDay()]).then(() => render({ resetScroll: true }));
         }
 
         // 月を移動したのに日別詳細だけ前の月の日付のまま、という状態を作らない。
@@ -273,13 +292,15 @@
             const t = todayJST();
             state.year = Number(t.slice(0, 4));
             state.month = Number(t.slice(5, 7));
+            // 日別表示で見ているときは、今日の区画へ送る(表示状態は変えない)。
+            if (!isWide() && state.view !== 'me' && state.mobileMode === 'day') { enterDayMode(t); return; }
             state.selected = t;
-            Promise.all([loadMonth(), loadDay()]).then(render);
+            Promise.all([loadMonth(), loadDay()]).then(() => render({ resetScroll: true }));
         }
         function jumpTo(dateStr) {
             state.view = 'month';
-            // スマホは連続タイムライン。離れた日へ飛ぶときはその日を中心に組み直す。
-            if (!isWide()) { rebuildTimeline(dateStr); return; }
+            // スマホは連続タイムライン。指定された日を含む日別表示へ入る。
+            if (!isWide()) { enterDayMode(dateStr); return; }
             state.year = Number(dateStr.slice(0, 4));
             state.month = Number(dateStr.slice(5, 7));
             state.selected = dateStr;
@@ -372,8 +393,15 @@
             elWeekTrack.scrollLeft = keep;
         }
 
+        function syncWeekLabel(date) {
+            const d = date || state.selected;
+            if (!d) return;
+            elWeekLabel.textContent = `${Number(d.slice(5, 7))}月${Number(d.slice(8, 10))}日(${DOW_JP[dowOf(d)]})`;
+        }
+
         function renderWeekStrip() {
             if (state.view === 'me') { elWeekNav.style.display = 'none'; return; }
+            syncWeekLabel(state.selected);
             const want = mondayOf(state.selected);
             if (!weekBase) { buildWeekTrack(want); return; }
             // 選んだ日がいまのトラックの中にあれば、その週へ寄せるだけ
@@ -475,7 +503,7 @@
             }
             if (!missing) return;
             try {
-                const data = await rpc('assignment_get_range', {
+                const data = await readRpc('assignment_get_range', {
                     p_employee_code: me, p_from: from, p_to: to,
                 });
                 mergeRange(data, from, to);
@@ -527,7 +555,7 @@
         // 「スクロールし始めてから別のパネルを出す」方式は、出た瞬間に高さが変わって
         // 一覧がカクつく・一瞬消える、という指摘の原因そのものだった(2026-09-05)。
         function syncWeekStripVisibility() {
-            const want = !(state.view === 'me' || isWide());
+            const want = !(state.view === 'me' || isWide() || state.mobileMode === 'month');
             const shown = elWeekNav.style.display !== 'none';
             if (want === shown) return;
             elWeekNav.style.display = want ? '' : 'none';
@@ -542,8 +570,12 @@
         // 日付バーやカレンダーから日を選んだときの共通処理。
         // 月をまたいだ場合は月データも読み直す(操作としては日付が連続して見える)。
         function selectDate(date) {
-            // スマホは連続タイムライン。日付を選んでも作り直さず、その日の区画へ送る。
-            if (!isWide() && state.view !== 'me' && timelineEl()) { goToDaySection(date, true); return; }
+            if (!isWide() && state.view !== 'me') {
+                // 月全体表示から押したときは、その日を含む週間+日別表示へ入る。
+                if (state.mobileMode === 'month') { enterDayMode(date); return; }
+                // すでに日別表示なら、作り直さずその日の区画へ送る。
+                if (timelineEl()) { goToDaySection(date, true); return; }
+            }
             const monthChanged = Number(date.slice(0, 4)) !== state.year || Number(date.slice(5, 7)) !== state.month;
             state.selected = date;
             state.year = Number(date.slice(0, 4));
@@ -581,6 +613,7 @@
                 // 月データを取得できた時点で認証済み社員であることが確定しているため編集可。
                 state.canEdit = true;
                 state.categories = state.month_data.categories || [];
+                state.monthLoaded = `${state.year}-${state.month}`;
                 // 月表示は月曜始まりの6週間ぶんを返す(前月末・翌月初を含む)。
                 mergeRange(state.month_data);
                 state.offline = false;
@@ -606,7 +639,7 @@
             const from = addDays(todayJST(), -3);
             const to = addDays(todayJST(), 30);
             try {
-                state.mine = await rpc('assignment_get_my_schedule', {
+                state.mine = await readRpc('assignment_get_my_schedule', {
                     p_employee_code: me, p_date_from: from, p_date_to: to,
                 });
                 state.offline = false;
@@ -808,7 +841,10 @@
         // 最初は選んだ日だけを描き、前後は描いたあとに TL_STEP 日ずつ足していく。
         const TL_STEP = 3;        // 一度に足す日数
         const TL_MAX_DAYS = 45;   // DOMが無限に伸びないための上限
-        const TL_EDGE = 800;      // 端まで何pxに近づいたら足すか
+        const TL_EDGE = 800;      // 下端まで何pxに近づいたら足すか
+        // 上へ足す距離は短くする。日別表示には月グリッドが無く先頭がすぐ来るため、
+        // 下と同じ800pxにすると上限までひたすら前の日を読み続けてしまう。
+        const TL_EDGE_UP = 300;
 
         function timelineEl() { return elBody.querySelector('.ac-timeline'); }
 
@@ -925,6 +961,7 @@
         }
 
         function markWeekSelection(date) {
+            syncWeekLabel(date);
             let inTrack = false;
             elWeekTrack.querySelectorAll('.ac-wcell').forEach((c) => {
                 const on = c.dataset.date === date;
@@ -1000,6 +1037,57 @@
         }
         function extendTimeline(dir) { return tlRun(() => extendTimelineNow(dir)); }
 
+        // 月全体表示 → 週間固定+日別連続スクロール。
+        // すでに読み込んである範囲の日なら、通信も組み直しもせずその日の位置へ送る。
+        function enterDayMode(date) { return tlRunNav(() => enterDayModeNow(date)); }
+        async function enterDayModeNow(date) {
+            const wasMonth = state.mobileMode === 'month';
+            state.mobileMode = 'day';
+            const inRange = state.tl.from && state.tl.to
+                && date >= state.tl.from && date <= state.tl.to;
+            if (!inRange) { await rebuildTimelineNow(date); if (wasMonth) fadeModeSwitch(); return; }
+            if (!state.days.has(date)) await loadDayData(date);
+            focusDate(date);
+            state.year = Number(date.slice(0, 4));
+            state.month = Number(date.slice(5, 7));
+            state.weekStart = mondayOf(date);
+            render({ resetScroll: true });
+            renderWeekStrip();
+            const tl = timelineEl();
+            const sec = tl && tl.querySelector(`.ac-daysec[data-date="${date}"]`);
+            if (sec) {
+                elBody.scrollTop = Math.max(0, sec.getBoundingClientRect().top
+                    - elBody.getBoundingClientRect().top + elBody.scrollTop);
+            }
+            if (wasMonth) fadeModeSwitch();
+        }
+
+        // 週間固定+日別 → 月全体表示。いま見ていた日をそのまま選択日として残す。
+        function backToMonth() { return tlRunNav(() => backToMonthNow()); }
+        async function backToMonthNow() {
+            const date = viewedDate() || state.selected;
+            focusDate(date);
+            state.year = Number(date.slice(0, 4));
+            state.month = Number(date.slice(5, 7));
+            state.weekStart = mondayOf(date);
+            state.mobileMode = 'month';
+            // 見ていた日の月と手元の月データが違う場合だけ読み直す(そのまま描くと別の月が出る)
+            if (state.monthLoaded !== `${state.year}-${state.month}`) await loadMonth();
+            render({ resetScroll: true });
+            fadeModeSwitch();
+        }
+
+        // 切り替えの見え方。画面が入れ替わったことだけ分かればよいので、
+        // 位置に影響しない短いフェードにする(高さを動かすとカクつきの原因になる)。
+        let fadeTimer = null;
+        function fadeModeSwitch() {
+            root.classList.remove('ac-modeswitch');
+            void root.offsetWidth;
+            root.classList.add('ac-modeswitch');
+            clearTimeout(fadeTimer);
+            fadeTimer = setTimeout(() => root.classList.remove('ac-modeswitch'), 260);
+        }
+
         function onTimelineScroll() {
             if (isWide() || state.view === 'me') return;
             const tl = timelineEl();
@@ -1010,7 +1098,7 @@
             const first = tl.firstElementChild;
             const firstTop = first ? first.getBoundingClientRect().top - bodyTop : 0;
             if (bottomGap < TL_EDGE) extendTimeline(1);
-            else if (elBody.scrollTop > 200 && firstTop > -TL_EDGE) extendTimeline(-1);
+            else if (firstTop > -TL_EDGE_UP) extendTimeline(-1);
         }
 
         // 週表示や月グリッドから日を選んだとき。画面を作り直さず、その日の区画へ送る。
@@ -4279,11 +4367,16 @@
             elBody.innerHTML = '';
             if (state.view === 'me') {
                 renderMine(elBody);
-            } else {
+            } else if (isWide()) {
                 renderMonth(elBody);
-                if (isWide()) renderDay(elBody);
-                else renderTimeline(elBody);
+                renderDay(elBody);
                 reflowMonthIfNeeded();
+            } else if (state.mobileMode === 'month') {
+                // 月全体表示。画面をまるごと使えるぶん、1日のマスに入る予定も増える。
+                renderMonth(elBody);
+                reflowMonthIfNeeded();
+            } else {
+                renderTimeline(elBody);
             }
             if (prev > 0) elBody.scrollTop = prev;
             restoreAnchor(anchor);
@@ -4339,23 +4432,17 @@
             if (!state.canEdit && !ctx.defaultView) state.view = 'me';
             if (state.view === 'me') { await loadMine(); render(); return; }
             await loadDay();
-            // 連続タイムライン用に、選択日の前後を先に読んでおく
+            // 日別表示へ入ったときにすぐ出せるよう、選択日ぶんは手元に置いておく。
             state.days.set(state.selected, {
                 day: state.day_data, issues: state.issues, confirmation: state.confirmation, full: true,
             });
-            // まず選んだ日だけで描いて、前後は描いたあとに少しずつ足す。
-            // 起動時に前後ぶんをまとめて問い合わせると、検証環境が応答しきれず
-            // assignment_get_day が500を返すことが実際に起きた(2026-09-05)。
             state.tl.from = state.selected;
             state.tl.to = state.selected;
             focusDate(state.selected);
+            // スマホ/タブレットは月全体表示から始める(日付を押すと日別表示へ入る)。
+            // PCは左右2カラムなので、これまでどおり月と日別を同時に出す。
             render();
             syncWeekStripVisibility();
-            if (isWide()) return;
-            await extendTimeline(1);
-            await extendTimeline(1);
-            await extendTimeline(-1);
-            goToDaySection(state.selected, false);
         })();
 
         return {

@@ -125,10 +125,25 @@
    セル(現場名・色・+N)を1週間ぶんだけ縮めて上部へ残す。
    高さはJS側が実測して決める(固定領域が画面の30%を超えないように)。 */
 .ac-weeknav {
-  display: flex; align-items: stretch; z-index: 25;
+  display: flex; flex-direction: column; z-index: 25;
   background: #fff; border-bottom: 1px solid var(--ac-line-strong);
   padding-left: var(--ac-safe-left); padding-right: var(--ac-safe-right);
 }
+.ac-weekrow { display: flex; align-items: stretch; flex: 1 1 auto; min-height: 0; }
+
+/* 月全体へ戻るための行(2026-09-05)。週間表示に入ったまま戻れない状態を作らない。 */
+.ac-weekbar {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  height: 30px; padding: 0 8px; background: #f4f7fb;
+  border-bottom: 1px solid var(--ac-line);
+}
+.ac-weekback {
+  border: 1px solid var(--ac-line-strong); background: #fff; cursor: pointer;
+  color: var(--ac-accent); font-size: 12px; font-weight: 800; line-height: 1;
+  padding: 5px 10px; border-radius: 999px; white-space: nowrap;
+}
+.ac-weekback:active { background: #e7ecf3; }
+.ac-weeklabel { font-size: 12px; font-weight: 700; color: var(--ac-muted); }
 .ac-datearrow {
   flex: 0 0 auto; width: 26px; border: none; background: #fff; cursor: pointer;
   color: var(--ac-accent); font-size: 17px; font-weight: 700; line-height: 1;
@@ -1084,6 +1099,11 @@
    日付が分からなくならないよう、各区画の日付ヘッダーは区画の中で吸着させ、
    区画どうしの境目もはっきり出す。
    ============================================================ */
+/* 月全体 ⇄ 週間+日別 の切り替え。位置が動く演出は入れない(カクつきの元になる)。 */
+@keyframes ac-modefade { from { opacity: .35; } to { opacity: 1; } }
+.ac-root.ac-modeswitch .ac-bodywrap { animation: ac-modefade .16s ease-out; }
+.ac-root.ac-modeswitch .ac-weeknav { animation: ac-modefade .16s ease-out; }
+
 .ac-timeline { display: block; }
 .ac-daysec { border-top: 8px solid #e7ecf3; }
 .ac-daysec:first-child { border-top: 0; }
