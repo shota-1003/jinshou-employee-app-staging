@@ -31,86 +31,86 @@
   .pbtn:active{ transform:scale(.97); }
   .pbtn .sub{ font-size:11px; font-weight:600; color:var(--mut); }
   .pbtn.miss{ border-color:#3a4460; }
-  .pbtn.c1{ border-color:#2f6bd6; } .pbtn.c2{ border-color:#c99a20; }
-  .pbtn.c3{ border-color:#12a06a; } .pbtn.c5{ border-color:#d83a2f; }
-  .pbtn.c10{ border-image:linear-gradient(90deg,#ff3b30,#ffcc00,#34c759,#0a84ff,#5e5ce6) 1; }
+  .pbtn.c1{ border-color:#2f6bd6; } .pbtn.c2{ border-color:#12a06a; }
+  .pbtn.c3{ border-color:#d83a2f; } .pbtn.c5{ border-color:#e0a021; }
+  .pbtn.c10{ border-image:linear-gradient(90deg,#2f6bd6,#12a06a,#d83a2f,#e0a021,#5e5ce6) 1; }
   .pbtn.hotel{ border-color:#caa34a; background:linear-gradient(160deg,#161a24,#221a10); }
   .pbtn .amt{ font-size:19px; }
   .foot{ color:var(--mut); font-size:12px; line-height:1.7; margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
 
-  /* ===== 演出オーバーレイ ===== */
+  /* ===== 演出オーバーレイ(r4: 大胆化) ===== */
   .lucky-overlay{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center;
     justify-content:center; text-align:center; z-index:9999; overflow:hidden; color:#fff;
-    background:#05070d; transition:background .4s ease; -webkit-user-select:none; user-select:none; }
+    background:#04060c; -webkit-user-select:none; user-select:none; }
   .lucky-overlay.show{ display:flex; }
   .lucky-inner{ position:relative; z-index:3; display:flex; flex-direction:column; align-items:center;
     justify-content:center; width:100%; height:100%; }
-  .lucky-overlay.shake .lucky-inner{ animation:luckyShake .46s ease; }
+  .lucky-overlay.shake{ animation:luckyShake .42s cubic-bezier(.36,.07,.19,.97); }
 
-  /* 心拍のビネット */
-  .pulse-vig{ position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0;
-    background:radial-gradient(circle at 50% 46%, rgba(190,60,60,.28), transparent 60%); }
+  /* 心拍(大きく明確に) */
+  .beat-flash{ position:absolute; inset:0; z-index:2; pointer-events:none; opacity:0;
+    background:radial-gradient(circle at 50% 46%, rgba(230,60,60,.55), rgba(120,20,20,.15) 55%, transparent 72%); }
+  .heart{ font-size:96px; line-height:1; filter:drop-shadow(0 0 26px rgba(230,60,60,.75)); transform:scale(1);
+    will-change:transform; }
+  .lucky-overlay.tame .heart{ font-size:34px; filter:drop-shadow(0 0 14px rgba(200,120,120,.5)); animation:heartTremble 1.1s ease-in-out infinite; }
+  .lucky-overlay.reveal .heart, .lucky-overlay.cutting .heart{ display:none; }
+  .beat-word{ position:absolute; top:26%; left:0; right:0; z-index:4; font-size:40px; font-weight:900; color:#ff8a80;
+    letter-spacing:.1em; opacity:0; text-shadow:0 2px 18px rgba(0,0,0,.6); pointer-events:none; }
+  .beat-word.on{ animation:beatWord .5s ease; }
+  .beat-dots{ position:absolute; bottom:20%; left:0; right:0; z-index:4; display:flex; gap:12px; justify-content:center; }
+  .beat-dots i{ width:14px; height:14px; border-radius:50%; background:#33405f; box-shadow:0 0 0 1px #223 inset; transition:background .15s, box-shadow .15s; }
+  .beat-dots i.lit{ background:#ff5a4c; box-shadow:0 0 14px #ff5a4c; }
+  .lucky-overlay.reveal .beat-dots, .lucky-overlay.cutting .beat-dots, .lucky-overlay.tame .beat-dots{ opacity:0; }
+  .prompt-line{ position:absolute; bottom:12%; left:0; right:0; z-index:4; font-size:15px; font-weight:700; color:#cdd8ef; letter-spacing:.06em; }
+  .tame-dots{ position:absolute; top:52%; left:0; right:0; z-index:4; font-size:34px; font-weight:900; letter-spacing:.3em; color:#fff; display:none; }
+  .lucky-overlay.tame .tame-dots{ display:block; animation:tameDots 1.2s ease-in-out infinite; }
+  .lucky-overlay.reveal .prompt-line, .lucky-overlay.cutting .prompt-line, .lucky-overlay.tame .prompt-line{ display:none; }
 
-  /* 心拍コア（結果が隠れているもの） */
-  .lucky-orb{ width:110px; height:110px; border-radius:50%; position:relative;
-    background:radial-gradient(circle at 40% 36%, #d7e2f5, #7f93ba 55%, #3a4a6e);
-    box-shadow:0 0 40px 8px rgba(150,170,210,.4); transition:opacity .6s ease, transform .6s ease, filter .6s ease; }
-  .lucky-orb::after{ content:""; position:absolute; inset:-12px; border-radius:50%;
-    border:2px solid rgba(255,255,255,.14); }
-  .lucky-overlay.silence .lucky-orb{ opacity:.2; transform:scale(.62); filter:blur(1px); }
-  .lucky-overlay.reveal .lucky-orb, .lucky-overlay.cutting .lucky-orb{ opacity:0; }
+  /* カットイン(全画面ハードフラッシュ+白閃光+斜め斬撃) */
+  .cut-fill{ position:absolute; inset:0; z-index:5; opacity:0; pointer-events:none; background:var(--rankc); }
+  .cut-fill.rainbow{ background:conic-gradient(#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55,#ff3b30); }
+  .cut-fill.special{ background:radial-gradient(circle at 50% 45%, #ffe9a8, #a5761a 45%, #120d04 78%); }
+  .cut-fill.on{ animation:cutFill .34s ease; }
+  .cut-white{ position:absolute; inset:0; z-index:7; background:#fff; opacity:0; pointer-events:none; }
+  .cut-white.on{ animation:cutWhite .26s ease; }
+  .cut-streak{ position:absolute; top:50%; left:-160%; width:170%; height:34vh; z-index:6; opacity:0;
+    transform:translateY(-50%) rotate(-20deg); pointer-events:none; mix-blend-mode:screen; filter:blur(1px);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.35) 28%, #fff 48%, #fff 54%, rgba(255,255,255,.35) 72%, transparent);
+    box-shadow:0 0 60px 16px var(--rankc); }
+  .cut-streak.on{ animation:cutStreak .26s linear; }
+  .cut-label{ position:absolute; top:44%; left:0; right:0; z-index:8; font-size:30px; font-weight:900; letter-spacing:.18em;
+    color:#fff; opacity:0; text-shadow:0 2px 20px rgba(0,0,0,.6); pointer-events:none; }
+  .cut-label.on{ animation:cutLabel .34s ease; }
+  .spark{ position:absolute; top:50%; left:50%; width:9px; height:9px; border-radius:50%; z-index:6; pointer-events:none;
+    background:var(--rankc); box-shadow:0 0 12px var(--rankc); }
 
-  .lucky-prompt{ margin-top:28px; font-size:16px; font-weight:700; color:#cdd8ef; letter-spacing:.05em;
-    text-shadow:0 1px 10px rgba(0,0,0,.6); transition:opacity .6s ease; }
-  .lucky-overlay.silence .lucky-prompt{ opacity:.35; }
-  .lucky-overlay.reveal .lucky-prompt, .lucky-overlay.cutting .lucky-prompt{ opacity:0; }
-
-  /* カットイン */
-  .cutin-fill{ position:absolute; inset:0; z-index:7; opacity:0; pointer-events:none; background:var(--rankc); }
-  .cutin-fill.rainbow{ background:conic-gradient(#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55,#ff3b30); }
-  .cutin-fill.special{ background:radial-gradient(circle at 50% 45%, #ffe9a8, #a5761a 45%, #120d04 78%); }
-  .cutin-fill.flash{ animation:cutFlash .34s ease; }
-  .cutin-slash{ position:absolute; top:50%; left:-140%; width:150%; height:20vh; z-index:8; opacity:0;
-    transform:translateY(-50%) rotate(-19deg); pointer-events:none; mix-blend-mode:screen; filter:blur(1.5px);
-    background:linear-gradient(90deg, transparent, rgba(255,255,255,.2) 30%, #fff 48%, #fff 54%, rgba(255,255,255,.2) 70%, transparent);
-    box-shadow:0 0 40px 10px var(--rankc); }
-  .cutin-slash.go{ animation:cutSlash var(--cutdur,.22s) linear; }
-  .cutin-slash.big{ height:26vh; }
-  @keyframes cutSlash{ 0%{ left:-140%; opacity:0;} 12%{ opacity:1;} 60%{ opacity:1;} 100%{ left:140%; opacity:0;} }
-  @keyframes cutFlash{ 0%{ opacity:0;} 8%{ opacity:.92;} 100%{ opacity:0;} }
-  .spark{ position:absolute; top:50%; left:50%; width:9px; height:9px; border-radius:50%; z-index:8; pointer-events:none;
-    background:var(--rankc); box-shadow:0 0 10px var(--rankc); }
-
-  /* 金の拡散（ホテル用） */
   .gold-spread{ position:absolute; top:50%; left:50%; width:20px; height:20px; border-radius:50%;
     transform:translate(-50%,-50%) scale(0); z-index:2; opacity:0;
     background:radial-gradient(circle,#fff4cf,#e6b53a 45%,#7a5410 72%); }
   .gold-spread.on{ animation:goldSpread 1.5s cubic-bezier(.15,.7,.3,1) forwards; }
 
   /* リザルト */
-  .lucky-stage{ display:none; position:relative; z-index:4; padding:0 18px; }
-  .lucky-overlay.reveal .lucky-stage{ display:block; animation:luckyPop .5s cubic-bezier(.2,1.3,.4,1) both; }
-  .lucky-badge{ font-size:26px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 18px rgba(0,0,0,.5); }
-  .lucky-amount{ font-size:60px; font-weight:900; line-height:1.05; margin:2px 0 6px; text-shadow:0 3px 22px rgba(0,0,0,.55); }
+  .lucky-stage{ display:none; position:relative; z-index:8; padding:0 18px; }
+  .lucky-overlay.reveal .lucky-stage{ display:block; animation:luckyPop .55s cubic-bezier(.2,1.35,.35,1) both; }
+  .lucky-badge{ font-size:27px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 18px rgba(0,0,0,.5); }
+  .lucky-amount{ font-size:62px; font-weight:900; line-height:1.05; margin:2px 0 6px; text-shadow:0 3px 22px rgba(0,0,0,.55); }
   .lucky-amount.small{ font-size:36px; }
   .lucky-winner{ font-size:19px; font-weight:800; margin-top:2px; }
   .lucky-sub{ font-size:13px; color:rgba(255,255,255,.85); margin-top:12px; }
-
+  .lucky-overlay.reveal{ transition:background .35s ease; }
   .lucky-overlay.reveal.theme-blue{ background:radial-gradient(circle at 50% 38%,#3f78e0,#0a1c40 72%); }
-  .lucky-overlay.reveal.theme-gold{ background:radial-gradient(circle at 50% 38%,#e6b53a,#4a300a 72%); }
   .lucky-overlay.reveal.theme-green{ background:radial-gradient(circle at 50% 38%,#17b877,#063a26 72%); }
   .lucky-overlay.reveal.theme-red{ background:radial-gradient(circle at 50% 40%,#f04437,#2a0603 72%); }
+  .lucky-overlay.reveal.theme-gold{ background:radial-gradient(circle at 50% 38%,#e6b53a,#4a300a 72%); }
   .lucky-overlay.reveal.theme-rainbow{ background:#05070d; }
   .lucky-overlay.reveal.theme-rainbow .lucky-badge{ background:linear-gradient(90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55);
-    -webkit-background-clip:text; background-clip:text; color:transparent; background-size:220% auto; animation:luckyRainbowText 2.4s linear infinite; }
+    -webkit-background-clip:text; background-clip:text; color:transparent; background-size:220% auto; animation:rainbowText 2.4s linear infinite; }
   .lucky-overlay.reveal.theme-hotel{ background:radial-gradient(circle at 50% 42%,#2a2110,#05070d 72%); }
   .lucky-overlay.reveal.theme-hotel .lucky-amount{ color:#ffe9a8; }
   .lucky-overlay.reveal.theme-miss{ background:radial-gradient(circle at 50% 42%,#212a4a,#080c18 76%); }
   .lucky-overlay.reveal.theme-miss .lucky-amount{ font-size:32px; color:#cdd6ee; }
 
-  .lucky-flash{ position:absolute; inset:0; background:#fff; opacity:0; z-index:6; pointer-events:none; }
-  .lucky-flash.on{ animation:luckyFlash .5s ease; }
-  .lucky-confetti{ position:absolute; inset:0; z-index:5; pointer-events:none; overflow:hidden; }
+  .lucky-confetti{ position:absolute; inset:0; z-index:7; pointer-events:none; overflow:hidden; }
   .lucky-piece{ position:absolute; top:-24px; width:10px; height:16px; border-radius:2px; opacity:.95; animation:luckyFall linear forwards; }
   .lucky-coin{ border-radius:50%; width:16px; height:16px; background:radial-gradient(circle at 35% 32%,#fff6d0,#e0a021 60%,#8a5e10); box-shadow:0 0 6px rgba(224,160,33,.6); }
 
@@ -119,42 +119,47 @@
     color:#fff; font-size:15px; font-weight:800; border-radius:999px; padding:12px 26px; backdrop-filter:blur(4px); }
   .lucky-btn.primary{ background:rgba(255,255,255,.92); color:#111; border-color:#fff; }
 
-  @keyframes luckyPop{ 0%{ transform:scale(.55); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
-  @keyframes luckyShake{ 0%,100%{ transform:translate(0,0);} 15%{ transform:translate(-10px,4px);}
-    30%{ transform:translate(9px,-5px);} 45%{ transform:translate(-8px,-3px);} 60%{ transform:translate(6px,5px);} 75%{ transform:translate(-4px,2px);} }
-  @keyframes luckyFlash{ 0%{ opacity:0;} 12%{ opacity:.9;} 100%{ opacity:0;} }
-  @keyframes luckyRainbowText{ to{ background-position:220% center; } }
+  @keyframes beatWord{ 0%{ opacity:0; transform:scale(.7);} 25%{ opacity:1; transform:scale(1.1);} 100%{ opacity:0; transform:scale(1);} }
+  @keyframes tameDots{ 0%,100%{ opacity:.3;} 50%{ opacity:1;} }
+  @keyframes heartTremble{ 0%,100%{ transform:translate(0,0) scale(1);} 25%{ transform:translate(-2px,1px) scale(1.03);} 60%{ transform:translate(2px,-1px) scale(.98);} }
+  @keyframes cutFill{ 0%{ opacity:0;} 10%{ opacity:.92;} 55%{ opacity:.7;} 100%{ opacity:0;} }
+  @keyframes cutWhite{ 0%{ opacity:0;} 8%{ opacity:.9;} 100%{ opacity:0;} }
+  @keyframes cutStreak{ 0%{ left:-160%; opacity:0;} 12%{ opacity:1;} 60%{ opacity:1;} 100%{ left:160%; opacity:0;} }
+  @keyframes cutLabel{ 0%{ opacity:0; transform:scale(.6);} 30%{ opacity:1; transform:scale(1.05);} 100%{ opacity:0; transform:scale(1);} }
+  @keyframes luckyShake{ 0%,100%{ transform:translate(0,0);} 12%{ transform:translate(-12px,6px);} 28%{ transform:translate(11px,-7px);}
+    44%{ transform:translate(-10px,-4px);} 60%{ transform:translate(8px,6px);} 78%{ transform:translate(-5px,3px);} }
+  @keyframes luckyPop{ 0%{ transform:scale(.5); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
+  @keyframes rainbowText{ to{ background-position:220% center; } }
   @keyframes goldSpread{ 0%{ transform:translate(-50%,-50%) scale(0); opacity:0;} 12%{ opacity:1;} 55%{ opacity:.95;} 100%{ transform:translate(-50%,-50%) scale(60); opacity:0;} }
   @keyframes luckyFall{ 0%{ transform:translateY(0) rotate(0);} 100%{ transform:translateY(112vh) rotate(540deg);} }
-  @media (prefers-reduced-motion:reduce){ .lucky-piece{ animation-duration:.001s; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r3</b> ／ 順序 青→緑→赤→金→虹→黒×金 ／ ホテル二段階</div>
-  <p class="lead">演出の中心は「抽選中の緊張感」です。<b>心拍（ドクン…）→ 2〜3秒の静寂 → シャキーン！のカットイン</b>で結果が出ます。<b>カットインの枚数＝賞のランク</b>。紙吹雪は当選確定後の祝福だけに使います。<br><b>抽選結果・履歴・予算・支給には一切記録しません</b>（プレビュー専用）。</p>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r4</b> ／ ❤4回→タメ→シャキーン ／ 青→緑→赤→金→虹→黒×金</div>
+  <p class="lead"><b>抽選開始 → ❤ドックン×4（画面全体が脈打つ）→ 2〜3秒の静寂のタメ → シャキーン！の全画面カットイン</b>で結果が出ます。カットインの枚数＝賞のランク。<br><b>音を出すと迫力が出ます（マナーモード解除＋音量）。</b>抽選結果・履歴・予算・支給には一切記録しません。</p>
 
   <div class="soundbar">
-    <span class="lbl">🔊 音・振動<br>重低音を体感するにはマナーモード解除＋音量を上げてください</span>
+    <span class="lbl">🔊 音・振動（重低音の心拍＋鋭いカットイン音／マナーモード解除で鳴ります）</span>
     <button class="toggle" id="soundToggle" data-on="1">ON</button>
   </div>
 
-  <div class="sec">ハズレ（カットインなし・力が抜ける「スン…」・3パターン）</div>
+  <div class="sec">ハズレ（タメまで期待→スーン…と力が抜ける・3パターン）</div>
   <div class="grid">
     <button class="pbtn miss" data-key="missA"><span>ハズレ A</span><span class="sub">青の兆しで止まる</span></button>
-    <button class="pbtn miss" data-key="missB"><span>ハズレ B</span><span class="sub">金まで行って外す</span></button>
+    <button class="pbtn miss" data-key="missB"><span>ハズレ B</span><span class="sub">金まで期待させて外す</span></button>
     <button class="pbtn miss" data-key="missC" style="grid-column:span 2"><span>ハズレ C</span><span class="sub">強く光ってから直前で外す</span></button>
   </div>
 
   <div class="sec">当選（カットイン枚数＝ランク／青→緑→赤→金→虹→黒金）</div>
   <div class="grid">
-    <button class="pbtn c1"  data-key="w1000"><span class="amt">1,000円</span><span class="sub">×1（青）</span></button>
+    <button class="pbtn c1"  data-key="w1000"><span class="amt">1,000円</span><span class="sub">シャキーン ×1（青）</span></button>
     <button class="pbtn c2"  data-key="w2000"><span class="amt">2,000円</span><span class="sub">×2（青→緑）</span></button>
     <button class="pbtn c3"  data-key="w3000"><span class="amt">3,000円</span><span class="sub">×3（青→緑→赤）</span></button>
-    <button class="pbtn c5"  data-key="w5000"><span class="amt">5,000円</span><span class="sub">×4（青→緑→赤→金・強）</span></button>
-    <button class="pbtn c10" data-key="w10000" style="grid-column:span 2"><span class="amt">10,000円</span><span class="sub">×5（4枚で一瞬止め→レインボー「ザーン！」）</span></button>
-    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">×5で1万かと思わせ→プシュン→暗転→静寂→金の粒子→黒×金SPECIAL復活</span></button>
+    <button class="pbtn c5"  data-key="w5000"><span class="amt">5,000円</span><span class="sub">×4（青→緑→赤→金）</span></button>
+    <button class="pbtn c10" data-key="w10000" style="grid-column:span 2"><span class="amt">10,000円</span><span class="sub">×5（…→金→虹「ザーン！」）</span></button>
+    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">虹まで＝1万かと思わせ→プシュン→暗転→金の粒子→黒×金 復活</span></button>
   </div>
 
   <p class="foot">このページはプレビュー専用の単独ページです。ログイン不要・DB非接続。<br>
@@ -162,11 +167,14 @@
 </div>
 
 <div class="lucky-overlay" id="ov" aria-hidden="true">
-  <div class="pulse-vig" id="pulse"></div>
+  <div class="beat-flash" id="beatFlash"></div>
   <div class="gold-spread" id="gold"></div>
   <div class="lucky-inner" id="inner">
-    <div class="lucky-orb" id="orb"></div>
-    <div class="lucky-prompt" id="prompt">今日のラッキーは誰だ…？</div>
+    <div class="heart" id="heart">❤</div>
+    <div class="beat-word" id="beatWord">ドックン</div>
+    <div class="tame-dots" id="tameDots">…</div>
+    <div class="prompt-line" id="promptLine">抽選開始…</div>
+    <div class="beat-dots" id="beatDots"><i></i><i></i><i></i><i></i></div>
     <div class="lucky-stage" id="stage">
       <div class="lucky-badge" id="badge">LUCKY!</div>
       <div class="lucky-amount" id="amount">1,000円</div>
@@ -174,9 +182,10 @@
       <div class="lucky-sub" id="sub">演出プレビュー</div>
     </div>
   </div>
-  <div class="cutin-fill" id="fill"></div>
-  <div class="cutin-slash" id="slash"></div>
-  <div class="lucky-flash" id="flash"></div>
+  <div class="cut-fill" id="cutFill"></div>
+  <div class="cut-streak" id="cutStreak"></div>
+  <div class="cut-label" id="cutLabel"></div>
+  <div class="cut-white" id="cutWhite"></div>
   <div class="lucky-confetti" id="confetti"></div>
   <div class="lucky-actions">
     <button class="lucky-btn" id="replay">もう一度</button>
@@ -187,158 +196,112 @@
 <script>
 (function(){
   "use strict";
-  var ov=document.getElementById('ov'), inner=document.getElementById('inner'), orb=document.getElementById('orb'),
-      prompt=document.getElementById('prompt'), badge=document.getElementById('badge'), amount=document.getElementById('amount'),
-      winner=document.getElementById('winner'), sub=document.getElementById('sub'), confetti=document.getElementById('confetti'),
-      flash=document.getElementById('flash'), fill=document.getElementById('fill'), slash=document.getElementById('slash'),
-      pulse=document.getElementById('pulse'), gold=document.getElementById('gold');
+  var ov=document.getElementById('ov'), inner=document.getElementById('inner'), heart=document.getElementById('heart'),
+      beatFlash=document.getElementById('beatFlash'), beatWord=document.getElementById('beatWord'), beatDots=document.getElementById('beatDots'),
+      promptLine=document.getElementById('promptLine'), tameDots=document.getElementById('tameDots'),
+      badge=document.getElementById('badge'), amount=document.getElementById('amount'), winner=document.getElementById('winner'),
+      sub=document.getElementById('sub'), confetti=document.getElementById('confetti'), gold=document.getElementById('gold'),
+      cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), cutStreak=document.getElementById('cutStreak'), cutLabel=document.getElementById('cutLabel');
   var WINNER='テスト 太郎';
-  var RANK={ blue:'#2f6bd6', gold:'#e0a021', green:'#0fae6e', red:'#e0392f', rainbow:'#ffffff', special:'#e6b53a' };
-  var THEME_COLS={ blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
-    green:['#b8f5da','#0fae6e','#ffffff','#5be0a8'], red:['#ffc2bd','#e0392f','#ffffff','#ff7a6e'],
+  var RANK={ blue:'#2f6bd6', green:'#0fae6e', red:'#e0392f', gold:'#e0a021', rainbow:'#ffffff', special:'#e6b53a' };
+  var RANKJP={ blue:'青', green:'緑', red:'赤', gold:'金', rainbow:'虹', special:'SPECIAL' };
+  var THEME_COLS={ blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], green:['#b8f5da','#0fae6e','#ffffff','#5be0a8'],
+    red:['#ffc2bd','#e0392f','#ffffff','#ff7a6e'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
     rainbow:['#ff3b30','#ff9500','#ffcc00','#34c759','#0a84ff','#5e5ce6','#ff2d55'],
     hotel:['#ffe9a8','#e0a021','#fff4cf','#c9962e','#ffffff'] };
 
-  /* ================= 音（重低音・間・緊張） ================= */
+  /* ---- 音 ---- */
   var actx=null, master=null, noiseBuf=null;
   function soundOn(){ try{ return localStorage.getItem('lucky_sound')!=='off'; }catch(e){ return true; } }
-  function ac(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)();
-        master=actx.createGain(); master.gain.value=1.0; master.connect(actx.destination); }catch(e){} }
+  function ac(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); master=actx.createGain(); master.gain.value=1; master.connect(actx.destination);}catch(e){} }
     if(actx&&actx.state==='suspended'){ try{ actx.resume(); }catch(e){} } return actx; }
-  function noise(){ var c=ac(); if(!c) return null; if(!noiseBuf){ var n=Math.floor(c.sampleRate*1.0);
-      noiseBuf=c.createBuffer(1,n,c.sampleRate); var d=noiseBuf.getChannelData(0); for(var i=0;i<n;i++) d[i]=Math.random()*2-1; } return noiseBuf; }
-  // ドクン（低く重い心拍：lub-dub）
-  function thump(when,freq,dur,gain){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
-    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter();
-    o.type='sine'; o.frequency.setValueAtTime(freq*1.7,t0); o.frequency.exponentialRampToValueAtTime(freq,t0+0.05);
-    f.type='lowpass'; f.frequency.value=170;
-    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(gain,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
-    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+0.03); }
-  function heartbeat(when,intensity){ intensity=intensity||1; thump(when,60,0.17,0.55*intensity); thump(when+0.17,46,0.24,0.36*intensity); }
-  // シャキーン（鋭い金属的スラッシュ）
-  function shakiin(when,intensity){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when; intensity=intensity||1;
-    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=0.7;
-      bp.frequency.setValueAtTime(6500,t0); bp.frequency.exponentialRampToValueAtTime(1100,t0+0.18);
-      var g=c.createGain(); g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.16*intensity,t0+0.008); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
-      s.connect(bp); bp.connect(g); g.connect(master); s.start(t0); s.stop(t0+0.25); }
-    var o=c.createOscillator(), og=c.createGain(); o.type='triangle';
-    o.frequency.setValueAtTime(2800,t0); o.frequency.exponentialRampToValueAtTime(850,t0+0.2);
-    og.gain.setValueAtTime(0.0001,t0); og.gain.exponentialRampToValueAtTime(0.10*intensity,t0+0.006); og.gain.exponentialRampToValueAtTime(0.0001,t0+0.25);
-    o.connect(og); og.connect(master); o.start(t0); o.stop(t0+0.27); }
-  // ザーン / ズドン（衝撃の重低音）
-  function impact(when,big){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
-    var o=c.createOscillator(), g=c.createGain(); o.type='sine';
-    o.frequency.setValueAtTime(95,t0); o.frequency.exponentialRampToValueAtTime(36,t0+(big?0.6:0.4));
-    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(big?0.6:0.4,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+(big?1.0:0.65));
+  function noise(){ var c=ac(); if(!c) return null; if(!noiseBuf){ var n=Math.floor(c.sampleRate); noiseBuf=c.createBuffer(1,n,c.sampleRate); var d=noiseBuf.getChannelData(0); for(var i=0;i<n;i++)d[i]=Math.random()*2-1; } return noiseBuf; }
+  function thump(when,freq,dur,gain){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter();
+    o.type='sine'; o.frequency.setValueAtTime(freq*1.7,t0); o.frequency.exponentialRampToValueAtTime(freq,t0+.05);
+    f.type='lowpass'; f.frequency.value=170; g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(gain,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+.03); }
+  function heartbeat(when,intensity){ intensity=intensity||1; thump(when,58,.18,.6*intensity); thump(when+.16,44,.26,.4*intensity); }
+  function shakiin(when,intensity){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when; intensity=intensity||1;
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=.7;
+      bp.frequency.setValueAtTime(6800,t0); bp.frequency.exponentialRampToValueAtTime(1100,t0+.18);
+      var g=c.createGain(); g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.18*intensity,t0+.008); g.gain.exponentialRampToValueAtTime(.0001,t0+.22);
+      s.connect(bp); bp.connect(g); g.connect(master); s.start(t0); s.stop(t0+.25); }
+    var o=c.createOscillator(),og=c.createGain(); o.type='triangle'; o.frequency.setValueAtTime(2900,t0); o.frequency.exponentialRampToValueAtTime(820,t0+.2);
+    og.gain.setValueAtTime(.0001,t0); og.gain.exponentialRampToValueAtTime(.11*intensity,t0+.006); og.gain.exponentialRampToValueAtTime(.0001,t0+.25);
+    o.connect(og); og.connect(master); o.start(t0); o.stop(t0+.27); }
+  function impact(when,big){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when,o=c.createOscillator(),g=c.createGain(); o.type='sine';
+    o.frequency.setValueAtTime(95,t0); o.frequency.exponentialRampToValueAtTime(36,t0+(big?.6:.4));
+    g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(big?.6:.4,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+(big?1:.65));
     o.connect(g); g.connect(master); o.start(t0); o.stop(t0+1.1);
-    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass';
-      lp.frequency.setValueAtTime(2200,t0); lp.frequency.exponentialRampToValueAtTime(260,t0+0.4);
-      var ng=c.createGain(); ng.gain.setValueAtTime(0.0001,t0); ng.gain.exponentialRampToValueAtTime(big?0.3:0.18,t0+0.008); ng.gain.exponentialRampToValueAtTime(0.0001,t0+(big?0.75:0.5));
-      s.connect(lp); lp.connect(ng); ng.connect(master); s.start(t0); s.stop(t0+0.85); } }
-  // スン…（力が抜ける・ハズレ）
-  function sunMiss(when){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
-    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter(); o.type='sine';
-    o.frequency.setValueAtTime(360,t0); o.frequency.exponentialRampToValueAtTime(110,t0+0.55);
-    f.type='lowpass'; f.frequency.value=800;
-    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.11,t0+0.04); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.6);
-    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.66); }
-  // プシュン…（電源が落ちるように演出が消える）
-  function pushun(when){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
-    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter(); o.type='sawtooth';
-    o.frequency.setValueAtTime(620,t0); o.frequency.exponentialRampToValueAtTime(70,t0+0.28);
-    f.type='lowpass'; f.frequency.setValueAtTime(2200,t0); f.frequency.exponentialRampToValueAtTime(300,t0+0.3);
-    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.13,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.34);
-    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.36);
-    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass';
-      lp.frequency.setValueAtTime(1400,t0); lp.frequency.exponentialRampToValueAtTime(200,t0+0.25);
-      var ng=c.createGain(); ng.gain.setValueAtTime(0.0001,t0); ng.gain.exponentialRampToValueAtTime(0.07,t0+0.01); ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.3);
-      s.connect(lp); lp.connect(ng); ng.connect(master); s.start(t0); s.stop(t0+0.32); } }
-  function vibe(p){ try{ if(soundOn() && navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(2200,t0); lp.frequency.exponentialRampToValueAtTime(260,t0+.4);
+      var ng=c.createGain(); ng.gain.setValueAtTime(.0001,t0); ng.gain.exponentialRampToValueAtTime(big?.3:.18,t0+.008); ng.gain.exponentialRampToValueAtTime(.0001,t0+(big?.75:.5));
+      s.connect(lp); lp.connect(ng); ng.connect(master); s.start(t0); s.stop(t0+.85); } }
+  function pushun(when){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter(); o.type='sawtooth';
+    o.frequency.setValueAtTime(620,t0); o.frequency.exponentialRampToValueAtTime(70,t0+.28); f.type='lowpass'; f.frequency.setValueAtTime(2200,t0); f.frequency.exponentialRampToValueAtTime(300,t0+.3);
+    g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.14,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.34);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+.36); }
+  function sunMiss(when){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter(); o.type='sine';
+    o.frequency.setValueAtTime(360,t0); o.frequency.exponentialRampToValueAtTime(110,t0+.55); f.type='lowpass'; f.frequency.value=800;
+    g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.11,t0+.04); g.gain.exponentialRampToValueAtTime(.0001,t0+.6);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+.66); }
+  function toneSoft(){ var c=ac(); if(!c||!soundOn())return; var o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(1200,c.currentTime); o.frequency.exponentialRampToValueAtTime(1900,c.currentTime+1.6);
+    g.gain.setValueAtTime(.0001,c.currentTime); g.gain.exponentialRampToValueAtTime(.03,c.currentTime+.4); g.gain.exponentialRampToValueAtTime(.0001,c.currentTime+2);
+    o.connect(g); g.connect(master); o.start(); o.stop(c.currentTime+2.1); }
+  function vibe(p){ try{ if(soundOn()&&navigator.vibrate) navigator.vibrate(p); }catch(e){} }
 
-  /* ================= シーケンサ ================= */
+  /* ---- シーケンサ ---- */
   var timers=[];
   function clearSeq(){ timers.forEach(clearTimeout); timers=[]; }
   function at(t,fn){ timers.push(setTimeout(fn,t)); }
-  function resetOverlay(){ clearSeq();
+  function reset(){ clearSeq();
     ov.className='lucky-overlay show'; ov.style.background=''; ov.style.setProperty('--rankc','#ffffff');
-    orb.style.opacity=''; orb.style.transform=''; prompt.style.opacity=''; prompt.style.display='';
-    prompt.textContent='今日のラッキーは誰だ…？'; confetti.innerHTML='';
-    fill.className='cutin-fill'; slash.className='cutin-slash'; flash.className='lucky-flash'; gold.className='gold-spread';
-    amount.className='lucky-amount'; stage.style.display='';
+    heart.style.display=''; heart.style.transform='scale(1)'; promptLine.style.display=''; promptLine.textContent='抽選開始…';
+    tameDots.style.display=''; confetti.innerHTML=''; amount.className='lucky-amount';
+    cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutStreak.className='cut-streak'; cutLabel.className='cut-label'; gold.className='gold-spread';
+    Array.prototype.forEach.call(beatDots.children,function(d){d.className='';});
     Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }
-  var stage=document.getElementById('stage');
 
-  function beatVisual(intensity){ intensity=intensity||1;
-    try{ orb.animate([{transform:'scale(1)'},{transform:'scale('+(1.12+0.05*intensity)+')'},{transform:'scale(1)'}],{duration:400,easing:'ease-out'});
-      pulse.animate([{opacity:0},{opacity:0.5*intensity},{opacity:0}],{duration:420,easing:'ease-out'}); }catch(e){} }
+  function fireBeat(i,intensity){ intensity=intensity||1;
+    try{ heart.animate([{transform:'scale(1)'},{transform:'scale('+(1.45+.05*intensity)+')'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); }catch(e){}
+    beatFlash.className='beat-flash'; void beatFlash.offsetWidth; beatFlash.className='beat-flash'; try{ beatFlash.animate([{opacity:0},{opacity:.85},{opacity:0}],{duration:420,easing:'ease-out'}); }catch(e){}
+    beatWord.className='beat-word'; void beatWord.offsetWidth; beatWord.className='beat-word on';
+    if(beatDots.children[i]) beatDots.children[i].className='lit';
+    heartbeat(0,intensity); vibe(40); }
+
+  function startHeart(){ promptLine.textContent='抽選開始…';
+    // 4回の明確な心拍
+    BEATS.forEach(function(t,i){ at(t,function(){ fireBeat(i,1+i*.18); }); });
+    at(SIL_MARK, function(){ ov.classList.add('tame'); promptLine.textContent=''; }); }
 
   function cutIn(colorKey,big){
     ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
     ov.classList.add('cutting');
-    // slash
-    slash.className='cutin-slash'; void slash.offsetWidth;
-    slash.style.setProperty('--cutdur',(big?0.3:0.2)+'s');
-    slash.className='cutin-slash go'+(big?' big':'');
-    // fill flash
-    var fc='cutin-fill'+(colorKey==='rainbow'?' rainbow':colorKey==='special'?' special':'');
-    fill.className=fc; void fill.offsetWidth; fill.className=fc+' flash';
-    shakiin(0, big?1.8:1);
-    if(big){ ov.classList.add('shake'); setTimeout(function(){ov.classList.remove('shake');},460); vibe([0,45]); }
-    spawnSparks(colorKey, big?20:11);
+    cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
+    var fc='cut-fill'+(colorKey==='rainbow'?' rainbow':colorKey==='special'?' special':''); cutFill.className=fc; void cutFill.offsetWidth; cutFill.className=fc+' on';
+    cutStreak.className='cut-streak'; void cutStreak.offsetWidth; cutStreak.className='cut-streak on';
+    cutLabel.textContent=RANKJP[colorKey]||''; cutLabel.className='cut-label'; void cutLabel.offsetWidth; cutLabel.className='cut-label on';
+    ov.classList.remove('shake'); void ov.offsetWidth; ov.classList.add('shake');
+    shakiin(0, big?1.9:1.2); vibe(big?[0,70,40,90]:[0,45]); spawnSparks(colorKey, big?22:12);
   }
-  function spawnSparks(colorKey,n){ var col=RANK[colorKey]||'#fff'; if(colorKey==='rainbow') col='#ffd23b';
-    for(var i=0;i<n;i++){ var s=document.createElement('span'); s.className='spark'; s.style.background=col; s.style.boxShadow='0 0 10px '+col;
-      inner.appendChild(s); var ang=Math.random()*Math.PI*2, dist=90+Math.random()*180;
-      try{ s.animate([{transform:'translate(-50%,-50%) scale(1)',opacity:1},
-        {transform:'translate(calc(-50% + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(0)',opacity:0}],
-        {duration:420+Math.random()*260,easing:'cubic-bezier(.2,.7,.3,1)'}); }catch(e){}
+  function spawnSparks(colorKey,n){ var col=RANK[colorKey]||'#fff'; if(colorKey==='rainbow')col='#ffd23b';
+    for(var i=0;i<n;i++){ var s=document.createElement('span'); s.className='spark'; s.style.background=col; s.style.boxShadow='0 0 12px '+col; inner.appendChild(s);
+      var ang=Math.random()*Math.PI*2, dist=110+Math.random()*200;
+      try{ s.animate([{transform:'translate(-50%,-50%) scale(1)',opacity:1},{transform:'translate(calc(-50% + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(0)',opacity:0}],{duration:460+Math.random()*260,easing:'cubic-bezier(.2,.7,.3,1)'});}catch(e){}
       (function(el){ setTimeout(function(){el.remove();},760); })(s); } }
-
-  // ハズレの淡い兆し（カットインなし・柔らかい発光）
-  function teaseGlow(colorKey,peak){ ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
-    fill.className='cutin-fill'; try{ fill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:560,easing:'ease-in-out'}); }catch(e){}
-    thump(0,58,0.16,0.38); beatVisual(0.6); }
-
-  // ホテル復活：暗闇に金の粒子が1つ→増える→中央へ集まる
-  function goldGather(){ var golds=[];
-    function addOne(delay){ at(delay, function(){ var s=document.createElement('span'); s.className='spark';
-      s.style.background='#ffd98a'; s.style.boxShadow='0 0 12px #ffcf5c'; s.style.width='7px'; s.style.height='7px';
-      var x=(Math.random()*2-1)*46, y=(Math.random()*2-1)*40;
-      s.style.transform='translate(calc(-50% + '+(x)+'vw),calc(-50% + '+(y)+'vh)) scale(0)';
-      inner.appendChild(s); golds.push(s);
-      try{ s.animate([{opacity:0,transform:s.style.transform},
-        {opacity:1,transform:'translate(calc(-50% + '+x+'vw),calc(-50% + '+y+'vh)) scale(1)'}],{duration:360,fill:'forwards'}); }catch(e){} }); }
-    addOne(180); addOne(380);
-    for(var i=0;i<12;i++) addOne(520+i*55);    // 徐々に増える
-    at(1200, function(){ golds.forEach(function(s){ try{ s.animate([{transform:s.style.transform,opacity:1},
-      {transform:'translate(-50%,-50%) scale(.6)',opacity:1}],{duration:380,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'}); }catch(e){} }); });
-    at(1650, function(){ golds.forEach(function(s){s.remove();}); }); }
-
-  function confettiBurst(cols,count,coin){ for(var k=0;k<count;k++){ var p=document.createElement('span');
-    p.className='lucky-piece'+(coin&&Math.random()<0.5?' lucky-coin':'');
+  function confettiBurst(cols,count,coin){ for(var k=0;k<count;k++){ var p=document.createElement('span'); p.className='lucky-piece'+(coin&&Math.random()<.5?' lucky-coin':'');
     if(!p.classList.contains('lucky-coin')) p.style.background=cols[k%cols.length];
-    p.style.left=Math.random()*100+'%'; p.style.animationDuration=(2.4+Math.random()*1.8)+'s'; p.style.animationDelay=(Math.random()*0.5)+'s';
-    p.style.width=(7+Math.random()*8)+'px'; if(!p.classList.contains('lucky-coin')) p.style.height=(10+Math.random()*12)+'px';
-    confetti.appendChild(p); } }
-
+    p.style.left=Math.random()*100+'%'; p.style.animationDuration=(2.4+Math.random()*1.8)+'s'; p.style.animationDelay=(Math.random()*.5)+'s';
+    p.style.width=(7+Math.random()*8)+'px'; if(!p.classList.contains('lucky-coin')) p.style.height=(10+Math.random()*12)+'px'; confetti.appendChild(p); } }
   function showStage(bd,amt,win,sb,small){ badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
     winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
-  function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; }
-  function finalReveal(theme,amt,bd,sb,small,cols,coin,bigImpact){
-    ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
-    flash.className='lucky-flash on'; showStage(bd,amt,WINNER,sb,small);
-    impact(0,bigImpact); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:120, coin); }
+  function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; heart.style.display='none'; }
+  function reveal(theme,amt,bd,sb,small,cols,coin,big){ ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
+    cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
+    showStage(bd,amt,WINNER,sb,small); impact(0,big); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:130, coin); }
 
-  /* ---- 共通スタート：心拍→静寂 ---- */
-  var BEATS=[350,1050,1700,2300], SIL_MARK=2650, SIL=4900, STEP=340;
-  function startHeart(){
-    prompt.textContent='今日のラッキーは誰だ…？';
-    BEATS.forEach(function(t,i){ at(t, function(){ heartbeat(0, 1+i*0.12); beatVisual(1+i*0.1); }); });
-    at(SIL_MARK, function(){ ov.classList.add('silence'); prompt.textContent='……'; });
-  }
+  var BEATS=[500,1350,2200,3050], SIL_MARK=3450, SIL=5500, STEP=520;
 
-  /* ---- シナリオ（正式カットイン順：青→緑→赤→金→虹→黒×金） ---- */
-  function play(key){ resetOverlay(); ac();
+  function play(key){ reset(); ac();
     if(key==='missA') return seqMiss('A');
     if(key==='missB') return seqMiss('B');
     if(key==='missC') return seqMiss('C');
@@ -349,73 +312,60 @@
     if(key==='w10000') return seq10000();
     if(key==='hotel') return seqHotel();
   }
-
+  function teaseGlow(colorKey,peak){ ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    cutFill.className='cut-fill'; try{ cutFill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:560,easing:'ease-in-out'});}catch(e){} thump(0,58,.16,.36); }
   function seqMiss(pat){ startHeart();
-    // カットインは出さず、淡い「兆し」だけで当たりそうに見せてから外す
-    if(pat==='A'){ at(SIL, function(){ teaseGlow('blue',0.22); });
-      at(SIL+520, function(){ orb.style.opacity='.06'; sunMiss(0); });
-      at(SIL+1050, revealMiss); }
-    else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*260, function(){ teaseGlow(c,0.18+i*0.05); }); });
-      at(SIL+1150, function(){ orb.style.opacity='.06'; sunMiss(0); });
-      at(SIL+1680, revealMiss); }
-    else { at(SIL, function(){ teaseGlow('gold',0.5); beatVisual(1.4); });
-      at(SIL+760, function(){ orb.style.opacity='.06'; sunMiss(0); });
-      at(SIL+1290, revealMiss); } }
-  function revealMiss(){ ov.className='lucky-overlay show reveal theme-miss';
-    showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true); }
+    if(pat==='A'){ at(SIL,function(){ teaseGlow('blue',.28); });
+      at(SIL+560,function(){ ov.classList.remove('tame'); heart.style.display='none'; sunMiss(0); });
+      at(SIL+1080,revealMiss); }
+    else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*300,function(){ teaseGlow(c,.22+i*.06); }); });
+      at(SIL+1300,function(){ heart.style.display='none'; sunMiss(0); });
+      at(SIL+1820,revealMiss); }
+    else { at(SIL,function(){ teaseGlow('gold',.6); fireBeat(3,1.6); });
+      at(SIL+820,function(){ heart.style.display='none'; sunMiss(0); });
+      at(SIL+1340,revealMiss); } }
+  function revealMiss(){ ov.className='lucky-overlay show reveal theme-miss'; showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true); }
 
   function seqCuts(colors,theme,amt,bd){ startHeart();
-    colors.forEach(function(c,i){ var last=i===colors.length-1;
-      at(SIL+i*STEP, function(){ cutIn(c,last); if(last) impact(0.02,false); }); });
-    var revealT=SIL+(colors.length-1)*STEP+520;
-    at(revealT-140, function(){ blackout(); });
-    at(revealT, function(){ finalReveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold');
-      vibe(theme==='gold'?[0,70,40,90]:[0,30]); });
+    colors.forEach(function(c,i){ var last=i===colors.length-1; at(SIL+i*STEP,function(){ cutIn(c,last); if(last) impact(.02,false); }); });
+    var rev=SIL+(colors.length-1)*STEP+560;
+    at(rev-150,function(){ blackout(); });
+    at(rev,function(){ reveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold'); vibe(theme==='gold'?[0,80,40,90]:[0,40]); });
   }
-
   function seq10000(){ startHeart();
-    var cols=['blue','green','red','gold'];
-    cols.forEach(function(c,i){ at(SIL+i*STEP, function(){ cutIn(c,false); }); });
-    var hold=SIL+4*STEP;                    // 4枚目(金)の後、一瞬止め（まだ続くのか？）
-    at(hold, function(){ ov.classList.add('silence'); prompt.textContent=''; });
-    var fifth=hold+760;
-    at(fifth, function(){ ov.classList.remove('silence'); cutIn('rainbow',true); impact(0.02,true); vibe([0,60,40,100,40,140]); });
-    at(fifth+560-140, function(){ blackout(); });
-    at(fifth+560, function(){ finalReveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
-
-  // 高級ホテル：虹まで到達→1万かと思わせる→プシュン→完全暗転→静寂→金の兆し→黒×金SPECIAL復活
+    ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*STEP,function(){ cutIn(c,false); }); });
+    var hold=SIL+4*STEP; at(hold,function(){ ov.classList.add('tame'); promptLine.style.display=''; promptLine.textContent='…まだ続く…？'; heart.style.display='none'; });
+    var fifth=hold+780;
+    at(fifth,function(){ ov.classList.remove('tame'); promptLine.style.display='none'; cutIn('rainbow',true); impact(.02,true); vibe([0,60,40,100,40,140]); });
+    at(fifth+600-150,function(){ blackout(); });
+    at(fifth+600,function(){ reveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
   function seqHotel(){ startHeart();
-    var cols=['blue','green','red','gold','rainbow'];
-    cols.forEach(function(c,i){ var big=c==='rainbow'; at(SIL+i*STEP, function(){ cutIn(c,big); if(big) impact(0.02,true); }); });
-    var rainbowT=SIL+4*STEP;                // 5枚目レインボー（＝1万円だと思わせる）
-    var die=rainbowT+520;
-    at(die, function(){ pushun(0); ov.className='lucky-overlay show'; ov.style.background='#000';
-      orb.style.display='none'; prompt.style.display='none'; fill.className='cutin-fill'; slash.className='cutin-slash';
-      Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }); // 完全暗転・全部消す
-    // 完全な静寂ののち、金の粒子が現れて集まる
-    at(die+900, function(){ goldGather(); tone_soft(); });
-    var sixth=die+900+1350;                 // 粒子が集まりきった瞬間
-    at(sixth, function(){ ov.className='lucky-overlay show'; ov.style.background='#000';
-      cutIn('special',true); impact(0.02,true); vibe([0,100,60,100,60,240]); gold.className='gold-spread on'; });
-    at(sixth+720, function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
+    ['blue','green','red','gold','rainbow'].forEach(function(c,i){ var big=c==='rainbow'; at(SIL+i*STEP,function(){ cutIn(c,big); if(big) impact(.02,true); }); });
+    var rainbowT=SIL+4*STEP;
+    var die=rainbowT+560;
+    at(die,function(){ pushun(0); ov.className='lucky-overlay show'; ov.style.background='#000'; heart.style.display='none'; promptLine.style.display='none';
+      cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutStreak.className='cut-streak'; cutLabel.className='cut-label';
+      Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); });
+    at(die+950,function(){ goldGather(); toneSoft(); });
+    var sixth=die+950+1400;
+    at(sixth,function(){ ov.className='lucky-overlay show'; ov.style.background='#000'; cutIn('special',true); impact(.02,true); vibe([0,100,60,100,60,240]); gold.className='gold-spread on'; });
+    at(sixth+720,function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
       showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉', true);
-      confettiBurst(THEME_COLS.hotel,200,true); impact(0.05,true); }); }
-  function tone_soft(){ var c=ac(); if(!c||!soundOn()) return; // 静寂の中のかすかな金の兆し音
-    var o=c.createOscillator(), g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(1200,c.currentTime);
-    o.frequency.exponentialRampToValueAtTime(1900,c.currentTime+1.6);
-    g.gain.setValueAtTime(0.0001,c.currentTime); g.gain.exponentialRampToValueAtTime(0.03,c.currentTime+0.4); g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+2.0);
-    o.connect(g); g.connect(master); o.start(); o.stop(c.currentTime+2.1); }
+      confettiBurst(THEME_COLS.hotel,200,true); impact(.05,true); }); }
+  function goldGather(){ var golds=[];
+    function addOne(delay){ at(delay,function(){ var s=document.createElement('span'); s.className='spark'; s.style.background='#ffd98a'; s.style.boxShadow='0 0 14px #ffcf5c'; s.style.width='8px'; s.style.height='8px';
+      var x=(Math.random()*2-1)*46, y=(Math.random()*2-1)*40; s.style.transform='translate(calc(-50% + '+x+'vw),calc(-50% + '+y+'vh)) scale(0)'; inner.appendChild(s); golds.push(s);
+      try{ s.animate([{opacity:0,transform:s.style.transform},{opacity:1,transform:'translate(calc(-50% + '+x+'vw),calc(-50% + '+y+'vh)) scale(1)'}],{duration:380,fill:'forwards'});}catch(e){} }); }
+    addOne(180); addOne(380); for(var i=0;i<14;i++) addOne(520+i*55);
+    at(1250,function(){ golds.forEach(function(s){ try{ s.animate([{transform:s.style.transform,opacity:1},{transform:'translate(-50%,-50%) scale(.6)',opacity:1}],{duration:380,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'});}catch(e){} }); });
+    at(1700,function(){ golds.forEach(function(s){s.remove();}); }); }
 
-  /* ---- 開閉 / トグル ---- */
-  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background='';
-    orb.style.opacity=''; orb.style.transform=''; prompt.style.opacity=''; prompt.style.display=''; confetti.innerHTML='';
-    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();});
-    try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
+  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; heart.style.display=''; promptLine.style.display=''; confetti.innerHTML='';
+    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
   var lastKey=null;
   document.getElementById('close').addEventListener('click', closeOverlay);
   document.getElementById('replay').addEventListener('click', function(){ if(lastKey) play(lastKey); });
-  Array.prototype.forEach.call(document.querySelectorAll('.pbtn'), function(b){
-    b.addEventListener('click', function(){ lastKey=b.getAttribute('data-key'); play(lastKey); }); });
+  Array.prototype.forEach.call(document.querySelectorAll('.pbtn'), function(b){ b.addEventListener('click', function(){ lastKey=b.getAttribute('data-key'); play(lastKey); }); });
   var tg=document.getElementById('soundToggle');
   function syncToggle(){ var on=soundOn(); tg.dataset.on=on?'1':'0'; tg.textContent=on?'ON':'OFF'; }
   syncToggle();
@@ -423,22 +373,9 @@
 })();
 </script>
 <script>
-(function(){
-  // このプレビューは常に最新を表示する。制御中のService Workerがあればupdateを促し、待機中を即時有効化。
-  try {
-    if ('serviceWorker' in navigator) {
-      var reloaded = false; try { reloaded = sessionStorage.getItem('lp_reloaded') === '1'; } catch(e){}
-      navigator.serviceWorker.getRegistration().then(function(reg){
-        if (!reg) return;
-        try { reg.update(); } catch(e){}
-        if (reg.waiting) { try { reg.waiting.postMessage({type:'SKIP_WAITING'}); } catch(e){} }
-      }).catch(function(){});
-      navigator.serviceWorker.addEventListener('controllerchange', function(){
-        if (!reloaded) { try { sessionStorage.setItem('lp_reloaded','1'); } catch(e){} location.reload(); }
-      });
-    }
-  } catch(e){}
-})();
+(function(){ try{ if('serviceWorker' in navigator){ var reloaded=false; try{reloaded=sessionStorage.getItem('lp_reloaded')==='1';}catch(e){}
+  navigator.serviceWorker.getRegistration().then(function(reg){ if(!reg)return; try{reg.update();}catch(e){} if(reg.waiting){try{reg.waiting.postMessage({type:'SKIP_WAITING'});}catch(e){}} }).catch(function(){});
+  navigator.serviceWorker.addEventListener('controllerchange', function(){ if(!reloaded){ try{sessionStorage.setItem('lp_reloaded','1');}catch(e){} location.reload(); } }); } }catch(e){} })();
 </script>
 </body>
 </html>
