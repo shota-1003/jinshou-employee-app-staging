@@ -38,7 +38,7 @@
   .pbtn .amt{ font-size:19px; }
   .foot{ color:var(--mut); font-size:12px; line-height:1.7; margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
 
-  /* ===== 演出オーバーレイ(r6: 遅いバシャーン + ホテル多段) ===== */
+  /* ===== 演出オーバーレイ(r7: 走る落雷 + 星型キラーン) ===== */
   .lucky-overlay{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center;
     justify-content:center; text-align:center; z-index:9999; overflow:hidden; color:#fff; background:#04060c;
     -webkit-user-select:none; user-select:none; }
@@ -46,7 +46,7 @@
   .lucky-inner{ position:relative; z-index:3; display:flex; flex-direction:column; align-items:center; justify-content:center; width:100%; height:100%; }
   .lucky-overlay.shake{ animation:luckyShake .5s cubic-bezier(.36,.07,.19,.97); }
 
-  /* 心拍=中央から広がる圧/波紋(ハート禁止) */
+  /* 心拍=圧/波紋 */
   .beat-flash{ position:absolute; inset:0; z-index:2; pointer-events:none; opacity:0; transform:scale(1);
     background:radial-gradient(circle at 50% 48%, rgba(235,70,60,.6), rgba(120,20,20,.16) 52%, transparent 72%); }
   .shock{ position:absolute; top:50%; left:50%; width:120px; height:120px; border-radius:50%; z-index:4;
@@ -64,35 +64,30 @@
   .lucky-overlay.tame .tame-dots{ display:block; animation:tameDots 1.2s ease-in-out infinite; }
   .lucky-overlay.reveal .prompt-line, .lucky-overlay.cutting .prompt-line, .lucky-overlay.hotelstage .prompt-line{ display:none; }
 
-  /* バシャーン カットイン: 稲妻 + 全画面フラッシュ + 色フィル + シェイク */
+  /* 走る落雷: 上→下へ生成される稲妻(stroke描画)+枝雷。全面白飛びさせない。 */
+  .bolt{ position:absolute; top:0; left:50%; width:86vw; height:100vh; transform:translateX(-50%); z-index:6; opacity:0; pointer-events:none; }
+  .bolt path{ fill:none; stroke:var(--rankc); stroke-linecap:round; stroke-linejoin:round;
+    filter:drop-shadow(0 0 8px var(--rankc)) drop-shadow(0 0 20px var(--rankc)); }
+  .bolt-head{ position:absolute; top:0; left:50%; width:44px; height:44px; border-radius:50%; transform:translate(-50%,-50%) scale(0); z-index:6; opacity:0;
+    background:radial-gradient(circle,#fff,var(--rankc) 55%,transparent); box-shadow:0 0 30px 8px var(--rankc); pointer-events:none; }
   .cut-fill{ position:absolute; inset:0; z-index:5; opacity:0; pointer-events:none; background:var(--rankc); }
   .cut-fill.rainbow{ background:conic-gradient(#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55,#ff3b30); }
-  .cut-fill.special{ background:radial-gradient(circle at 50% 45%, #ffe9a8, #a5761a 45%, #120d04 78%); }
   .cut-fill.on{ animation:cutFill .55s ease; }
   .cut-white{ position:absolute; inset:0; z-index:8; background:#fff; opacity:0; pointer-events:none; }
-  .cut-white.on{ animation:cutWhite .3s ease; }
-  .cut-black{ position:absolute; inset:0; z-index:4; background:#000; opacity:0; pointer-events:none; }
-  .cut-black.on{ animation:cutBlack .5s ease; }
-  .bolt{ position:absolute; top:0; left:50%; width:70vw; height:100vh; transform:translateX(-50%); z-index:6; opacity:0; pointer-events:none;
-    fill:var(--rankc); filter:drop-shadow(0 0 24px var(--rankc)) drop-shadow(0 0 8px #fff); }
-  .bolt.on{ animation:boltFlash .5s ease; }
+  .cut-white.on{ animation:cutWhite .32s ease; }
   .cut-label{ position:absolute; top:40%; left:0; right:0; z-index:9; font-size:52px; font-weight:900; letter-spacing:.16em;
     color:#fff; opacity:0; text-shadow:0 2px 24px rgba(0,0,0,.7); pointer-events:none; }
   .cut-label.on{ animation:cutLabel .8s ease; }
   .spark{ position:absolute; top:50%; left:50%; width:9px; height:9px; border-radius:50%; z-index:6; pointer-events:none;
     background:var(--rankc); box-shadow:0 0 12px var(--rankc); }
 
-  /* ホテル: 金の点/扉/最終 */
-  .gold-spread{ position:absolute; top:50%; left:50%; width:20px; height:20px; border-radius:50%;
-    transform:translate(-50%,-50%) scale(0); z-index:2; opacity:0; background:radial-gradient(circle,#fff4cf,#e6b53a 45%,#7a5410 72%); }
-  .gold-spread.on{ animation:goldSpread 1.6s cubic-bezier(.15,.7,.3,1) forwards; }
+  /* ホテル: 金の点 / 扉 / 星型フレア(キラーン) */
   .door-wrap{ position:absolute; inset:0; z-index:5; display:none; }
   .lucky-overlay.doors .door-wrap{ display:block; }
   .door-panel{ position:absolute; top:7%; bottom:7%; width:42%; opacity:0;
     background:linear-gradient(180deg,#2c2109 0%,#181205 55%,#0b0803 100%); border:3px solid #b8933f;
     box-shadow:inset 0 0 46px rgba(0,0,0,.85), 0 0 26px rgba(184,147,63,.35); transition:transform 2.4s cubic-bezier(.5,0,.18,1), opacity 1.4s ease; }
-  .door-panel::before{ content:""; position:absolute; inset:14px; border:2px solid rgba(212,175,90,.5); border-radius:2px;
-    box-shadow:inset 0 0 30px rgba(0,0,0,.6); }
+  .door-panel::before{ content:""; position:absolute; inset:14px; border:2px solid rgba(212,175,90,.5); border-radius:2px; box-shadow:inset 0 0 30px rgba(0,0,0,.6); }
   .door-panel.l{ left:8%; border-right:2px solid #ffe9a8; }
   .door-panel.r{ right:8%; border-left:2px solid #ffe9a8; }
   .door-wrap.appear .door-panel{ opacity:1; }
@@ -102,6 +97,15 @@
     background:linear-gradient(180deg, transparent, #fff4cf 30%, #ffcf5c 50%, #fff4cf 70%, transparent); box-shadow:0 0 34px 10px #ffcf5c; }
   .door-wrap.appear .door-gap{ opacity:.5; }
   .door-wrap.open .door-gap{ opacity:1; animation:doorGap 2.4s ease forwards; }
+
+  .rays{ position:absolute; top:50%; left:50%; width:12px; height:12px; transform:translate(-50%,-50%) scale(0) rotate(0); z-index:5; opacity:0; pointer-events:none;
+    background:repeating-conic-gradient(from 0deg, rgba(255,222,140,.6) 0deg 4deg, transparent 4deg 15deg); border-radius:50%; }
+  .rays.on{ animation:raysAnim 1.7s ease-out forwards; }
+  .star-flare{ position:absolute; top:50%; left:50%; width:200px; height:200px; transform:translate(-50%,-50%) scale(0); z-index:6; opacity:0; pointer-events:none;
+    background:radial-gradient(circle,#fff,#ffe9a8 42%,rgba(255,207,92,.22) 70%,transparent);
+    clip-path:polygon(50% 0,61% 35%,98% 35%,68% 57%,79% 91%,50% 70%,21% 91%,32% 57%,2% 35%,39% 35%); filter:drop-shadow(0 0 34px #ffcf5c); }
+  .star-flare.on{ animation:flareAnim 1.2s cubic-bezier(.2,1.2,.3,1) forwards; }
+  .starspk{ position:absolute; top:50%; left:50%; z-index:7; color:#ffe9a8; opacity:0; pointer-events:none; text-shadow:0 0 12px #ffcf5c; }
 
   /* リザルト */
   .lucky-stage{ display:none; position:relative; z-index:9; padding:0 18px; }
@@ -119,14 +123,14 @@
   .lucky-overlay.reveal.theme-rainbow{ background:#05070d; }
   .lucky-overlay.reveal.theme-rainbow .lucky-badge{ background:linear-gradient(90deg,#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55);
     -webkit-background-clip:text; background-clip:text; color:transparent; background-size:220% auto; animation:rainbowText 2.4s linear infinite; }
-  .lucky-overlay.reveal.theme-hotel{ background:radial-gradient(circle at 50% 42%,#2a2110,#05070d 72%); }
+  .lucky-overlay.reveal.theme-hotel{ background:radial-gradient(circle at 50% 42%,#3a2c0e,#05070d 74%); }
   .lucky-overlay.reveal.theme-hotel .lucky-amount{ color:#ffe9a8; }
   .lucky-overlay.reveal.theme-miss{ background:radial-gradient(circle at 50% 42%,#212a4a,#080c18 76%); }
   .lucky-overlay.reveal.theme-miss .lucky-amount{ font-size:32px; color:#cdd6ee; }
 
   .lucky-confetti{ position:absolute; inset:0; z-index:7; pointer-events:none; overflow:hidden; }
   .lucky-piece{ position:absolute; top:-24px; width:10px; height:16px; border-radius:2px; opacity:.95; animation:luckyFall linear forwards; }
-  .lucky-coin{ border-radius:50%; width:16px; height:16px; background:radial-gradient(circle at 35% 32%,#fff6d0,#e0a021 60%,#8a5e10); box-shadow:0 0 6px rgba(224,160,33,.6); }
+  .lucky-coin{ border-radius:50%; width:14px; height:14px; background:radial-gradient(circle at 35% 32%,#fff6d0,#e0a021 60%,#8a5e10); box-shadow:0 0 8px rgba(255,207,92,.7); }
 
   .lucky-actions{ position:absolute; left:0; right:0; bottom:34px; z-index:10; display:flex; gap:12px; justify-content:center; }
   .lucky-btn{ appearance:none; border:1px solid rgba(255,255,255,.5); background:rgba(255,255,255,.12);
@@ -134,29 +138,27 @@
   .lucky-btn.primary{ background:rgba(255,255,255,.92); color:#111; border-color:#fff; }
 
   @keyframes tameDots{ 0%,100%{ opacity:.3;} 50%{ opacity:1;} }
-  @keyframes cutFill{ 0%{ opacity:0;} 14%{ opacity:.95;} 55%{ opacity:.6;} 100%{ opacity:0;} }
-  @keyframes cutWhite{ 0%{ opacity:0;} 10%{ opacity:.95;} 100%{ opacity:0;} }
-  @keyframes cutBlack{ 0%{ opacity:0;} 8%{ opacity:.95;} 40%{ opacity:.5;} 100%{ opacity:0;} }
-  @keyframes boltFlash{ 0%{ opacity:0; transform:translateX(-50%) scaleY(.6);} 12%{ opacity:1; transform:translateX(-50%) scaleY(1.04);}
-    36%{ opacity:.4;} 52%{ opacity:1;} 100%{ opacity:0; transform:translateX(-50%) scaleY(1);} }
+  @keyframes cutFill{ 0%{ opacity:0;} 14%{ opacity:.72;} 55%{ opacity:.4;} 100%{ opacity:0;} }
+  @keyframes cutWhite{ 0%{ opacity:0;} 12%{ opacity:.6;} 100%{ opacity:0;} }
   @keyframes cutLabel{ 0%{ opacity:0; transform:scale(.5);} 22%{ opacity:1; transform:scale(1.08);} 70%{ opacity:1; transform:scale(1);} 100%{ opacity:0;} }
   @keyframes luckyShake{ 0%,100%{ transform:translate(0,0);} 10%{ transform:translate(-14px,7px);} 26%{ transform:translate(13px,-8px);}
     42%{ transform:translate(-12px,-5px);} 58%{ transform:translate(9px,7px);} 74%{ transform:translate(-6px,4px);} 88%{ transform:translate(4px,-3px);} }
   @keyframes luckyPop{ 0%{ transform:scale(.5); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
   @keyframes rainbowText{ to{ background-position:220% center; } }
-  @keyframes goldSpread{ 0%{ transform:translate(-50%,-50%) scale(0); opacity:0;} 12%{ opacity:1;} 55%{ opacity:.95;} 100%{ transform:translate(-50%,-50%) scale(60); opacity:0;} }
   @keyframes doorGap{ 0%{ opacity:.4; width:8px;} 100%{ opacity:1; width:40%;} }
+  @keyframes raysAnim{ 0%{ transform:translate(-50%,-50%) scale(0) rotate(0); opacity:0;} 14%{ opacity:.9;} 100%{ transform:translate(-50%,-50%) scale(52) rotate(26deg); opacity:0;} }
+  @keyframes flareAnim{ 0%{ transform:translate(-50%,-50%) scale(0) rotate(-24deg); opacity:0;} 28%{ transform:translate(-50%,-50%) scale(1.4) rotate(6deg); opacity:1;} 100%{ transform:translate(-50%,-50%) scale(1.05) rotate(0); opacity:.92;} }
   @keyframes luckyFall{ 0%{ transform:translateY(0) rotate(0);} 100%{ transform:translateY(112vh) rotate(540deg);} }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r6</b> ／ ワンテンポずつのバシャーン ／ ホテル=虹→プシュン→暗転→金の点→扉→開放→JACKPOT</div>
-  <p class="lead"><b>ドクン×4（衝撃波・進むほど強く）→ 2〜3秒の静寂 → バシャーン！を1段ずつ（間を空けて格上げ）</b>。青→緑→赤→金→虹→黒×金。<br>ホテルは虹まで＝1万かと思わせ、<b>プシュン→長い暗転→金の点が1つずつ→扉が現れゆっくり開く→バシャーン→キラキラ→SPECIAL JACKPOT</b>の二段階サプライズ。<b>音ON＋マナーモード解除で迫力。</b></p>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r7</b> ／ 走る落雷(枝雷・重い雷音) ／ ホテル扉開放後=星型キラーン</div>
+  <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。</b>青→緑→赤→金→虹→黒×金。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋<b>扉が開いた後は星型の「キラァァン！」祝福演出</b>。<b>音ON＋マナーモード解除で迫力。</b></p>
 
   <div class="soundbar">
-    <span class="lbl">🔊 音・振動（重低音ドクン＋雷/衝撃のバシャーン＋扉の重低音）</span>
+    <span class="lbl">🔊 音・振動（重低音ドクン＋バリバリ→ドガァン の雷＋扉の重低音＋キラーン）</span>
     <button class="toggle" id="soundToggle" data-on="1">ON</button>
   </div>
 
@@ -167,14 +169,14 @@
     <button class="pbtn miss" data-key="missC" style="grid-column:span 2"><span>ハズレ C</span><span class="sub">強く光ってから直前で外す</span></button>
   </div>
 
-  <div class="sec">当選（バシャーン枚数＝ランク／青→緑→赤→金→虹→黒金）</div>
+  <div class="sec">当選（落雷の枚数＝ランク／青→緑→赤→金→虹→黒金）</div>
   <div class="grid">
     <button class="pbtn c1"  data-key="w1000"><span class="amt">1,000円</span><span class="sub">×1（青）</span></button>
     <button class="pbtn c2"  data-key="w2000"><span class="amt">2,000円</span><span class="sub">×2（青→緑）</span></button>
     <button class="pbtn c3"  data-key="w3000"><span class="amt">3,000円</span><span class="sub">×3（青→緑→赤）</span></button>
     <button class="pbtn c5"  data-key="w5000"><span class="amt">5,000円</span><span class="sub">×4（青→緑→赤→金）</span></button>
     <button class="pbtn c10" data-key="w10000" style="grid-column:span 2"><span class="amt">10,000円</span><span class="sub">×5（…→金→虹）</span></button>
-    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">虹→プシュン→暗転→金の点→扉→開放→JACKPOT</span></button>
+    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">虹→プシュン→暗転→金の点→扉→開放→星型キラーン→JACKPOT</span></button>
   </div>
 
   <p class="foot">このページはプレビュー専用の単独ページです。ログイン不要・DB非接続。<br>
@@ -183,11 +185,12 @@
 
 <div class="lucky-overlay" id="ov" aria-hidden="true">
   <div class="beat-flash" id="beatFlash"></div>
-  <div class="gold-spread" id="gold"></div>
+  <div class="rays" id="rays"></div>
   <div class="door-wrap" id="doors"><div class="door-panel l"></div><div class="door-panel r"></div><div class="door-gap"></div></div>
   <div class="lucky-inner" id="inner">
     <div class="shock" id="shock"></div>
     <div class="core" id="core"></div>
+    <div class="star-flare" id="starFlare"></div>
     <div class="tame-dots" id="tameDots">…</div>
     <div class="prompt-line" id="promptLine">抽選開始…</div>
     <div class="beat-dots" id="beatDots"><i></i><i></i><i></i><i></i></div>
@@ -198,9 +201,15 @@
       <div class="lucky-sub" id="sub">演出プレビュー</div>
     </div>
   </div>
-  <div class="cut-black" id="cutBlack"></div>
+  <div class="bolt-head" id="boltHead"></div>
+  <svg class="bolt" id="bolt" viewBox="0 0 100 300" preserveAspectRatio="none">
+    <path class="bmain" d="M54 -4 L44 56 L60 92 L41 150 L62 196 L47 244 L57 304"/>
+    <path class="bbr" d="M60 92 L79 118 L70 140"/>
+    <path class="bbr" d="M41 150 L21 178 L33 200"/>
+    <path class="bbr" d="M62 196 L83 220"/>
+    <path class="bbr" d="M47 244 L29 266"/>
+  </svg>
   <div class="cut-fill" id="cutFill"></div>
-  <svg class="bolt" id="bolt" viewBox="0 0 100 300" preserveAspectRatio="none"><path d="M58 0 L40 118 L54 118 L28 300 L74 128 L56 128 L74 0 Z"/></svg>
   <div class="cut-label" id="cutLabel"></div>
   <div class="cut-white" id="cutWhite"></div>
   <div class="lucky-confetti" id="confetti"></div>
@@ -217,13 +226,14 @@
       beatFlash=document.getElementById('beatFlash'), shock=document.getElementById('shock'), core=document.getElementById('core'),
       promptLine=document.getElementById('promptLine'), beatDots=document.getElementById('beatDots'), tameDots=document.getElementById('tameDots'),
       badge=document.getElementById('badge'), amount=document.getElementById('amount'), winner=document.getElementById('winner'),
-      sub=document.getElementById('sub'), confetti=document.getElementById('confetti'), gold=document.getElementById('gold'), doors=document.getElementById('doors'),
-      cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), cutBlack=document.getElementById('cutBlack'),
-      bolt=document.getElementById('bolt'), cutLabel=document.getElementById('cutLabel');
+      sub=document.getElementById('sub'), confetti=document.getElementById('confetti'), doors=document.getElementById('doors'),
+      rays=document.getElementById('rays'), starFlare=document.getElementById('starFlare'), boltHead=document.getElementById('boltHead'),
+      cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), bolt=document.getElementById('bolt'), cutLabel=document.getElementById('cutLabel');
   var WINNER='テスト 太郎';
   var RANK={ blue:'#3a86ff', green:'#22d07a', red:'#ff3b30', gold:'#ffc531', rainbow:'#ffffff', special:'#ffd15a' };
   var RANKJP={ blue:'青', green:'緑', red:'赤', gold:'金', rainbow:'虹', special:'JACKPOT' };
-  var VIB={ blue:[0,45], green:[0,60], red:[0,80], gold:[0,110,40,60], rainbow:[0,150,50,120], special:[0,240] };
+  var LEVEL={ blue:0, green:1, red:2, gold:3, rainbow:4, special:4 };
+  var VIB={ blue:[0,50], green:[0,70], red:[0,95], gold:[0,120,40,70], rainbow:[0,170,60,140], special:[0,240] };
   var THEME_COLS={ blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], green:['#b8f5da','#0fae6e','#ffffff','#5be0a8'],
     red:['#ffc2bd','#e0392f','#ffffff','#ff7a6e'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
     rainbow:['#ff3b30','#ff9500','#ffcc00','#34c759','#0a84ff','#5e5ce6','#ff2d55'],
@@ -240,19 +250,24 @@
     f.type='lowpass'; f.frequency.value=170; g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(gain,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
     o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+.03); }
   function beatSound(intensity){ intensity=intensity||1; thump(0,50,.22,.5*intensity); thump(.14,36,.32,.44*intensity); }
-  // バシャーン=雷+金属+衝撃。intensityで格上げ。
-  function bashaan(intensity){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime; intensity=intensity||1;
-    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=.6;
-      bp.frequency.setValueAtTime(5200,t0); bp.frequency.exponentialRampToValueAtTime(700,t0+.22);
-      var g=c.createGain(); g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.2*intensity,t0+.006); g.gain.exponentialRampToValueAtTime(.0001,t0+.3);
-      s.connect(bp); bp.connect(g); g.connect(master); s.start(t0); s.stop(t0+.32);
-      var s2=c.createBufferSource(); s2.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(1400,t0); lp.frequency.exponentialRampToValueAtTime(180,t0+.4);
-      var g2=c.createGain(); g2.gain.setValueAtTime(.0001,t0); g2.gain.exponentialRampToValueAtTime(.24*intensity,t0+.01); g2.gain.exponentialRampToValueAtTime(.0001,t0+.5);
-      s2.connect(lp); lp.connect(g2); g2.connect(master); s2.start(t0); s2.stop(t0+.55); }
-    var o=c.createOscillator(),og=c.createGain(); o.type='triangle'; o.frequency.setValueAtTime(3000,t0); o.frequency.exponentialRampToValueAtTime(760,t0+.22);
-    og.gain.setValueAtTime(.0001,t0); og.gain.exponentialRampToValueAtTime(.12*intensity,t0+.006); og.gain.exponentialRampToValueAtTime(.0001,t0+.28); o.connect(og); og.connect(master); o.start(t0); o.stop(t0+.3);
-    var lo=c.createOscillator(),lg=c.createGain(); lo.type='sine'; lo.frequency.setValueAtTime(90,t0); lo.frequency.exponentialRampToValueAtTime(40,t0+.4);
-    lg.gain.setValueAtTime(.0001,t0); lg.gain.exponentialRampToValueAtTime(.4*intensity,t0+.02); lg.gain.exponentialRampToValueAtTime(.0001,t0+.6); lo.connect(lg); lg.connect(master); lo.start(t0); lo.stop(t0+.65); }
+  function crackle(when,k){ var c=ac(); if(!c||!soundOn())return; var nb=noise(); if(!nb)return; var t0=c.currentTime+when;
+    var s=c.createBufferSource(); s.buffer=nb; var hp=c.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=4200+Math.random()*2500;
+    var g=c.createGain(); g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.14*k,t0+.004); g.gain.exponentialRampToValueAtTime(.0001,t0+.05);
+    s.connect(hp); hp.connect(g); g.connect(master); s.start(t0); s.stop(t0+.06); }
+  // 雷=① 高音バリバリ ② 中域が裂ける ③ 着弾の低音ドガァン(0.2s)。levelで格上げ。
+  function thunder(level,big){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime; var k=(1+level*0.4)*(big?1.5:1); var nb=noise();
+    var crk=3+level; for(var i=0;i<crk;i++){ crackle(i*0.045, k); }                                  // ① バリバリバリ
+    if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=.5;
+      bp.frequency.setValueAtTime(3200,t0); bp.frequency.exponentialRampToValueAtTime(650,t0+.24);
+      var g=c.createGain(); g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.16*k,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.3);
+      s.connect(bp); bp.connect(g); g.connect(master); s.start(t0); s.stop(t0+.32); }               // ② 裂ける音
+    var t1=t0+0.2, lo=c.createOscillator(),lg=c.createGain(); lo.type='sine'; lo.frequency.setValueAtTime(120,t1); lo.frequency.exponentialRampToValueAtTime(30,t1+.55);
+    lg.gain.setValueAtTime(.0001,t1); lg.gain.exponentialRampToValueAtTime(.6*k,t1+.02); lg.gain.exponentialRampToValueAtTime(.0001,t1+.8); lo.connect(lg); lg.connect(master); lo.start(t1); lo.stop(t1+.85);
+    if(nb){ var s2=c.createBufferSource(); s2.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass'; lp.frequency.setValueAtTime(1600,t1); lp.frequency.exponentialRampToValueAtTime(150,t1+.45);
+      var g2=c.createGain(); g2.gain.setValueAtTime(.0001,t1); g2.gain.exponentialRampToValueAtTime(.34*k,t1+.01); g2.gain.exponentialRampToValueAtTime(.0001,t1+.6);
+      s2.connect(lp); lp.connect(g2); g2.connect(master); s2.start(t1); s2.stop(t1+.65); }            // ③ ドガァン(低域衝撃)
+    var o=c.createOscillator(),og=c.createGain(); o.type='triangle'; o.frequency.setValueAtTime(3000,t1); o.frequency.exponentialRampToValueAtTime(760,t1+.2);
+    og.gain.setValueAtTime(.0001,t1); og.gain.exponentialRampToValueAtTime(.1*k,t1+.006); og.gain.exponentialRampToValueAtTime(.0001,t1+.26); o.connect(og); og.connect(master); o.start(t1); o.stop(t1+.28); }
   function impact(when,big){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when,o=c.createOscillator(),g=c.createGain(); o.type='sine';
     o.frequency.setValueAtTime(95,t0); o.frequency.exponentialRampToValueAtTime(34,t0+(big?.7:.45));
     g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(big?.65:.42,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+(big?1.1:.7));
@@ -264,20 +279,22 @@
     o.frequency.setValueAtTime(640,t0); o.frequency.exponentialRampToValueAtTime(60,t0+.3); f.type='lowpass'; f.frequency.setValueAtTime(2200,t0); f.frequency.exponentialRampToValueAtTime(240,t0+.32);
     g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.16,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.38);
     o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+.4); }
-  // 金の点=澄んだ高級感のある高音(プチュン/テン)
-  function goldPing(when,pitch){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+(when||0),o=c.createOscillator(),g=c.createGain();
+  function goldPing(pitch){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime,o=c.createOscillator(),g=c.createGain();
     o.type='sine'; o.frequency.setValueAtTime(pitch||1400,t0); o.frequency.exponentialRampToValueAtTime((pitch||1400)*1.5,t0+.12);
     g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.09,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.5);
     o.connect(g); g.connect(master); o.start(t0); o.stop(t0+.55);
     var o2=c.createOscillator(),g2=c.createGain(); o2.type='sine'; o2.frequency.setValueAtTime((pitch||1400)*2.01,t0);
     g2.gain.setValueAtTime(.0001,t0); g2.gain.exponentialRampToValueAtTime(.04,t0+.02); g2.gain.exponentialRampToValueAtTime(.0001,t0+.4); o2.connect(g2); g2.connect(master); o2.start(t0); o2.stop(t0+.45); }
-  // 扉=重厚な低い持続音
   function doorRumble(dur){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter();
     o.type='sawtooth'; o.frequency.setValueAtTime(46,t0); o.frequency.linearRampToValueAtTime(60,t0+dur); f.type='lowpass'; f.frequency.value=140;
     g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.16,t0+.5); g.gain.setValueAtTime(.16,t0+dur-.4); g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
     o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+.05); }
+  // キラァァン: 澄んだ高音の祝福チャイム + シマー
+  function chime(){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime; [0,4,7,12,16,19].forEach(function(s,i){ var o=c.createOscillator(),g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(880*Math.pow(2,s/12),t0+i*.055);
+    g.gain.setValueAtTime(.0001,t0+i*.055); g.gain.exponentialRampToValueAtTime(.085,t0+i*.055+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+i*.055+.9); o.connect(g); g.connect(master); o.start(t0+i*.055); o.stop(t0+i*.055+.95); });
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var hp=c.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6500; var g2=c.createGain(); g2.gain.setValueAtTime(.0001,t0); g2.gain.exponentialRampToValueAtTime(.05,t0+.06); g2.gain.exponentialRampToValueAtTime(.0001,t0+1); s.connect(hp); hp.connect(g2); g2.connect(master); s.start(t0); s.stop(t0+1.05); } }
   function fanfare(when){ [0,4,7,12].forEach(function(s,i){ var c=ac(); if(!c)return; var t0=c.currentTime+when+i*.09,o=c.createOscillator(),g=c.createGain(); o.type='square'; o.frequency.setValueAtTime(523*Math.pow(2,s/12),t0);
-    g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.06,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.4); if(soundOn()){o.connect(g); g.connect(master); o.start(t0); o.stop(t0+.42);} }); }
+    g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.055,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+.4); if(soundOn()){o.connect(g); g.connect(master); o.start(t0); o.stop(t0+.42);} }); }
   function sunMiss(){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime,o=c.createOscillator(),g=c.createGain(),f=c.createBiquadFilter(); o.type='sine';
     o.frequency.setValueAtTime(360,t0); o.frequency.exponentialRampToValueAtTime(110,t0+.6); f.type='lowpass'; f.frequency.value=800;
     g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(.11,t0+.04); g.gain.exponentialRampToValueAtTime(.0001,t0+.66);
@@ -292,10 +309,10 @@
   function reset(){ clearSeq();
     ov.className='lucky-overlay show'; ov.style.background=''; ov.style.setProperty('--rankc','#ffffff');
     promptLine.style.display=''; promptLine.textContent='抽選開始…'; tameDots.style.display=''; confetti.innerHTML=''; amount.className='lucky-amount';
-    cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutBlack.className='cut-black'; bolt.setAttribute('class','bolt'); cutLabel.className='cut-label'; gold.className='gold-spread';
-    doors.className='door-wrap';
+    cutFill.className='cut-fill'; cutWhite.className='cut-white'; bolt.setAttribute('class','bolt'); bolt.style.opacity=0; boltHead.className='bolt-head'; cutLabel.className='cut-label';
+    rays.className='rays'; starFlare.className='star-flare'; doors.className='door-wrap';
     Array.prototype.forEach.call(beatDots.children,function(d){d.className='';});
-    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }
+    Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();}); }
 
   function fireBeat(i){ shock.style.borderColor=['#c23a2f','#e0392f','#ff5a4c','#ff7a4c'][i]||'#ff7a4c';
     try{ shock.animate([{transform:'translate(-50%,-50%) scale(.15)',opacity:0},{transform:'translate(-50%,-50%) scale(.9)',opacity:.9},{transform:'translate(-50%,-50%) scale('+(2.6+i*1.1)+')',opacity:0}],{duration:520,easing:'cubic-bezier(.15,.6,.3,1)'});}catch(e){}
@@ -306,17 +323,33 @@
     BEATS.forEach(function(t,i){ at(t,function(){ fireBeat(i); }); });
     at(SIL_MARK, function(){ ov.classList.add('tame'); promptLine.textContent=''; }); }
 
-  /* バシャーン(1段) — 雷+全画面フラッシュ+色フィル+シェイク。ワンテンポ。 */
+  /* 上→下へ走る稲妻(枝雷付き) */
+  function fireBolt(colorKey){ var level=LEVEL[colorKey]!=null?LEVEL[colorKey]:4; var w=3+level*1.7;
+    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    bolt.style.opacity=1; var paths=bolt.querySelectorAll('path'); var branches=1+level;
+    // 先端の発光を上から下へ移動
+    boltHead.className='bolt-head'; boltHead.style.opacity=0;
+    try{ boltHead.animate([{top:'2%',opacity:0,transform:'translate(-50%,-50%) scale(.4)'},{top:'8%',opacity:1,transform:'translate(-50%,-50%) scale(1)'},{top:'92%',opacity:1,transform:'translate(-50%,-50%) scale(1.2)'},{top:'98%',opacity:0,transform:'translate(-50%,-50%) scale(.4)'}],{duration:240,easing:'linear'});}catch(e){}
+    paths.forEach(function(p,idx){ var isMain=idx===0;
+      if(!isMain && idx>branches){ p.style.opacity=0; return; }
+      p.style.opacity=1; p.style.strokeWidth=(isMain? w : Math.max(2,w-1.6));
+      var len; try{ len=p.getTotalLength(); }catch(e){ len=380; }
+      p.style.strokeDasharray=len; p.style.strokeDashoffset=len;
+      var delay=isMain?0:70+idx*45, dur=isMain?210:110;
+      try{ p.animate([{strokeDashoffset:len,opacity:1},{strokeDashoffset:0,opacity:1}],{duration:dur,delay:delay,fill:'forwards',easing:'linear'});}catch(e){ p.style.strokeDashoffset=0; }
+    });
+    try{ bolt.animate([{opacity:1},{opacity:1},{opacity:.7},{opacity:0}],{duration:560,easing:'ease-out'});}catch(e){}
+  }
+
+  /* バシャーン(1段) = 走る稲妻 → 着弾で閃光+色フィル+シェイク */
   function bashaanCut(colorKey,big){
-    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff'); ov.classList.remove('tame'); ov.classList.add('cutting');
-    cutBlack.className='cut-black'; void cutBlack.offsetWidth; cutBlack.className='cut-black on';           // 一瞬の暗転
-    at(70, function(){
-      cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';         // 白閃光
-      var fc='cut-fill'+(colorKey==='rainbow'?' rainbow':colorKey==='special'?' special':''); cutFill.className=fc; void cutFill.offsetWidth; cutFill.className=fc+' on';
-      bolt.setAttribute('class','bolt'); bolt.getBoundingClientRect(); bolt.setAttribute('class','bolt on'); // 稲妻
+    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff'); ov.classList.remove('tame'); ov.classList.add('cutting'); ov.style.background='#04060c';
+    fireBolt(colorKey); thunder(LEVEL[colorKey]||0, big); vibe(VIB[colorKey]||[0,60]);
+    at(200, function(){                                      // 着弾の瞬間
+      var fc='cut-fill'+(colorKey==='rainbow'?' rainbow':''); cutFill.className=fc; void cutFill.offsetWidth; cutFill.className=fc+' on';
+      cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
       cutLabel.textContent=RANKJP[colorKey]||''; cutLabel.className='cut-label'; void cutLabel.offsetWidth; cutLabel.className='cut-label on';
-      ov.classList.remove('shake'); void ov.offsetWidth; ov.classList.add('shake');
-      bashaan(big?2:1.2); vibe(VIB[colorKey]||[0,60]); spawnSparks(colorKey, big?24:14);
+      ov.classList.remove('shake'); void ov.offsetWidth; ov.classList.add('shake'); spawnSparks(colorKey, big?24:14);
     });
   }
   function spawnSparks(colorKey,n){ var col=RANK[colorKey]||'#fff'; if(colorKey==='rainbow')col='#ffd23b';
@@ -335,7 +368,7 @@
     cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
     showStage(bd,amt,WINNER,sb,small); impact(0,big); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:130, coin); }
 
-  var BEATS=[500,1350,2200,3050], SIL_MARK=3450, SIL=5500, STEP=1050; // カットインは1段=約1.05秒(ワンテンポ)
+  var BEATS=[500,1350,2200,3050], SIL_MARK=3450, SIL=5500, STEP=1050;
 
   function play(key){ reset(); ac();
     if(key==='missA') return seqMiss('A');
@@ -351,20 +384,14 @@
   function teaseGlow(colorKey,peak){ ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
     cutFill.className='cut-fill'; try{ cutFill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:640,easing:'ease-in-out'});}catch(e){} thump(0,54,.16,.34); }
   function seqMiss(pat){ startHeart();
-    if(pat==='A'){ at(SIL,function(){ teaseGlow('blue',.3); });
-      at(SIL+680,function(){ sunMiss(); });
-      at(SIL+1250,revealMiss); }
-    else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*360,function(){ teaseGlow(c,.24+i*.06); }); });
-      at(SIL+1560,function(){ sunMiss(); });
-      at(SIL+2130,revealMiss); }
-    else { at(SIL,function(){ teaseGlow('gold',.62); });
-      at(SIL+900,function(){ sunMiss(); });
-      at(SIL+1470,revealMiss); } }
+    if(pat==='A'){ at(SIL,function(){ teaseGlow('blue',.3); }); at(SIL+680,function(){ sunMiss(); }); at(SIL+1250,revealMiss); }
+    else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*360,function(){ teaseGlow(c,.24+i*.06); }); }); at(SIL+1560,function(){ sunMiss(); }); at(SIL+2130,revealMiss); }
+    else { at(SIL,function(){ teaseGlow('gold',.62); }); at(SIL+900,function(){ sunMiss(); }); at(SIL+1470,revealMiss); } }
   function revealMiss(){ ov.className='lucky-overlay show reveal theme-miss'; showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true); }
 
   function seqCuts(colors,theme,amt,bd){ startHeart();
     colors.forEach(function(c,i){ var last=i===colors.length-1; at(SIL+i*STEP,function(){ bashaanCut(c,last); }); });
-    var rev=SIL+(colors.length-1)*STEP+760;
+    var rev=SIL+(colors.length-1)*STEP+780;
     at(rev-170,function(){ blackout(); });
     at(rev,function(){ reveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold'); vibe(theme==='gold'?[0,90,40,90]:[0,50]); });
   }
@@ -373,48 +400,55 @@
     var hold=SIL+4*STEP; at(hold,function(){ ov.classList.add('tame'); promptLine.style.display=''; promptLine.textContent='…まだ上がる…？'; });
     var fifth=hold+900;
     at(fifth,function(){ promptLine.style.display='none'; bashaanCut('rainbow',true); });
-    at(fifth+900-170,function(){ blackout(); });
-    at(fifth+900,function(){ reveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
+    at(fifth+920-170,function(){ blackout(); });
+    at(fifth+920,function(){ reveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
 
-  /* ===== ホテル: 虹まで→プシュン→長い暗転→金の点→扉→開放→JACKPOT ===== */
+  /* ===== ホテル(r6構成維持): 虹→プシュン→暗転→金の点→扉→開放→★星型キラーン→JACKPOT ===== */
   function seqHotel(){ startHeart();
     ['blue','green','red','gold','rainbow'].forEach(function(c,i){ var big=c==='rainbow'; at(SIL+i*STEP,function(){ bashaanCut(c,big); }); });
-    var rainbowT=SIL+4*STEP;               // 虹バシャーン
-    // 虹の余韻(1万かと思わせる)をやや長めにホールド
+    var rainbowT=SIL+4*STEP;
     var die=rainbowT+1500;
-    at(die,function(){ pushun(); vibeStop();                 // プシュン→完全ブラックアウト、振動停止
+    at(die,function(){ pushun(); vibeStop();
       ov.className='lucky-overlay show hotelstage'; ov.style.background='#000'; promptLine.style.display='none';
-      cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutBlack.className='cut-black'; bolt.setAttribute('class','bolt'); cutLabel.className='cut-label';
+      cutFill.className='cut-fill'; cutWhite.className='cut-white'; bolt.setAttribute('class','bolt'); bolt.style.opacity=0; cutLabel.className='cut-label';
       Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); });
-    // 長い静寂(約1.8秒)ののち、金の点が1つずつ
     var p1=die+1800, p2=p1+900, p3=p2+800;
-    at(p1,function(){ goldPoint(-30,-10); goldPing(0,1500); });   // 1つ目 プチュン
-    at(p2,function(){ goldPoint(24,14); goldPing(0,1700); });     // 2つ目 テン
-    at(p3,function(){ goldPoint(-14,26); goldPing(0,1900); });    // 3つ目 テン
-    // 徐々に増える→集まり始める
+    at(p1,function(){ goldPoint(-30,-10); goldPing(1500); });
+    at(p2,function(){ goldPoint(24,14); goldPing(1700); });
+    at(p3,function(){ goldPoint(-14,26); goldPing(1900); });
     var gather=p3+700;
-    at(gather,function(){ for(var i=0;i<10;i++){ (function(k){ at(k*140,function(){ goldPoint((Math.random()*2-1)*40,(Math.random()*2-1)*36); if(k%3===0) goldPing(0,1600+k*40); }); })(i); } });
-    // 扉が現れる
+    at(gather,function(){ for(var i=0;i<10;i++){ (function(k){ at(k*140,function(){ goldPoint((Math.random()*2-1)*40,(Math.random()*2-1)*36); if(k%3===0) goldPing(1600+k*40); }); })(i); } });
     var doorAppear=gather+1700;
     at(doorAppear,function(){ ov.className='lucky-overlay show hotelstage doors'; ov.style.background='#000'; doors.className='door-wrap'; void doors.offsetWidth; doors.className='door-wrap appear'; doorRumble(2.2); });
-    // ゆっくり開く
     var doorOpen=doorAppear+1900;
     at(doorOpen,function(){ doors.className='door-wrap appear open'; doorRumble(2.4); });
-    // 開き切る瞬間 バシャーン + キラキラ
-    var burst=doorOpen+2400;
-    at(burst,function(){ cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on'; gold.className='gold-spread'; void gold.offsetWidth; gold.className='gold-spread on';
-      bashaan(2.2); impact(.02,true); vibe([0,240,80,180]); confettiBurst(THEME_COLS.hotel,200,true); });
-    // 最後に初めて賞名表示
-    at(burst+700,function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
+    // 扉が開き切って一瞬静止 → 星型キラァァン祝福
+    var burst=doorOpen+2500;
+    at(burst,function(){ goldBlessing(); at(160,function(){ chime(); }); vibe([0,240,80,180]); });
+    at(burst+1000,function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
       showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉', true);
-      confettiBurst(THEME_COLS.hotel,140,true); fanfare(.1); }); }
+      spawnStars(10); confettiBurst(THEME_COLS.hotel,120,true); fanfare(.1); }); }
+
   function goldPoint(xvw,yvh){ var s=document.createElement('span'); s.className='spark'; s.style.background='#ffe9a8'; s.style.boxShadow='0 0 16px #ffcf5c'; s.style.width='9px'; s.style.height='9px';
     s.style.transform='translate(calc(-50% + '+xvw+'vw),calc(-50% + '+yvh+'vh)) scale(0)'; inner.appendChild(s);
     try{ s.animate([{opacity:0,transform:s.style.transform+' scale(0)'},{opacity:1,transform:'translate(calc(-50% + '+xvw+'vw),calc(-50% + '+yvh+'vh)) scale(1.2)'},{opacity:.85,transform:'translate(calc(-50% + '+xvw+'vw),calc(-50% + '+yvh+'vh)) scale(1)'}],{duration:700,fill:'forwards'});}catch(e){}
     setTimeout(function(){ try{ s.animate([{opacity:.85},{opacity:0}],{duration:1200,fill:'forwards'}); }catch(e){} setTimeout(function(){s.remove();},1300); }, 1600); }
+  // 扉開放後の祝福: 星型フレア + 光線 + 星型キラキラ飛散 + 金粉
+  function goldBlessing(){ ov.className='lucky-overlay show hotelstage'; ov.style.background='radial-gradient(circle at 50% 45%,#42320f,#05070d 76%)';
+    impact(0,true); vibe([0,240]);
+    rays.className='rays'; void rays.offsetWidth; rays.className='rays on';
+    starFlare.className='star-flare'; void starFlare.offsetWidth; starFlare.className='star-flare on';
+    cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
+    spawnStars(20); confettiBurst(THEME_COLS.hotel, 90, true); }
+  function spawnStars(n){ var chars=['✦','✧','⋆','✦','✧'];
+    for(var i=0;i<n;i++){ (function(i){ setTimeout(function(){ var s=document.createElement('span'); s.className='starspk'; s.textContent=chars[i%chars.length];
+      s.style.fontSize=(14+Math.random()*22)+'px'; inner.appendChild(s);
+      var ang=Math.random()*Math.PI*2, dist=120+Math.random()*240;
+      try{ s.animate([{transform:'translate(-50%,-50%) scale(.3) rotate(0)',opacity:0},{transform:'translate(calc(-50% + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(1.15) rotate(90deg)',opacity:1},{transform:'translate(calc(-50% + '+Math.cos(ang)*dist*1.3+'px),calc(-50% + '+Math.sin(ang)*dist*1.3+'px)) scale(.5) rotate(200deg)',opacity:0}],{duration:1200+Math.random()*600,easing:'cubic-bezier(.2,.7,.3,1)'});}catch(e){}
+      setTimeout(function(){s.remove();},1900); }, i*35); })(i); } }
 
-  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; promptLine.style.display=''; confetti.innerHTML=''; doors.className='door-wrap';
-    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); vibeStop(); }
+  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; promptLine.style.display=''; confetti.innerHTML=''; doors.className='door-wrap'; rays.className='rays'; starFlare.className='star-flare';
+    Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();}); vibeStop(); }
   var lastKey=null;
   document.getElementById('close').addEventListener('click', closeOverlay);
   document.getElementById('replay').addEventListener('click', function(){ if(lastKey) play(lastKey); });
