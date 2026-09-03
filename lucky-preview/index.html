@@ -68,6 +68,9 @@
   .bolt{ position:absolute; top:0; left:50%; width:86vw; height:100vh; transform:translateX(-50%); z-index:6; opacity:0; pointer-events:none; }
   .bolt path{ fill:none; stroke:var(--rankc); stroke-linecap:round; stroke-linejoin:round;
     filter:drop-shadow(0 0 8px var(--rankc)) drop-shadow(0 0 20px var(--rankc)); }
+  /* 虹ランク: 雷そのものをレインボーグラデ(青→紫→赤→橙→黄→緑→水色)にし、白飛びさせない。白は細い芯のみ。 */
+  .bolt.rainbow path{ stroke:url(#rbg);
+    filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px #ff3b30) drop-shadow(0 0 15px #ffd60a) drop-shadow(0 0 22px #34c759) drop-shadow(0 0 30px #3a86ff); }
   .bolt-head{ position:absolute; top:0; left:50%; width:44px; height:44px; border-radius:50%; transform:translate(-50%,-50%) scale(0); z-index:6; opacity:0;
     background:radial-gradient(circle,#fff,var(--rankc) 55%,transparent); box-shadow:0 0 30px 8px var(--rankc); pointer-events:none; }
   .cut-fill{ position:absolute; inset:0; z-index:5; opacity:0; pointer-events:none; background:var(--rankc); }
@@ -154,8 +157,8 @@
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r7</b> ／ 走る落雷(枝雷・重い雷音) ／ ホテル扉開放後=星型キラーン</div>
-  <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。</b>青→緑→赤→金→虹→黒×金。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋<b>扉が開いた後は星型の「キラァァン！」祝福演出</b>。<b>音ON＋マナーモード解除で迫力。</b></p>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r8</b> ／ 虹の雷はレインボー(白飛びなし) ／ 色名テキスト無し ／ ホテル星型キラーン</div>
+  <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。色名の文字は出さず、雷だけで段階が上がります。</b>青→緑→赤→金→<b>虹（レインボーの雷）</b>→黒×金。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋扉が開いた後は星型の「キラァァン！」祝福。<b>音ON＋マナーモード解除で迫力。</b></p>
 
   <div class="soundbar">
     <span class="lbl">🔊 音・振動（重低音ドクン＋バリバリ→ドガァン の雷＋扉の重低音＋キラーン）</span>
@@ -203,6 +206,10 @@
   </div>
   <div class="bolt-head" id="boltHead"></div>
   <svg class="bolt" id="bolt" viewBox="0 0 100 300" preserveAspectRatio="none">
+    <defs><linearGradient id="rbg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a86ff"/><stop offset="0.16" stop-color="#8b5cf6"/><stop offset="0.33" stop-color="#ff3b30"/>
+      <stop offset="0.5" stop-color="#ff9500"/><stop offset="0.66" stop-color="#ffd60a"/><stop offset="0.82" stop-color="#34c759"/><stop offset="1" stop-color="#5ac8fa"/>
+    </linearGradient></defs>
     <path class="bmain" d="M54 -4 L44 56 L60 92 L41 150 L62 196 L47 244 L57 304"/>
     <path class="bbr" d="M60 92 L79 118 L70 140"/>
     <path class="bbr" d="M41 150 L21 178 L33 200"/>
@@ -326,6 +333,7 @@
   /* 上→下へ走る稲妻(枝雷付き) */
   function fireBolt(colorKey){ var level=LEVEL[colorKey]!=null?LEVEL[colorKey]:4; var w=3+level*1.7;
     ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    bolt.setAttribute('class', 'bolt'+(colorKey==='rainbow'?' rainbow':''));
     bolt.style.opacity=1; var paths=bolt.querySelectorAll('path'); var branches=1+level;
     // 先端の発光を上から下へ移動
     boltHead.className='bolt-head'; boltHead.style.opacity=0;
@@ -343,12 +351,13 @@
 
   /* バシャーン(1段) = 走る稲妻 → 着弾で閃光+色フィル+シェイク */
   function bashaanCut(colorKey,big){
+    var isR = colorKey==='rainbow';
     ov.style.setProperty('--rankc', RANK[colorKey]||'#fff'); ov.classList.remove('tame'); ov.classList.add('cutting'); ov.style.background='#04060c';
     fireBolt(colorKey); thunder(LEVEL[colorKey]||0, big); vibe(VIB[colorKey]||[0,60]);
-    at(200, function(){                                      // 着弾の瞬間
-      var fc='cut-fill'+(colorKey==='rainbow'?' rainbow':''); cutFill.className=fc; void cutFill.offsetWidth; cutFill.className=fc+' on';
-      cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
-      cutLabel.textContent=RANKJP[colorKey]||''; cutLabel.className='cut-label'; void cutLabel.offsetWidth; cutLabel.className='cut-label on';
+    at(200, function(){                                      // 着弾の瞬間(色名テキストは出さない)
+      // 虹は白飛びさせない: 背景の黒を残し、レインボーの雷を主役にする(閃光・色フィルを弱める)。
+      cutWhite.className='cut-white'; try{ cutWhite.animate([{opacity:0},{opacity:isR?.24:.6},{opacity:0}],{duration:isR?260:320,easing:'ease'}); }catch(e){}
+      cutFill.className='cut-fill'+(isR?' rainbow':''); try{ cutFill.animate([{opacity:0},{opacity:isR?.4:.7},{opacity:0}],{duration:isR?620:560,easing:'ease'}); }catch(e){}
       ov.classList.remove('shake'); void ov.offsetWidth; ov.classList.add('shake'); spawnSparks(colorKey, big?24:14);
     });
   }
