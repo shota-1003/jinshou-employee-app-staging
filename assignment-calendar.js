@@ -1045,6 +1045,7 @@
         // 日付の移動が待っている間は、前後の日の読み込みを途中で切り上げて先を譲る。
         // (起動直後の読み込みが終わるまでタップが待たされると、反応が鈍く感じる)
         let tlNavWaiting = 0;
+        let tlNavCount = 0;       // 利用者の操作で移動した回数(起動処理が後から上書きしないため)
         function tlRun(fn) {
             const next = tlQueue.then(fn, fn);
             tlQueue = next.catch(() => {});
@@ -1052,6 +1053,7 @@
         }
         function tlRunNav(fn) {
             tlNavWaiting += 1;
+            tlNavCount += 1;
             return tlRun(() => { tlNavWaiting -= 1; return fn(); });
         }
 
@@ -1158,6 +1160,8 @@
         // 週表示や月グリッドから日を選んだとき。画面を作り直さず、その日の区画へ送る。
         function goToDaySection(date, smooth) { return tlRunNav(() => goToDaySectionNow(date, smooth)); }
         async function goToDaySectionNow(date, smooth) {
+            // 月間カレンダーを開いている最中は、一覧へ勝手に戻さない
+            if (state.mobileMode === 'month') return;
             const tl = timelineEl();
             if (!tl) { selectDate(date); return; }
             // 範囲の外なら、届くまで足す。遠すぎる場合はそこを中心に組み直す。
@@ -4498,10 +4502,13 @@
             render();
             syncWeekStripVisibility();
             if (isWide()) return;
+            // 前後の日を読んでいる最中に利用者が操作した場合は、
+            // 起動処理の最後で位置を戻さない(押した操作を上書きしない)。
+            const navAtStart = tlNavCount;
             await extendTimeline(1);
             await extendTimeline(1);
             await extendTimeline(-1);
-            goToDaySection(state.selected, false);
+            if (tlNavCount === navAtStart) goToDaySection(state.selected, false);
         })();
 
         return {

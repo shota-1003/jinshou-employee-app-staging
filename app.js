@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v126-staging';
-const BUILD_DEPLOYED_AT = '2026-09-03T22:05:10.193Z';
+const BUILD_DEPLOYED_AT = '2026-09-03T22:19:01.050Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -50,6 +50,9 @@ window.ClientErrorReporter.init({
   getDeviceToken: () => currentDeviceToken,
 });
 
+// 任意/本番未提供の機能RPC。DBに未適用の環境では404になるが、呼び出し側でgraceful degradeするため
+// 監視へは報告しない(例: ラッキー賞は本番DB未適用のため404。有効化されれば200が返る)。
+const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule']);
 async function rpc(name, params) {
   const headers = {
     apikey: SUPABASE_ANON_KEY,
@@ -70,6 +73,17 @@ async function rpc(name, params) {
     try { const parsed = JSON.parse(text); if (parsed && parsed.message) message = parsed.message; } catch { /* JSONでなければそのまま */ }
     // 端末が無効化された/退職・利用停止になった等でセッションが失効した場合は、
     // その場のエラー表示だけで終わらせず、ログイン画面へ強制的に戻す。
+    // 想定内の認証拒否(auth rejection)は「Productionエラー」ではなく通常フロー。
+    // require_employee_session が返す 401/403(SQLSTATE 28000相当)= 端末が承認待ち・セッション失効・
+    // 利用停止 は、いずれもログイン/承認待ち画面へ案内するのが正しい動作であり、監視へエラー報告しない。
+    // 特に resume_employee_session の 401/403 は「保存端末での自動セッション復帰が失効していた」だけで、
+    // 有効な承認済み端末なら 200 が返る(2026-09-03 実データ確認: 承認済み端末116/直近復帰多数)。
+    const isAuthRejection = (res.status === 401 || res.status === 403) && (
+      name === 'resume_employee_session' ||
+      message === 'セッションが確認できませんでした。再度ログインしてください' ||
+      message === 'このアカウントは現在ご利用いただけません' ||
+      message === 'この端末はまだ管理者の承認待ちです。承認され次第ご利用いただけます'
+    );
     if (message === 'セッションが確認できませんでした。再度ログインしてください' || message === 'このアカウントは現在ご利用いただけません') {
       clearSession();
       clearDeviceAuth();
@@ -78,9 +92,17 @@ async function rpc(name, params) {
         showScreen('login');
         showError('login-error', message === 'このアカウントは現在ご利用いただけません' ? message : 'ログイン状態が無効になりました。もう一度ログインしてください。');
       }
+    } else if (isAuthRejection) {
+      // 端末承認待ち・resume時の失効など。エラー報告せず、案内だけ出してログイン/承認待ちへ。
+      if (document.getElementById('screen-login')) {
+        showScreen('login');
+        showError('login-error', message);
+      }
+    } else if (res.status === 404 && OPTIONAL_MISSING_RPCS.has(name)) {
+      // 任意/本番未提供の機能RPC(ラッキー賞など、DB未適用の環境がある)の404は
+      // graceful degrade(呼び出し側でカードを隠す)が正しい動作。Productionエラーとして報告しない。
     } else {
-      // 2026-09-02: セッション失効(想定内の通常フロー)以外は、可視化マップが検知できるよう
-      // 実際のProductionエラーとして報告する。
+      // セッション失効・認証拒否(想定内)以外は、可視化マップが検知できるよう実Productionエラーとして報告する。
       window.ClientErrorReporter.reportHttpError(`rpc/${name}`, res.status, message);
     }
     throw new Error(message);
