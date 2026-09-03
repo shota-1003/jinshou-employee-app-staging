@@ -71,6 +71,13 @@
   /* 虹ランク: 雷そのものをレインボーグラデ(青→紫→赤→橙→黄→緑→水色)にし、白飛びさせない。白は細い芯のみ。 */
   .bolt.rainbow path{ stroke:url(#rbg);
     filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px #ff3b30) drop-shadow(0 0 15px #ffd60a) drop-shadow(0 0 22px #34c759) drop-shadow(0 0 30px #3a86ff); }
+  /* r11: サイド稲妻(左右)。中央=金額の上には重ねない(z-index<ステージ)。結果確定後も走らせ続ける。 */
+  .bolt-side{ position:absolute; top:0; width:30vw; height:100vh; z-index:6; opacity:0; pointer-events:none; }
+  #boltL{ left:0; } #boltR{ right:0; }
+  .bolt-side path{ fill:none; stroke:var(--rankc,#fff); stroke-linecap:round; stroke-linejoin:round;
+    filter:drop-shadow(0 0 6px var(--rankc,#fff)) drop-shadow(0 0 16px var(--rankc,#fff)); }
+  .bolt-side.rainbow path{ stroke:url(#rbg);
+    filter:drop-shadow(0 0 2px #fff) drop-shadow(0 0 8px #ff3b30) drop-shadow(0 0 15px #34c759) drop-shadow(0 0 22px #3a86ff); }
   .bolt-head{ position:absolute; top:0; left:50%; width:44px; height:44px; border-radius:50%; transform:translate(-50%,-50%) scale(0); z-index:6; opacity:0;
     background:radial-gradient(circle,#fff,var(--rankc) 55%,transparent); box-shadow:0 0 30px 8px var(--rankc); pointer-events:none; }
   .cut-fill{ position:absolute; inset:0; z-index:5; opacity:0; pointer-events:none; background:var(--rankc); }
@@ -110,16 +117,22 @@
   .star-flare.on{ animation:flareAnim 1.2s cubic-bezier(.2,1.2,.3,1) forwards; }
   .starspk{ position:absolute; top:50%; left:50%; z-index:7; color:#ffe9a8; opacity:0; pointer-events:none; text-shadow:0 0 12px #ffcf5c; }
 
-  /* リザルト — 結果表示フェーズ: 中央を暗幕(scrim)で少し暗くし、金額を最前面で読ませる */
-  .result-scrim{ position:absolute; inset:0; z-index:9; opacity:0; pointer-events:none;
-    background:radial-gradient(ellipse 92% 56% at 50% 44%, rgba(0,0,0,.76) 0%, rgba(0,0,0,.52) 38%, rgba(0,0,0,.14) 62%, transparent 78%); transition:opacity .3s ease; }
-  .lucky-overlay.reveal .result-scrim{ opacity:1; }
-  .lucky-stage{ display:none; position:relative; z-index:12; padding:0 18px; }
+  /* リザルト — r10/r11方針: 画面全体を暗くしない/演出を消さない。
+     金額ステージを全演出より上(z-index)に置き、文字の“背後だけ”を局所的に暗くして、
+     太いアウトライン+濃いドロップシャドウで常に読ませる。演出は結果確定後もサイドで継続。 */
+  .lucky-stage{ display:none; position:relative; z-index:40; padding:0 18px; }
   .lucky-overlay.reveal .lucky-stage{ display:block; animation:luckyPop .55s cubic-bezier(.2,1.35,.35,1) both; }
-  .lucky-badge{ font-size:27px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 6px #000, 0 3px 18px rgba(0,0,0,.7); }
-  .lucky-amount{ font-size:66px; font-weight:900; line-height:1.05; margin:2px 0 6px; color:#fff;
-    text-shadow:0 2px 4px #000, 0 5px 22px rgba(0,0,0,.95), 0 0 3px rgba(0,0,0,.9); }
+  /* 文字の背後だけ局所的に暗くする(画面全体ではなく、金額の後ろだけradialな暗がり) */
+  .lucky-stage::before{ content:""; position:absolute; left:50%; top:50%; transform:translate(-50%,-50%);
+    width:180%; height:300%; z-index:-1; pointer-events:none;
+    background:radial-gradient(ellipse 60% 46% at 50% 50%, rgba(0,0,0,.80) 0%, rgba(0,0,0,.58) 36%, rgba(0,0,0,.22) 60%, transparent 76%); }
+  .lucky-badge{ position:relative; z-index:2; font-size:27px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; color:#fff;
+    -webkit-text-stroke:.6px rgba(0,0,0,.7); text-shadow:0 2px 6px #000, 0 3px 18px rgba(0,0,0,.85); }
+  .lucky-amount{ position:relative; z-index:3; font-size:66px; font-weight:900; line-height:1.05; margin:2px 0 6px; color:#fff;
+    -webkit-text-stroke:2.2px rgba(0,0,0,.9);
+    text-shadow:0 2px 4px #000, 0 4px 10px #000, 0 6px 26px rgba(0,0,0,.98), 0 0 4px rgba(0,0,0,.95); }
   .lucky-amount.small{ font-size:38px; }
+  .lucky-winner, .lucky-sub{ position:relative; z-index:2; }
   .lucky-winner{ font-size:19px; font-weight:800; margin-top:2px; text-shadow:0 2px 6px #000; }
   .lucky-sub{ font-size:13px; color:rgba(255,255,255,.9); margin-top:12px; text-shadow:0 1px 4px #000; }
   .lucky-overlay.reveal{ transition:background .35s ease; }
@@ -161,8 +174,8 @@
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r10</b> ／ 当選後も虹雷・祝福を継続（3〜4秒）＋金額はアウトライン＆局所暗幕で常に読める</div>
-  <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。色名の文字は出さず、雷だけで段階が上がります。</b>青→緑→赤→金→<b>虹（レインボーの雷）</b>→黒×金。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋扉が開いた後は星型の「キラァァン！」祝福。<b>音ON＋マナーモード解除で迫力。</b></p>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r11</b> ／ 当選確定後もサイド稲妻＋星＋紙吹雪を3.8秒継続（消さない/暗くしない）／ 金額は太アウトライン＋局所暗がり＋最前面で常に読める ／ 稲妻は上→左右サイド配置で中央は避ける ／ 虹雷レインボー ／ 色名無し</div>
+  <p class="lead"><b>雷は上→下へ走って落ちる（枝分かれ・ランクが上がるほど太く激しく重く）。色名の文字は出さず、雷だけで段階が上がります。</b>青→緑→赤→金→<b>虹（レインボーの雷）</b>→黒×金。<br><b>当選が決まった後も、稲妻・星・紙吹雪の演出をサイド（左右）で3〜4秒続けます。</b>金額は太いフチ取りと文字の後ろだけの局所的な暗がりで、演出を消さなくても常にはっきり読めます。<br>ホテルは r6 の構成維持（虹→プシュン→暗転→金の点→扉→ゆっくり開く）＋扉が開いた後は星型の「キラァァン！」祝福。<b>音ON＋マナーモード解除で迫力。</b></p>
 
   <div class="soundbar">
     <span class="lbl">🔊 音・振動（重低音ドクン＋バリバリ→ドガァン の雷＋扉の重低音＋キラーン）</span>
@@ -220,11 +233,26 @@
     <path class="bbr" d="M62 196 L83 220"/>
     <path class="bbr" d="M47 244 L29 266"/>
   </svg>
+  <svg class="bolt-side" id="boltL" viewBox="0 0 100 300" preserveAspectRatio="none">
+    <path class="bmain" d="M62 -4 L38 60 L58 120 L34 182 L54 240 L40 304"/>
+    <path class="bbr" d="M58 120 L82 150"/>
+    <path class="bbr" d="M34 182 L12 210"/>
+    <path class="bbr" d="M54 240 L80 268"/>
+    <path class="bbr" d="M38 60 L16 88"/>
+    <path class="bbr" d="M58 120 L44 96"/>
+  </svg>
+  <svg class="bolt-side" id="boltR" viewBox="0 0 100 300" preserveAspectRatio="none">
+    <path class="bmain" d="M38 -4 L62 60 L42 120 L66 182 L46 240 L60 304"/>
+    <path class="bbr" d="M42 120 L18 150"/>
+    <path class="bbr" d="M66 182 L88 210"/>
+    <path class="bbr" d="M46 240 L20 268"/>
+    <path class="bbr" d="M62 60 L84 88"/>
+    <path class="bbr" d="M42 120 L56 96"/>
+  </svg>
   <div class="cut-fill" id="cutFill"></div>
   <div class="cut-label" id="cutLabel"></div>
   <div class="cut-white" id="cutWhite"></div>
   <div class="lucky-confetti" id="confetti"></div>
-  <div class="result-scrim" id="scrim"></div>
   <div class="lucky-actions">
     <button class="lucky-btn" id="replay">もう一度</button>
     <button class="lucky-btn primary" id="close">閉じる</button>
@@ -240,7 +268,8 @@
       badge=document.getElementById('badge'), amount=document.getElementById('amount'), winner=document.getElementById('winner'),
       sub=document.getElementById('sub'), confetti=document.getElementById('confetti'), doors=document.getElementById('doors'),
       rays=document.getElementById('rays'), starFlare=document.getElementById('starFlare'), boltHead=document.getElementById('boltHead'),
-      cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), bolt=document.getElementById('bolt'), cutLabel=document.getElementById('cutLabel');
+      cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), bolt=document.getElementById('bolt'), cutLabel=document.getElementById('cutLabel'),
+      boltL=document.getElementById('boltL'), boltR=document.getElementById('boltR');
   var WINNER='テスト 太郎';
   var RANK={ blue:'#3a86ff', green:'#22d07a', red:'#ff3b30', gold:'#ffc531', rainbow:'#ffffff', special:'#ffd15a' };
   var RANKJP={ blue:'青', green:'緑', red:'赤', gold:'金', rainbow:'虹', special:'JACKPOT' };
@@ -322,6 +351,7 @@
     ov.className='lucky-overlay show'; ov.style.background=''; ov.style.setProperty('--rankc','#ffffff');
     promptLine.style.display=''; promptLine.textContent='抽選開始…'; tameDots.style.display=''; confetti.innerHTML=''; amount.className='lucky-amount';
     cutFill.className='cut-fill'; cutWhite.className='cut-white'; bolt.setAttribute('class','bolt'); bolt.style.opacity=0; boltHead.className='bolt-head'; cutLabel.className='cut-label';
+    boltL.setAttribute('class','bolt-side'); boltL.style.opacity=0; boltR.setAttribute('class','bolt-side'); boltR.style.opacity=0;
     rays.className='rays'; starFlare.className='star-flare'; doors.className='door-wrap';
     Array.prototype.forEach.call(beatDots.children,function(d){d.className='';});
     Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();}); }
@@ -354,6 +384,48 @@
     try{ bolt.animate([{opacity:1},{opacity:1},{opacity:.7},{opacity:0}],{duration:560,easing:'ease-out'});}catch(e){}
   }
 
+  /* r11: サイドを走る稲妻(左右)。中央=金額には重ねない。結果確定後の継続演出に使う。 */
+  function drawSideBolt(el, colorKey){
+    var level=LEVEL[colorKey]!=null?LEVEL[colorKey]:4; var w=2.4+level*1.2;
+    el.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    el.setAttribute('class','bolt-side'+(colorKey==='rainbow'?' rainbow':''));
+    el.style.opacity=1; var paths=el.querySelectorAll('path'); var branches=2+level;
+    paths.forEach(function(p,idx){ var isMain=idx===0;
+      if(!isMain && idx>branches){ p.style.opacity=0; return; }
+      p.style.opacity=1; p.style.strokeWidth=(isMain? w : Math.max(1.4,w-1.2));
+      var len; try{ len=p.getTotalLength(); }catch(e){ len=380; }
+      p.style.strokeDasharray=len; p.style.strokeDashoffset=len;
+      var delay=isMain?0:45+idx*30, dur=isMain?170:85;
+      try{ p.animate([{strokeDashoffset:len,opacity:1},{strokeDashoffset:0,opacity:1}],{duration:dur,delay:delay,fill:'forwards',easing:'linear'});}catch(e){ p.style.strokeDashoffset=0; }
+    });
+    try{ el.animate([{opacity:1},{opacity:1},{opacity:.5},{opacity:0}],{duration:500,easing:'ease-out'});}catch(e){}
+    (function(node){ setTimeout(function(){ node.style.opacity=0; }, 500); })(el);
+  }
+  /* サイド起点(中央を避ける)の火花 */
+  function spawnSideSparks(colorKey,n,side){ var col=RANK[colorKey]||'#fff'; if(colorKey==='rainbow')col='#ffd23b';
+    var ox=side*34;
+    for(var i=0;i<n;i++){ var s=document.createElement('span'); s.className='spark'; s.style.background=col; s.style.boxShadow='0 0 12px '+col;
+      s.style.transform='translate(calc(-50% + '+ox+'vw),-50%)'; inner.appendChild(s);
+      var ang=Math.random()*Math.PI*2, dist=50+Math.random()*150;
+      try{ s.animate([{transform:'translate(calc(-50% + '+ox+'vw),-50%) scale(1)',opacity:1},{transform:'translate(calc(-50% + '+ox+'vw + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(0)',opacity:0}],{duration:520+Math.random()*260,easing:'cubic-bezier(.2,.7,.3,1)'});}catch(e){}
+      (function(el){ setTimeout(function(){el.remove();},820); })(s); } }
+  /* サイド起点の星キラキラ(中央を避ける) */
+  function spawnStarsSide(n,side){ var chars=['✦','✧','⋆'];
+    var ox=side*30;
+    for(var i=0;i<n;i++){ (function(i){ setTimeout(function(){ var s=document.createElement('span'); s.className='starspk'; s.textContent=chars[i%chars.length];
+      s.style.fontSize=(13+Math.random()*18)+'px'; s.style.transform='translate(calc(-50% + '+ox+'vw),-50%)'; inner.appendChild(s);
+      var ang=Math.random()*Math.PI*2, dist=60+Math.random()*160;
+      try{ s.animate([{transform:'translate(calc(-50% + '+ox+'vw),-50%) scale(.3) rotate(0)',opacity:0},{transform:'translate(calc(-50% + '+ox+'vw + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(1.1) rotate(120deg)',opacity:1},{transform:'translate(calc(-50% + '+ox+'vw + '+Math.cos(ang)*dist*1.3+'px),calc(-50% + '+Math.sin(ang)*dist*1.3+'px)) scale(.4) rotate(220deg)',opacity:0}],{duration:1100+Math.random()*500,easing:'cubic-bezier(.2,.7,.3,1)'});}catch(e){}
+      setTimeout(function(){s.remove();},1750); }, i*40); })(i); } }
+  /* r11: 結果確定後もサイドで演出を継続(最低3〜4秒)。中央の金額には重ねない。 */
+  function celebrate(colorKey,dur){
+    var volleys=[0,300,560,900,1250,1650,2050,2500,2950,3350];
+    volleys.forEach(function(t,i){ if(t>dur) return; var side=(i%2===0)?-1:1; var el=side<0?boltL:boltR;
+      at(t,function(){ drawSideBolt(el,colorKey); crackle(0,.55+(LEVEL[colorKey]||0)*0.14); spawnSideSparks(colorKey,6,side); }); });
+    var stars=[200,700,1300,1900,2500,3100];
+    stars.forEach(function(t,i){ if(t>dur) return; at(t,function(){ spawnStarsSide(4,(i%2===0)?-1:1); }); });
+  }
+
   /* バシャーン(1段) = 走る稲妻 → 着弾で閃光+色フィル+シェイク */
   function bashaanCut(colorKey,big){
     var isR = colorKey==='rainbow';
@@ -378,13 +450,16 @@
   function showStage(bd,amt,win,sb,small){ badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
     winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
   function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; }
-  function reveal(theme,amt,bd,sb,small,cols,coin,big){
-    // 抽選演出フェーズ → 結果表示フェーズへ。雷・粒子・閃光を消し、暗幕の上に金額を最前面で出す。
+  function reveal(theme,amt,bd,sb,small,cols,coin,big,rankKey){
+    // r11: 読みやすさのために演出を消さない/画面を暗くしない。
+    //   中央の“主稲妻”だけ止めて金額の中央には重ねず、サイドで演出を継続(celebrate)。
+    //   金額ステージは全演出より前面(z-index)+局所暗がり+アウトラインで常に読める。
     ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
     bolt.style.opacity=0; bolt.setAttribute('class','bolt'); cutWhite.className='cut-white';
     Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();});
     showStage(bd,amt,WINNER,sb,small); impact(0,big);
-    confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?150:110, coin); }
+    confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?150:110, coin);
+    if(rankKey) celebrate(rankKey, 3800); }
 
   var BEATS=[500,1350,2200,3050], SIL_MARK=3450, SIL=5500, STEP=1050;
 
@@ -411,7 +486,7 @@
     colors.forEach(function(c,i){ var last=i===colors.length-1; at(SIL+i*STEP,function(){ bashaanCut(c,last); }); });
     var rev=SIL+(colors.length-1)*STEP+780;
     at(rev-170,function(){ blackout(); });
-    at(rev,function(){ reveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold'); vibe(theme==='gold'?[0,90,40,90]:[0,50]); });
+    at(rev,function(){ reveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold',theme); vibe(theme==='gold'?[0,90,40,90]:[0,50]); });
   }
   function seq10000(){ startHeart();
     ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*STEP,function(){ bashaanCut(c,false); }); });
@@ -419,7 +494,7 @@
     var fifth=hold+900;
     at(fifth,function(){ promptLine.style.display='none'; bashaanCut('rainbow',true); });
     at(fifth+920-170,function(){ blackout(); });
-    at(fifth+920,function(){ reveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
+    at(fifth+920,function(){ reveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true,'rainbow'); }); }
 
   /* ===== ホテル(r6構成維持): 虹→プシュン→暗転→金の点→扉→開放→★星型キラーン→JACKPOT ===== */
   function seqHotel(){ startHeart();
@@ -444,11 +519,11 @@
     var burst=doorOpen+2500;
     at(burst,function(){ goldBlessing(); at(160,function(){ chime(); }); vibe([0,240,80,180]); });
     at(burst+1000,function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
-      // 結果表示フェーズ: 星型フレア・光線・粒子を消し、暗幕の上に賞名を最前面で読ませる。
+      // r11: 中央の大フレア/光線/主稲妻だけ止め賞名を最前面に。演出はサイドで3.8秒継続(消さない/暗くしない)。
       bolt.style.opacity=0; starFlare.className='star-flare'; rays.className='rays';
       Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();});
       showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉', true);
-      confettiBurst(THEME_COLS.hotel,45,true); fanfare(.1); }); }
+      confettiBurst(THEME_COLS.hotel,45,true); fanfare(.1); celebrate('gold',3800); }); }
 
   function goldPoint(xvw,yvh){ var s=document.createElement('span'); s.className='spark'; s.style.background='#ffe9a8'; s.style.boxShadow='0 0 16px #ffcf5c'; s.style.width='9px'; s.style.height='9px';
     s.style.transform='translate(calc(-50% + '+xvw+'vw),calc(-50% + '+yvh+'vh)) scale(0)'; inner.appendChild(s);
@@ -469,6 +544,7 @@
       setTimeout(function(){s.remove();},1900); }, i*35); })(i); } }
 
   function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; promptLine.style.display=''; confetti.innerHTML=''; doors.className='door-wrap'; rays.className='rays'; starFlare.className='star-flare';
+    boltL.setAttribute('class','bolt-side'); boltL.style.opacity=0; boltR.setAttribute('class','bolt-side'); boltR.style.opacity=0;
     Array.prototype.forEach.call(document.querySelectorAll('.spark,.starspk'),function(s){s.remove();}); vibeStop(); }
   var lastKey=null;
   document.getElementById('close').addEventListener('click', closeOverlay);
