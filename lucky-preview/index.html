@@ -3,22 +3,22 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0b1220">
+<meta name="theme-color" content="#05070d">
 <title>ラッキー賞 演出プレビュー</title>
 <style>
-  :root{ --bg:#0b1220; --card:#141c2e; --line:#26324a; --fg:#eaf0fb; --mut:#9fb0cc; }
+  :root{ --bg:#0b1220; --card:#141c2e; --line:#26324a; --fg:#eaf0fb; --mut:#9fb0cc; --rankc:#ffffff; }
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
   html,body{ margin:0; padding:0; background:var(--bg); color:var(--fg);
     font-family:-apple-system,BlinkMacSystemFont,"Hiragino Kaku Gothic ProN","Yu Gothic",sans-serif; }
   .wrap{ max-width:520px; margin:0 auto; padding:20px 16px 48px; }
   .top{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }
   .top h1{ font-size:20px; margin:0; }
-  .lead{ color:var(--mut); font-size:13px; line-height:1.7; margin:8px 0 18px; }
+  .lead{ color:var(--mut); font-size:13px; line-height:1.7; margin:8px 0 16px; }
   .soundbar{ display:flex; align-items:center; justify-content:space-between; gap:10px;
-    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:18px; }
-  .soundbar .lbl{ font-size:13px; color:var(--mut); }
+    background:var(--card); border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-bottom:16px; }
+  .soundbar .lbl{ font-size:12px; color:var(--mut); line-height:1.5; }
   .toggle{ appearance:none; border:1px solid var(--line); background:#0e1626; color:var(--fg);
-    font-size:14px; font-weight:700; border-radius:999px; padding:8px 18px; }
+    font-size:14px; font-weight:700; border-radius:999px; padding:8px 18px; flex:0 0 auto; }
   .toggle[data-on="1"]{ background:#173a2a; border-color:#2b7a52; color:#7ff0b6; }
   .sec{ font-size:12px; color:var(--mut); letter-spacing:.08em; margin:18px 2px 8px; }
   .grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
@@ -33,51 +33,66 @@
   .pbtn.c10{ border-image:linear-gradient(90deg,#ff3b30,#ffcc00,#34c759,#0a84ff,#5e5ce6) 1; }
   .pbtn.hotel{ border-color:#caa34a; background:linear-gradient(160deg,#161a24,#221a10); }
   .pbtn .amt{ font-size:19px; }
-  .foot{ color:var(--mut); font-size:12px; line-height:1.7; margin-top:22px;
-    border-top:1px solid var(--line); padding-top:14px; }
+  .foot{ color:var(--mut); font-size:12px; line-height:1.7; margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
 
   /* ===== 演出オーバーレイ ===== */
   .lucky-overlay{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center;
     justify-content:center; text-align:center; z-index:9999; overflow:hidden; color:#fff;
-    background:#05070d; transition:background .45s ease; -webkit-user-select:none; user-select:none; }
+    background:#05070d; transition:background .4s ease; -webkit-user-select:none; user-select:none; }
   .lucky-overlay.show{ display:flex; }
   .lucky-inner{ position:relative; z-index:3; display:flex; flex-direction:column; align-items:center;
     justify-content:center; width:100%; height:100%; }
-  .lucky-overlay.shake .lucky-inner{ animation:luckyShake .5s ease; }
+  .lucky-overlay.shake .lucky-inner{ animation:luckyShake .46s ease; }
 
-  /* orb（結果が隠されているもの） */
-  .lucky-orb{ width:120px; height:120px; border-radius:50%; position:relative;
-    background:radial-gradient(circle at 38% 34%, #cfe0ff, #6f8bbf 55%, #33436b);
-    box-shadow:0 0 42px 10px rgba(120,150,220,.55); animation:luckyOrbPulse 1.1s ease-in-out infinite;
-    transition:box-shadow .16s ease, background .16s ease; }
-  .lucky-orb::after{ content:""; position:absolute; inset:-14px; border-radius:50%;
-    border:2px solid rgba(255,255,255,.16); animation:luckyRing 1.6s linear infinite; }
-  .lucky-overlay[data-rank=blue]  .lucky-orb{ background:radial-gradient(circle at 38% 34%,#dcebff,#2f6bd6 60%,#123a86); box-shadow:0 0 60px 16px rgba(47,107,214,.75);}
-  .lucky-overlay[data-rank=gold]  .lucky-orb{ background:radial-gradient(circle at 38% 34%,#fff2c8,#e0a021 60%,#8a5e10); box-shadow:0 0 62px 18px rgba(224,160,33,.8);}
-  .lucky-overlay[data-rank=green] .lucky-orb{ background:radial-gradient(circle at 38% 34%,#d3ffe9,#0fae6e 60%,#0a6b45); box-shadow:0 0 62px 18px rgba(15,174,110,.8);}
-  .lucky-overlay[data-rank=red]   .lucky-orb{ background:radial-gradient(circle at 38% 34%,#ffd6d1,#e0392f 60%,#8a1811); box-shadow:0 0 72px 22px rgba(224,57,47,.9);}
-  .lucky-overlay.reveal .lucky-orb{ display:none; }
+  /* 心拍のビネット */
+  .pulse-vig{ position:absolute; inset:0; z-index:1; pointer-events:none; opacity:0;
+    background:radial-gradient(circle at 50% 46%, rgba(190,60,60,.28), transparent 60%); }
 
-  .lucky-prompt{ margin-top:26px; font-size:16px; font-weight:700; color:#dbe6ff; letter-spacing:.04em;
-    opacity:0; animation:luckyFadeIn .5s ease forwards; text-shadow:0 1px 10px rgba(0,0,0,.5); }
-  .lucky-overlay.reveal .lucky-prompt{ display:none; }
-  .lucky-dots{ margin-top:14px; font-size:30px; font-weight:900; letter-spacing:.24em; color:#fff;
-    display:none; animation:luckyDots 1s ease-in-out infinite; }
-  .lucky-overlay.suspense .lucky-dots{ display:block; }
-  .lucky-overlay.reveal .lucky-dots{ display:none; }
+  /* 心拍コア（結果が隠れているもの） */
+  .lucky-orb{ width:110px; height:110px; border-radius:50%; position:relative;
+    background:radial-gradient(circle at 40% 36%, #d7e2f5, #7f93ba 55%, #3a4a6e);
+    box-shadow:0 0 40px 8px rgba(150,170,210,.4); transition:opacity .6s ease, transform .6s ease, filter .6s ease; }
+  .lucky-orb::after{ content:""; position:absolute; inset:-12px; border-radius:50%;
+    border:2px solid rgba(255,255,255,.14); }
+  .lucky-overlay.silence .lucky-orb{ opacity:.2; transform:scale(.62); filter:blur(1px); }
+  .lucky-overlay.reveal .lucky-orb, .lucky-overlay.cutting .lucky-orb{ opacity:0; }
+
+  .lucky-prompt{ margin-top:28px; font-size:16px; font-weight:700; color:#cdd8ef; letter-spacing:.05em;
+    text-shadow:0 1px 10px rgba(0,0,0,.6); transition:opacity .6s ease; }
+  .lucky-overlay.silence .lucky-prompt{ opacity:.35; }
+  .lucky-overlay.reveal .lucky-prompt, .lucky-overlay.cutting .lucky-prompt{ opacity:0; }
+
+  /* カットイン */
+  .cutin-fill{ position:absolute; inset:0; z-index:7; opacity:0; pointer-events:none; background:var(--rankc); }
+  .cutin-fill.rainbow{ background:conic-gradient(#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55,#ff3b30); }
+  .cutin-fill.special{ background:radial-gradient(circle at 50% 45%, #ffe9a8, #a5761a 45%, #120d04 78%); }
+  .cutin-fill.flash{ animation:cutFlash .34s ease; }
+  .cutin-slash{ position:absolute; top:50%; left:-140%; width:150%; height:20vh; z-index:8; opacity:0;
+    transform:translateY(-50%) rotate(-19deg); pointer-events:none; mix-blend-mode:screen; filter:blur(1.5px);
+    background:linear-gradient(90deg, transparent, rgba(255,255,255,.2) 30%, #fff 48%, #fff 54%, rgba(255,255,255,.2) 70%, transparent);
+    box-shadow:0 0 40px 10px var(--rankc); }
+  .cutin-slash.go{ animation:cutSlash var(--cutdur,.22s) linear; }
+  .cutin-slash.big{ height:26vh; }
+  @keyframes cutSlash{ 0%{ left:-140%; opacity:0;} 12%{ opacity:1;} 60%{ opacity:1;} 100%{ left:140%; opacity:0;} }
+  @keyframes cutFlash{ 0%{ opacity:0;} 8%{ opacity:.92;} 100%{ opacity:0;} }
+  .spark{ position:absolute; top:50%; left:50%; width:9px; height:9px; border-radius:50%; z-index:8; pointer-events:none;
+    background:var(--rankc); box-shadow:0 0 10px var(--rankc); }
+
+  /* 金の拡散（ホテル用） */
+  .gold-spread{ position:absolute; top:50%; left:50%; width:20px; height:20px; border-radius:50%;
+    transform:translate(-50%,-50%) scale(0); z-index:2; opacity:0;
+    background:radial-gradient(circle,#fff4cf,#e6b53a 45%,#7a5410 72%); }
+  .gold-spread.on{ animation:goldSpread 1.5s cubic-bezier(.15,.7,.3,1) forwards; }
 
   /* リザルト */
   .lucky-stage{ display:none; position:relative; z-index:4; padding:0 18px; }
   .lucky-overlay.reveal .lucky-stage{ display:block; animation:luckyPop .5s cubic-bezier(.2,1.3,.4,1) both; }
-  .lucky-badge{ font-size:26px; font-weight:900; letter-spacing:.16em; margin-bottom:6px;
-    text-shadow:0 2px 18px rgba(0,0,0,.45); }
-  .lucky-amount{ font-size:60px; font-weight:900; line-height:1.05; margin:2px 0 6px;
-    text-shadow:0 3px 22px rgba(0,0,0,.5); }
-  .lucky-amount.small{ font-size:38px; }
+  .lucky-badge{ font-size:26px; font-weight:900; letter-spacing:.16em; margin-bottom:6px; text-shadow:0 2px 18px rgba(0,0,0,.5); }
+  .lucky-amount{ font-size:60px; font-weight:900; line-height:1.05; margin:2px 0 6px; text-shadow:0 3px 22px rgba(0,0,0,.55); }
+  .lucky-amount.small{ font-size:36px; }
   .lucky-winner{ font-size:19px; font-weight:800; margin-top:2px; }
   .lucky-sub{ font-size:13px; color:rgba(255,255,255,.85); margin-top:12px; }
 
-  /* テーマ別リザルト背景 */
   .lucky-overlay.reveal.theme-blue{ background:radial-gradient(circle at 50% 38%,#3f78e0,#0a1c40 72%); }
   .lucky-overlay.reveal.theme-gold{ background:radial-gradient(circle at 50% 38%,#e6b53a,#4a300a 72%); }
   .lucky-overlay.reveal.theme-green{ background:radial-gradient(circle at 50% 38%,#17b877,#063a26 72%); }
@@ -87,92 +102,55 @@
     -webkit-background-clip:text; background-clip:text; color:transparent; background-size:220% auto; animation:luckyRainbowText 2.4s linear infinite; }
   .lucky-overlay.reveal.theme-hotel{ background:radial-gradient(circle at 50% 42%,#2a2110,#05070d 72%); }
   .lucky-overlay.reveal.theme-hotel .lucky-amount{ color:#ffe9a8; }
-  .lucky-overlay.reveal.theme-miss{ background:radial-gradient(circle at 50% 40%,#2b3566,#0a0f22 74%); }
-  .lucky-overlay.reveal.theme-miss .lucky-amount{ font-size:32px; }
+  .lucky-overlay.reveal.theme-miss{ background:radial-gradient(circle at 50% 42%,#212a4a,#080c18 76%); }
+  .lucky-overlay.reveal.theme-miss .lucky-amount{ font-size:32px; color:#cdd6ee; }
 
-  /* 稲妻・閃光・レインボー・扉 */
   .lucky-flash{ position:absolute; inset:0; background:#fff; opacity:0; z-index:6; pointer-events:none; }
   .lucky-flash.on{ animation:luckyFlash .5s ease; }
-  .lucky-bolt{ position:absolute; top:50%; left:50%; width:120px; height:260px; transform:translate(-50%,-58%);
-    background:linear-gradient(#fff,#ffd7d2 40%,#ff5a4c); opacity:0; z-index:5;
-    clip-path:polygon(52% 0,20% 46%,46% 46%,14% 100%,86% 40%,56% 40%,84% 0); filter:drop-shadow(0 0 18px #ff5a4c); }
-  .lucky-bolt.on{ animation:luckyBolt .5s ease; }
-  .lucky-rainbow{ position:absolute; top:50%; left:50%; width:20px; height:20px; border-radius:50%;
-    transform:translate(-50%,-50%) scale(0); z-index:1; opacity:0;
-    background:conic-gradient(#ff3b30,#ff9500,#ffcc00,#34c759,#0a84ff,#5e5ce6,#ff2d55,#ff3b30); }
-  .lucky-rainbow.on{ animation:luckyRainbowBurst 1.3s cubic-bezier(.15,.7,.3,1) forwards; }
-  .lucky-rainbow.gold{ background:radial-gradient(circle,#fff4cf,#e6b53a 45%,#7a5410 72%); }
-  .lucky-rainbow.gold.on{ animation:luckyGoldBurst 1.5s cubic-bezier(.15,.7,.3,1) forwards; }
-  .lucky-doors{ position:absolute; inset:0; z-index:5; display:none; }
-  .lucky-overlay.doors .lucky-doors{ display:block; }
-  .door{ position:absolute; top:0; bottom:0; width:50%; background:linear-gradient(180deg,#1a1408,#000);
-    box-shadow:inset 0 0 40px rgba(0,0,0,.8); transition:transform 1.1s cubic-bezier(.5,0,.2,1); }
-  .door.l{ left:0; border-right:2px solid #caa34a; transform:translateX(0); }
-  .door.r{ right:0; border-left:2px solid #caa34a; transform:translateX(0); }
-  .lucky-doors.open .door.l{ transform:translateX(-100%); }
-  .lucky-doors.open .door.r{ transform:translateX(100%); }
-  .door::before{ content:""; position:absolute; top:0; bottom:0; width:2px; background:linear-gradient(#caa34a,transparent); opacity:.7; }
-  .door.l::before{ right:0; } .door.r::before{ left:0; }
-
-  /* 紙吹雪・コイン */
   .lucky-confetti{ position:absolute; inset:0; z-index:5; pointer-events:none; overflow:hidden; }
-  .lucky-piece{ position:absolute; top:-24px; width:10px; height:16px; border-radius:2px; opacity:.95;
-    animation:luckyFall linear forwards; }
-  .lucky-coin{ border-radius:50%; width:16px; height:16px;
-    background:radial-gradient(circle at 35% 32%,#fff6d0,#e0a021 60%,#8a5e10); box-shadow:0 0 6px rgba(224,160,33,.6); }
+  .lucky-piece{ position:absolute; top:-24px; width:10px; height:16px; border-radius:2px; opacity:.95; animation:luckyFall linear forwards; }
+  .lucky-coin{ border-radius:50%; width:16px; height:16px; background:radial-gradient(circle at 35% 32%,#fff6d0,#e0a021 60%,#8a5e10); box-shadow:0 0 6px rgba(224,160,33,.6); }
 
-  /* ボタン */
-  .lucky-actions{ position:absolute; left:0; right:0; bottom:34px; z-index:7; display:flex; gap:12px; justify-content:center; }
+  .lucky-actions{ position:absolute; left:0; right:0; bottom:34px; z-index:9; display:flex; gap:12px; justify-content:center; }
   .lucky-btn{ appearance:none; border:1px solid rgba(255,255,255,.5); background:rgba(255,255,255,.12);
     color:#fff; font-size:15px; font-weight:800; border-radius:999px; padding:12px 26px; backdrop-filter:blur(4px); }
   .lucky-btn.primary{ background:rgba(255,255,255,.92); color:#111; border-color:#fff; }
 
-  @keyframes luckyOrbPulse{ 0%,100%{ transform:scale(1);} 50%{ transform:scale(1.08);} }
-  @keyframes luckyRing{ to{ transform:rotate(360deg);} }
-  @keyframes luckyFadeIn{ from{ opacity:0; transform:translateY(6px);} to{ opacity:1; transform:none;} }
-  @keyframes luckyDots{ 0%,100%{ opacity:.35;} 50%{ opacity:1;} }
-  @keyframes luckyPop{ 0%{ transform:scale(.5); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
-  @keyframes luckyShake{ 0%,100%{ transform:translate(0,0);} 15%{ transform:translate(-9px,4px);}
-    30%{ transform:translate(8px,-5px);} 45%{ transform:translate(-7px,-3px);} 60%{ transform:translate(6px,5px);}
-    75%{ transform:translate(-4px,2px);} }
-  @keyframes luckyFlash{ 0%{ opacity:0;} 12%{ opacity:.95;} 100%{ opacity:0;} }
-  @keyframes luckyBolt{ 0%{ opacity:0; transform:translate(-50%,-58%) scaleY(.4);} 18%{ opacity:1; transform:translate(-50%,-58%) scaleY(1.05);}
-    40%{ opacity:.6;} 60%{ opacity:1;} 100%{ opacity:0;} }
-  @keyframes luckyRainbowBurst{ 0%{ transform:translate(-50%,-50%) scale(0); opacity:0;}
-    12%{ opacity:1;} 100%{ transform:translate(-50%,-50%) scale(60); opacity:.92;} }
-  @keyframes luckyGoldBurst{ 0%{ transform:translate(-50%,-50%) scale(0); opacity:0;}
-    12%{ opacity:1;} 55%{ opacity:.95;} 100%{ transform:translate(-50%,-50%) scale(60); opacity:0;} }
+  @keyframes luckyPop{ 0%{ transform:scale(.55); opacity:0;} 100%{ transform:scale(1); opacity:1;} }
+  @keyframes luckyShake{ 0%,100%{ transform:translate(0,0);} 15%{ transform:translate(-10px,4px);}
+    30%{ transform:translate(9px,-5px);} 45%{ transform:translate(-8px,-3px);} 60%{ transform:translate(6px,5px);} 75%{ transform:translate(-4px,2px);} }
+  @keyframes luckyFlash{ 0%{ opacity:0;} 12%{ opacity:.9;} 100%{ opacity:0;} }
   @keyframes luckyRainbowText{ to{ background-position:220% center; } }
-  @keyframes luckyFall{ 0%{ transform:translateY(0) rotate(0); } 100%{ transform:translateY(112vh) rotate(540deg); } }
-  @media (prefers-reduced-motion:reduce){ .lucky-orb,.lucky-piece{ animation-duration:.001s; } }
+  @keyframes goldSpread{ 0%{ transform:translate(-50%,-50%) scale(0); opacity:0;} 12%{ opacity:1;} 55%{ opacity:.95;} 100%{ transform:translate(-50%,-50%) scale(60); opacity:0;} }
+  @keyframes luckyFall{ 0%{ transform:translateY(0) rotate(0);} 100%{ transform:translateY(112vh) rotate(540deg);} }
+  @media (prefers-reduced-motion:reduce){ .lucky-piece{ animation-duration:.001s; } }
 </style>
 </head>
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <p class="lead">本番と同じ演出を再生します。<b>抽選結果・当選履歴・年間予算・支給履歴には一切記録しません</b>（プレビュー専用）。<br>
-  ボタンを押すと全画面で演出が流れます。「閉じる」で戻り、次を試せます。金額が上がるほどタメと豪華さが増します。</p>
+  <p class="lead">演出の中心は「抽選中の緊張感」です。<b>心拍（ドクン…）→ 2〜3秒の静寂 → シャキーン！のカットイン</b>で結果が出ます。<b>カットインの枚数＝賞のランク</b>。紙吹雪は当選確定後の祝福だけに使います。<br><b>抽選結果・履歴・予算・支給には一切記録しません</b>（プレビュー専用）。</p>
 
   <div class="soundbar">
-    <span class="lbl">🔊 音・振動（スマホをマナーモード解除で音が出ます）</span>
+    <span class="lbl">🔊 音・振動<br>重低音を体感するにはマナーモード解除＋音量を上げてください</span>
     <button class="toggle" id="soundToggle" data-on="1">ON</button>
   </div>
 
-  <div class="sec">ハズレ（3パターン・毎回同じではない）</div>
+  <div class="sec">ハズレ（カットインなし・力が抜ける「スン…」・3パターン）</div>
   <div class="grid">
-    <button class="pbtn miss" data-key="missA"><span>ハズレ A</span><span class="sub">青まで上がって外す</span></button>
-    <button class="pbtn miss" data-key="missB"><span>ハズレ B</span><span class="sub">金まで期待させて外す</span></button>
+    <button class="pbtn miss" data-key="missA"><span>ハズレ A</span><span class="sub">青の兆しで止まる</span></button>
+    <button class="pbtn miss" data-key="missB"><span>ハズレ B</span><span class="sub">金まで行って外す</span></button>
     <button class="pbtn miss" data-key="missC" style="grid-column:span 2"><span>ハズレ C</span><span class="sub">強く光ってから直前で外す</span></button>
   </div>
 
-  <div class="sec">当選（金額別）</div>
+  <div class="sec">当選（カットイン枚数＝ランク／青→緑→赤→金→虹→黒金）</div>
   <div class="grid">
-    <button class="pbtn c1"  data-key="w1000"><span class="amt">1,000円</span><span class="sub">青 / 通常</span></button>
-    <button class="pbtn c2"  data-key="w2000"><span class="amt">2,000円</span><span class="sub">金・コイン</span></button>
-    <button class="pbtn c3"  data-key="w3000"><span class="amt">3,000円</span><span class="sub">緑・集束</span></button>
-    <button class="pbtn c5"  data-key="w5000"><span class="amt">5,000円</span><span class="sub">赤・稲妻・振動</span></button>
-    <button class="pbtn c10" data-key="w10000" style="grid-column:span 2"><span class="amt">10,000円</span><span class="sub">レインボー・完全なタメ</span></button>
-    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">黒×金・扉・JACKPOT（別格）</span></button>
+    <button class="pbtn c1"  data-key="w1000"><span class="amt">1,000円</span><span class="sub">×1（青）</span></button>
+    <button class="pbtn c2"  data-key="w2000"><span class="amt">2,000円</span><span class="sub">×2（青→緑）</span></button>
+    <button class="pbtn c3"  data-key="w3000"><span class="amt">3,000円</span><span class="sub">×3（青→緑→赤）</span></button>
+    <button class="pbtn c5"  data-key="w5000"><span class="amt">5,000円</span><span class="sub">×4（青→緑→赤→金・強）</span></button>
+    <button class="pbtn c10" data-key="w10000" style="grid-column:span 2"><span class="amt">10,000円</span><span class="sub">×5（4枚で一瞬止め→レインボー「ザーン！」）</span></button>
+    <button class="pbtn hotel" data-key="hotel" style="grid-column:span 2"><span class="amt">🏨 高級ホテル宿泊券</span><span class="sub">×5で1万かと思わせ→プシュン→暗転→静寂→金の粒子→黒×金SPECIAL復活</span></button>
   </div>
 
   <p class="foot">このページはプレビュー専用の単独ページです。ログイン不要・DB非接続。<br>
@@ -180,12 +158,11 @@
 </div>
 
 <div class="lucky-overlay" id="ov" aria-hidden="true">
-  <div class="lucky-rainbow" id="rainbow"></div>
-  <div class="lucky-doors" id="doors"><div class="door l"></div><div class="door r"></div></div>
+  <div class="pulse-vig" id="pulse"></div>
+  <div class="gold-spread" id="gold"></div>
   <div class="lucky-inner" id="inner">
     <div class="lucky-orb" id="orb"></div>
     <div class="lucky-prompt" id="prompt">今日のラッキーは誰だ…？</div>
-    <div class="lucky-dots">・・・</div>
     <div class="lucky-stage" id="stage">
       <div class="lucky-badge" id="badge">LUCKY!</div>
       <div class="lucky-amount" id="amount">1,000円</div>
@@ -193,7 +170,8 @@
       <div class="lucky-sub" id="sub">演出プレビュー</div>
     </div>
   </div>
-  <div class="lucky-bolt" id="bolt"></div>
+  <div class="cutin-fill" id="fill"></div>
+  <div class="cutin-slash" id="slash"></div>
   <div class="lucky-flash" id="flash"></div>
   <div class="lucky-confetti" id="confetti"></div>
   <div class="lucky-actions">
@@ -205,163 +183,235 @@
 <script>
 (function(){
   "use strict";
-  var ov=document.getElementById('ov'), orb=document.getElementById('orb'), prompt=document.getElementById('prompt'),
-      badge=document.getElementById('badge'), amount=document.getElementById('amount'),
-      winner=document.getElementById('winner'), sub=document.getElementById('sub'),
-      confetti=document.getElementById('confetti'), flash=document.getElementById('flash'),
-      bolt=document.getElementById('bolt'), rainbow=document.getElementById('rainbow'), doors=document.getElementById('doors');
+  var ov=document.getElementById('ov'), inner=document.getElementById('inner'), orb=document.getElementById('orb'),
+      prompt=document.getElementById('prompt'), badge=document.getElementById('badge'), amount=document.getElementById('amount'),
+      winner=document.getElementById('winner'), sub=document.getElementById('sub'), confetti=document.getElementById('confetti'),
+      flash=document.getElementById('flash'), fill=document.getElementById('fill'), slash=document.getElementById('slash'),
+      pulse=document.getElementById('pulse'), gold=document.getElementById('gold');
   var WINNER='テスト 太郎';
-
-  /* ---- 音・振動 ---- */
-  var actx=null;
-  function soundOn(){ try{ return localStorage.getItem('lucky_sound')!=='off'; }catch(e){ return true; } }
-  function ac(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
-    if(actx&&actx.state==='suspended'){ try{ actx.resume(); }catch(e){} } return actx; }
-  function tone(freq, when, dur, type, gain){
-    var c=ac(); if(!c||!soundOn()) return;
-    var t0=c.currentTime+when, o=c.createOscillator(), g=c.createGain();
-    o.type=type||'sine'; o.frequency.setValueAtTime(freq,t0);
-    g.gain.setValueAtTime(0.0001,t0);
-    g.gain.exponentialRampToValueAtTime(gain||0.12,t0+0.012);
-    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
-    o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0+dur+0.02);
-  }
-  function sweep(f1,f2,when,dur,gain){
-    var c=ac(); if(!c||!soundOn()) return;
-    var t0=c.currentTime+when, o=c.createOscillator(), g=c.createGain();
-    o.type='sawtooth'; o.frequency.setValueAtTime(f1,t0); o.frequency.exponentialRampToValueAtTime(f2,t0+dur);
-    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(gain||0.06,t0+0.04);
-    g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
-    o.connect(g); g.connect(c.destination); o.start(t0); o.stop(t0+dur+0.02);
-  }
-  function tick(){ tone(760+Math.random()*260,0,0.05,'triangle',0.05); }
-  function chordWin(base,when,rich){ var arr=rich?[0,4,7,12,16,19]:[0,4,7,12];
-    arr.forEach(function(s,i){ tone(base*Math.pow(2,s/12),when+i*0.06,0.5,'sine',0.08); }); }
-  function fanfare(when){ [0,2,4,7].forEach(function(s,i){ tone(523*Math.pow(2,s/12),when+i*0.09,0.4,'square',0.06); }); }
-  function missSfx(when){ tone(392,when,0.22,'sine',0.08); tone(311,when+0.18,0.4,'sine',0.07); }
-  function vibe(p){ try{ if(soundOn() && navigator.vibrate) navigator.vibrate(p); }catch(e){} }
-
-  /* ---- シーケンサ ---- */
-  var timers=[], flickerIv=null;
-  function clearSeq(){ timers.forEach(clearTimeout); timers=[]; if(flickerIv){ clearInterval(flickerIv); flickerIv=null; } }
-  function at(t,fn){ timers.push(setTimeout(fn,t)); }
-  function resetOverlay(){
-    clearSeq();
-    ov.className='lucky-overlay show'; ov.removeAttribute('data-rank'); ov.style.background='';
-    orb.style.display=''; prompt.style.display=''; prompt.style.opacity=''; prompt.textContent='今日のラッキーは誰だ…？';
-    confetti.innerHTML=''; doors.className='lucky-doors';
-    flash.className='lucky-flash'; bolt.className='lucky-bolt'; rainbow.className='lucky-rainbow';
-    amount.className='lucky-amount';
-  }
-  function setRank(r){ ov.setAttribute('data-rank',r); }
-  function startFlicker(speed){ var cols=['blue','gold','green','red'], i=Math.floor(Math.random()*4);
-    setRank(cols[i]); flickerIv=setInterval(function(){ i=(i+1)%4; setRank(cols[i]); tick(); }, speed||130); }
-  function stopFlicker(){ if(flickerIv){ clearInterval(flickerIv); flickerIv=null; } }
-  function suspense(){ ov.classList.add('suspense'); tone(180,0,0.5,'sine',0.05); }
-  function doFlash(){ flash.className='lucky-flash on'; }
-  function doBolt(){ bolt.className='lucky-bolt on'; doFlash(); }
-  function reveal(theme){ ov.classList.remove('suspense'); ov.classList.add('reveal','theme-'+theme); }
-  function showStage(bd,amt,win,sb,small){
-    badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
-    winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
-  function confettiBurst(cols,count,coin){
-    for(var k=0;k<count;k++){
-      var p=document.createElement('span'); p.className='lucky-piece'+(coin&&Math.random()<0.5?' lucky-coin':'');
-      if(!p.classList.contains('lucky-coin')) p.style.background=cols[k%cols.length];
-      p.style.left=Math.random()*100+'%';
-      p.style.animationDuration=(2.4+Math.random()*1.8)+'s'; p.style.animationDelay=(Math.random()*0.5)+'s';
-      p.style.width=(7+Math.random()*8)+'px'; if(!p.classList.contains('lucky-coin')) p.style.height=(10+Math.random()*12)+'px';
-      confetti.appendChild(p);
-    }
-  }
-  var THEME_COLS={
-    blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
+  var RANK={ blue:'#2f6bd6', gold:'#e0a021', green:'#0fae6e', red:'#e0392f', rainbow:'#ffffff', special:'#e6b53a' };
+  var THEME_COLS={ blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
     green:['#b8f5da','#0fae6e','#ffffff','#5be0a8'], red:['#ffc2bd','#e0392f','#ffffff','#ff7a6e'],
     rainbow:['#ff3b30','#ff9500','#ffcc00','#34c759','#0a84ff','#5e5ce6','#ff2d55'],
-    hotel:['#ffe9a8','#e0a021','#fff4cf','#c9962e','#ffffff'], miss:['#6d7ba0'] };
+    hotel:['#ffe9a8','#e0a021','#fff4cf','#c9962e','#ffffff'] };
 
-  /* ---- 各シナリオ ---- */
-  function play(key){
-    resetOverlay(); ac(); sweep(220,520,0.05,1.3,0.05);
+  /* ================= 音（重低音・間・緊張） ================= */
+  var actx=null, master=null, noiseBuf=null;
+  function soundOn(){ try{ return localStorage.getItem('lucky_sound')!=='off'; }catch(e){ return true; } }
+  function ac(){ if(!actx){ try{ actx=new (window.AudioContext||window.webkitAudioContext)();
+        master=actx.createGain(); master.gain.value=1.0; master.connect(actx.destination); }catch(e){} }
+    if(actx&&actx.state==='suspended'){ try{ actx.resume(); }catch(e){} } return actx; }
+  function noise(){ var c=ac(); if(!c) return null; if(!noiseBuf){ var n=Math.floor(c.sampleRate*1.0);
+      noiseBuf=c.createBuffer(1,n,c.sampleRate); var d=noiseBuf.getChannelData(0); for(var i=0;i<n;i++) d[i]=Math.random()*2-1; } return noiseBuf; }
+  // ドクン（低く重い心拍：lub-dub）
+  function thump(when,freq,dur,gain){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
+    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter();
+    o.type='sine'; o.frequency.setValueAtTime(freq*1.7,t0); o.frequency.exponentialRampToValueAtTime(freq,t0+0.05);
+    f.type='lowpass'; f.frequency.value=170;
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(gain,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+dur);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+0.03); }
+  function heartbeat(when,intensity){ intensity=intensity||1; thump(when,60,0.17,0.55*intensity); thump(when+0.17,46,0.24,0.36*intensity); }
+  // シャキーン（鋭い金属的スラッシュ）
+  function shakiin(when,intensity){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when; intensity=intensity||1;
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=0.7;
+      bp.frequency.setValueAtTime(6500,t0); bp.frequency.exponentialRampToValueAtTime(1100,t0+0.18);
+      var g=c.createGain(); g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.16*intensity,t0+0.008); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.22);
+      s.connect(bp); bp.connect(g); g.connect(master); s.start(t0); s.stop(t0+0.25); }
+    var o=c.createOscillator(), og=c.createGain(); o.type='triangle';
+    o.frequency.setValueAtTime(2800,t0); o.frequency.exponentialRampToValueAtTime(850,t0+0.2);
+    og.gain.setValueAtTime(0.0001,t0); og.gain.exponentialRampToValueAtTime(0.10*intensity,t0+0.006); og.gain.exponentialRampToValueAtTime(0.0001,t0+0.25);
+    o.connect(og); og.connect(master); o.start(t0); o.stop(t0+0.27); }
+  // ザーン / ズドン（衝撃の重低音）
+  function impact(when,big){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
+    var o=c.createOscillator(), g=c.createGain(); o.type='sine';
+    o.frequency.setValueAtTime(95,t0); o.frequency.exponentialRampToValueAtTime(36,t0+(big?0.6:0.4));
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(big?0.6:0.4,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+(big?1.0:0.65));
+    o.connect(g); g.connect(master); o.start(t0); o.stop(t0+1.1);
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass';
+      lp.frequency.setValueAtTime(2200,t0); lp.frequency.exponentialRampToValueAtTime(260,t0+0.4);
+      var ng=c.createGain(); ng.gain.setValueAtTime(0.0001,t0); ng.gain.exponentialRampToValueAtTime(big?0.3:0.18,t0+0.008); ng.gain.exponentialRampToValueAtTime(0.0001,t0+(big?0.75:0.5));
+      s.connect(lp); lp.connect(ng); ng.connect(master); s.start(t0); s.stop(t0+0.85); } }
+  // スン…（力が抜ける・ハズレ）
+  function sunMiss(when){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
+    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter(); o.type='sine';
+    o.frequency.setValueAtTime(360,t0); o.frequency.exponentialRampToValueAtTime(110,t0+0.55);
+    f.type='lowpass'; f.frequency.value=800;
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.11,t0+0.04); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.6);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.66); }
+  // プシュン…（電源が落ちるように演出が消える）
+  function pushun(when){ var c=ac(); if(!c||!soundOn()) return; var t0=c.currentTime+when;
+    var o=c.createOscillator(), g=c.createGain(), f=c.createBiquadFilter(); o.type='sawtooth';
+    o.frequency.setValueAtTime(620,t0); o.frequency.exponentialRampToValueAtTime(70,t0+0.28);
+    f.type='lowpass'; f.frequency.setValueAtTime(2200,t0); f.frequency.exponentialRampToValueAtTime(300,t0+0.3);
+    g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.13,t0+0.02); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.34);
+    o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+0.36);
+    var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var lp=c.createBiquadFilter(); lp.type='lowpass';
+      lp.frequency.setValueAtTime(1400,t0); lp.frequency.exponentialRampToValueAtTime(200,t0+0.25);
+      var ng=c.createGain(); ng.gain.setValueAtTime(0.0001,t0); ng.gain.exponentialRampToValueAtTime(0.07,t0+0.01); ng.gain.exponentialRampToValueAtTime(0.0001,t0+0.3);
+      s.connect(lp); lp.connect(ng); ng.connect(master); s.start(t0); s.stop(t0+0.32); } }
+  function vibe(p){ try{ if(soundOn() && navigator.vibrate) navigator.vibrate(p); }catch(e){} }
+
+  /* ================= シーケンサ ================= */
+  var timers=[];
+  function clearSeq(){ timers.forEach(clearTimeout); timers=[]; }
+  function at(t,fn){ timers.push(setTimeout(fn,t)); }
+  function resetOverlay(){ clearSeq();
+    ov.className='lucky-overlay show'; ov.style.background=''; ov.style.setProperty('--rankc','#ffffff');
+    orb.style.opacity=''; orb.style.transform=''; prompt.style.opacity=''; prompt.style.display='';
+    prompt.textContent='今日のラッキーは誰だ…？'; confetti.innerHTML='';
+    fill.className='cutin-fill'; slash.className='cutin-slash'; flash.className='lucky-flash'; gold.className='gold-spread';
+    amount.className='lucky-amount'; stage.style.display='';
+    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }
+  var stage=document.getElementById('stage');
+
+  function beatVisual(intensity){ intensity=intensity||1;
+    try{ orb.animate([{transform:'scale(1)'},{transform:'scale('+(1.12+0.05*intensity)+')'},{transform:'scale(1)'}],{duration:400,easing:'ease-out'});
+      pulse.animate([{opacity:0},{opacity:0.5*intensity},{opacity:0}],{duration:420,easing:'ease-out'}); }catch(e){} }
+
+  function cutIn(colorKey,big){
+    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    ov.classList.add('cutting');
+    // slash
+    slash.className='cutin-slash'; void slash.offsetWidth;
+    slash.style.setProperty('--cutdur',(big?0.3:0.2)+'s');
+    slash.className='cutin-slash go'+(big?' big':'');
+    // fill flash
+    var fc='cutin-fill'+(colorKey==='rainbow'?' rainbow':colorKey==='special'?' special':'');
+    fill.className=fc; void fill.offsetWidth; fill.className=fc+' flash';
+    shakiin(0, big?1.8:1);
+    if(big){ ov.classList.add('shake'); setTimeout(function(){ov.classList.remove('shake');},460); vibe([0,45]); }
+    spawnSparks(colorKey, big?20:11);
+  }
+  function spawnSparks(colorKey,n){ var col=RANK[colorKey]||'#fff'; if(colorKey==='rainbow') col='#ffd23b';
+    for(var i=0;i<n;i++){ var s=document.createElement('span'); s.className='spark'; s.style.background=col; s.style.boxShadow='0 0 10px '+col;
+      inner.appendChild(s); var ang=Math.random()*Math.PI*2, dist=90+Math.random()*180;
+      try{ s.animate([{transform:'translate(-50%,-50%) scale(1)',opacity:1},
+        {transform:'translate(calc(-50% + '+Math.cos(ang)*dist+'px),calc(-50% + '+Math.sin(ang)*dist+'px)) scale(0)',opacity:0}],
+        {duration:420+Math.random()*260,easing:'cubic-bezier(.2,.7,.3,1)'}); }catch(e){}
+      (function(el){ setTimeout(function(){el.remove();},760); })(s); } }
+
+  // ハズレの淡い兆し（カットインなし・柔らかい発光）
+  function teaseGlow(colorKey,peak){ ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
+    fill.className='cutin-fill'; try{ fill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:560,easing:'ease-in-out'}); }catch(e){}
+    thump(0,58,0.16,0.38); beatVisual(0.6); }
+
+  // ホテル復活：暗闇に金の粒子が1つ→増える→中央へ集まる
+  function goldGather(){ var golds=[];
+    function addOne(delay){ at(delay, function(){ var s=document.createElement('span'); s.className='spark';
+      s.style.background='#ffd98a'; s.style.boxShadow='0 0 12px #ffcf5c'; s.style.width='7px'; s.style.height='7px';
+      var x=(Math.random()*2-1)*46, y=(Math.random()*2-1)*40;
+      s.style.transform='translate(calc(-50% + '+(x)+'vw),calc(-50% + '+(y)+'vh)) scale(0)';
+      inner.appendChild(s); golds.push(s);
+      try{ s.animate([{opacity:0,transform:s.style.transform},
+        {opacity:1,transform:'translate(calc(-50% + '+x+'vw),calc(-50% + '+y+'vh)) scale(1)'}],{duration:360,fill:'forwards'}); }catch(e){} }); }
+    addOne(180); addOne(380);
+    for(var i=0;i<12;i++) addOne(520+i*55);    // 徐々に増える
+    at(1200, function(){ golds.forEach(function(s){ try{ s.animate([{transform:s.style.transform,opacity:1},
+      {transform:'translate(-50%,-50%) scale(.6)',opacity:1}],{duration:380,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'}); }catch(e){} }); });
+    at(1650, function(){ golds.forEach(function(s){s.remove();}); }); }
+
+  function confettiBurst(cols,count,coin){ for(var k=0;k<count;k++){ var p=document.createElement('span');
+    p.className='lucky-piece'+(coin&&Math.random()<0.5?' lucky-coin':'');
+    if(!p.classList.contains('lucky-coin')) p.style.background=cols[k%cols.length];
+    p.style.left=Math.random()*100+'%'; p.style.animationDuration=(2.4+Math.random()*1.8)+'s'; p.style.animationDelay=(Math.random()*0.5)+'s';
+    p.style.width=(7+Math.random()*8)+'px'; if(!p.classList.contains('lucky-coin')) p.style.height=(10+Math.random()*12)+'px';
+    confetti.appendChild(p); } }
+
+  function showStage(bd,amt,win,sb,small){ badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
+    winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
+  function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; }
+  function finalReveal(theme,amt,bd,sb,small,cols,coin,bigImpact){
+    ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
+    flash.className='lucky-flash on'; showStage(bd,amt,WINNER,sb,small);
+    impact(0,bigImpact); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:120, coin); }
+
+  /* ---- 共通スタート：心拍→静寂 ---- */
+  var BEATS=[350,1050,1700,2300], SIL_MARK=2650, SIL=4900, STEP=340;
+  function startHeart(){
+    prompt.textContent='今日のラッキーは誰だ…？';
+    BEATS.forEach(function(t,i){ at(t, function(){ heartbeat(0, 1+i*0.12); beatVisual(1+i*0.1); }); });
+    at(SIL_MARK, function(){ ov.classList.add('silence'); prompt.textContent='……'; });
+  }
+
+  /* ---- シナリオ（正式カットイン順：青→緑→赤→金→虹→黒×金） ---- */
+  function play(key){ resetOverlay(); ac();
     if(key==='missA') return seqMiss('A');
     if(key==='missB') return seqMiss('B');
     if(key==='missC') return seqMiss('C');
-    if(key==='w1000') return seqCash('blue','LUCKY!','1,000円',1);
-    if(key==='w2000') return seqCash('gold','LUCKY!','2,000円',2);
-    if(key==='w3000') return seqGreen();
-    if(key==='w5000') return seqRed();
-    if(key==='w10000') return seqRainbow();
+    if(key==='w1000') return seqCuts(['blue'],'blue','1,000円','LUCKY!');
+    if(key==='w2000') return seqCuts(['blue','green'],'green','2,000円','LUCKY!');
+    if(key==='w3000') return seqCuts(['blue','green','red'],'red','3,000円','LUCKY!');
+    if(key==='w5000') return seqCuts(['blue','green','red','gold'],'gold','5,000円','BIG LUCKY!');
+    if(key==='w10000') return seq10000();
     if(key==='hotel') return seqHotel();
   }
-  function seqMiss(pat){
-    var peakEnd = pat==='A'?1500 : pat==='B'?1750 : 2100, speed = pat==='C'?110 : 130;
-    at(550, function(){ startFlicker(speed); });
-    at(peakEnd, function(){ stopFlicker(); suspense(); });
-    at(peakEnd+650, function(){ reveal('miss');
-      showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true);
-      missSfx(0); confettiBurst(THEME_COLS.miss,8,false); });
-  }
-  function seqCash(theme,bd,amt,level){
-    var flickEnd = level>=2 ? 1950 : 1650, speed = level>=2 ? 120 : 140;
-    at(550, function(){ startFlicker(speed); });
-    at(flickEnd, function(){ stopFlicker(); suspense(); });
-    at(flickEnd+520, function(){ reveal(theme); doFlash();
-      showStage(bd,amt,WINNER,'演出プレビュー',false);
-      confettiBurst(THEME_COLS[theme], level>=2?110:80, theme==='gold');
-      chordWin(theme==='gold'?392:523,0,false); });
-  }
-  function seqGreen(){
-    at(550, function(){ startFlicker(125); });
-    at(2000, function(){ stopFlicker(); setRank('green'); });
-    at(2050, function(){ suspense(); });
-    at(2550, function(){ reveal('green'); doFlash();
-      showStage('LUCKY!','3,000円',WINNER,'演出プレビュー',false);
-      confettiBurst(THEME_COLS.green,120,false); chordWin(466,0,true); vibe([0,25]); });
-  }
-  function seqRed(){
-    at(550, function(){ startFlicker(110); });
-    at(2050, function(){ stopFlicker(); ov.className='lucky-overlay show'; ov.style.background='#05070d'; });
-    at(2100, function(){ tone(120,0,0.3,'sine',0.04); });
-    at(2850, function(){ doBolt(); ov.classList.add('shake'); vibe([0,60,40,90]); tone(70,0,0.35,'sawtooth',0.09); });
-    at(2980, function(){ ov.style.background=''; reveal('red');
-      showStage('BIG LUCKY!','5,000円',WINNER,'演出プレビュー',false);
-      confettiBurst(THEME_COLS.red,150,false); chordWin(440,0,true); fanfare(0.15); });
-    at(3480, function(){ ov.classList.remove('shake'); });
-  }
-  function seqRainbow(){
-    at(550, function(){ setRank('blue'); startFlicker(120); });
-    at(2150, function(){ stopFlicker(); ov.className='lucky-overlay show'; ov.style.background='#000';
-      orb.style.display='none'; prompt.style.display='none'; });
-    at(3200, function(){ ov.style.background=''; rainbow.className='lucky-rainbow on'; doFlash();
-      vibe([0,40,30,60,30,120]); sweep(300,1400,0,1.0,0.06); });
-    at(3450, function(){ reveal('rainbow'); orb.style.display=''; prompt.style.display='';
-      showStage('SPECIAL LUCKY','10,000円',WINNER,'演出プレビュー',false);
-      confettiBurst(THEME_COLS.rainbow,190,false); chordWin(523,0,true); fanfare(0.2); fanfare(0.6); });
-  }
-  function seqHotel(){
-    at(550, function(){ startFlicker(120); });
-    at(1900, function(){ stopFlicker(); ov.className='lucky-overlay show doors'; ov.style.background='#05070d';
-      orb.style.display='none'; prompt.textContent='………'; });
-    at(2100, function(){ tone(160,0,0.5,'sine',0.05); prompt.style.opacity='.8'; });
-    at(3100, function(){ doors.classList.add('open'); sweep(200,900,0,1.1,0.05); });
-    at(3450, function(){ rainbow.className='lucky-rainbow gold on'; doFlash(); vibe([0,80,50,80,50,200]); });
-    at(3650, function(){ ov.style.background=''; ov.classList.add('reveal','theme-hotel'); orb.style.display=''; prompt.style.display='none';
-      showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉',true);
-      confettiBurst(THEME_COLS.hotel,200,true); chordWin(392,0,true); fanfare(0.25); fanfare(0.7); fanfare(1.15); });
+
+  function seqMiss(pat){ startHeart();
+    // カットインは出さず、淡い「兆し」だけで当たりそうに見せてから外す
+    if(pat==='A'){ at(SIL, function(){ teaseGlow('blue',0.22); });
+      at(SIL+520, function(){ orb.style.opacity='.06'; sunMiss(0); });
+      at(SIL+1050, revealMiss); }
+    else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*260, function(){ teaseGlow(c,0.18+i*0.05); }); });
+      at(SIL+1150, function(){ orb.style.opacity='.06'; sunMiss(0); });
+      at(SIL+1680, revealMiss); }
+    else { at(SIL, function(){ teaseGlow('gold',0.5); beatVisual(1.4); });
+      at(SIL+760, function(){ orb.style.opacity='.06'; sunMiss(0); });
+      at(SIL+1290, revealMiss); } }
+  function revealMiss(){ ov.className='lucky-overlay show reveal theme-miss';
+    showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true); }
+
+  function seqCuts(colors,theme,amt,bd){ startHeart();
+    colors.forEach(function(c,i){ var last=i===colors.length-1;
+      at(SIL+i*STEP, function(){ cutIn(c,last); if(last) impact(0.02,false); }); });
+    var revealT=SIL+(colors.length-1)*STEP+520;
+    at(revealT-140, function(){ blackout(); });
+    at(revealT, function(){ finalReveal(theme,amt,bd,'演出プレビュー',false,null,theme==='gold',theme==='gold');
+      vibe(theme==='gold'?[0,70,40,90]:[0,30]); });
   }
 
-  /* ---- 開閉 ---- */
-  function closeOverlay(){ clearSeq(); stopFlicker();
-    ov.className='lucky-overlay'; ov.style.background=''; orb.style.display=''; prompt.style.display='';
-    prompt.style.opacity=''; confetti.innerHTML=''; try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
+  function seq10000(){ startHeart();
+    var cols=['blue','green','red','gold'];
+    cols.forEach(function(c,i){ at(SIL+i*STEP, function(){ cutIn(c,false); }); });
+    var hold=SIL+4*STEP;                    // 4枚目(金)の後、一瞬止め（まだ続くのか？）
+    at(hold, function(){ ov.classList.add('silence'); prompt.textContent=''; });
+    var fifth=hold+760;
+    at(fifth, function(){ ov.classList.remove('silence'); cutIn('rainbow',true); impact(0.02,true); vibe([0,60,40,100,40,140]); });
+    at(fifth+560-140, function(){ blackout(); });
+    at(fifth+560, function(){ finalReveal('rainbow','10,000円','SPECIAL LUCKY','演出プレビュー',false,THEME_COLS.rainbow,false,true); }); }
+
+  // 高級ホテル：虹まで到達→1万かと思わせる→プシュン→完全暗転→静寂→金の兆し→黒×金SPECIAL復活
+  function seqHotel(){ startHeart();
+    var cols=['blue','green','red','gold','rainbow'];
+    cols.forEach(function(c,i){ var big=c==='rainbow'; at(SIL+i*STEP, function(){ cutIn(c,big); if(big) impact(0.02,true); }); });
+    var rainbowT=SIL+4*STEP;                // 5枚目レインボー（＝1万円だと思わせる）
+    var die=rainbowT+520;
+    at(die, function(){ pushun(0); ov.className='lucky-overlay show'; ov.style.background='#000';
+      orb.style.display='none'; prompt.style.display='none'; fill.className='cutin-fill'; slash.className='cutin-slash';
+      Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }); // 完全暗転・全部消す
+    // 完全な静寂ののち、金の粒子が現れて集まる
+    at(die+900, function(){ goldGather(); tone_soft(); });
+    var sixth=die+900+1350;                 // 粒子が集まりきった瞬間
+    at(sixth, function(){ ov.className='lucky-overlay show'; ov.style.background='#000';
+      cutIn('special',true); impact(0.02,true); vibe([0,100,60,100,60,240]); gold.className='gold-spread on'; });
+    at(sixth+720, function(){ ov.className='lucky-overlay show reveal theme-hotel'; ov.style.background='';
+      showStage('SPECIAL JACKPOT','高級ホテル宿泊券',WINNER,'当選！ おめでとうございます 🎉', true);
+      confettiBurst(THEME_COLS.hotel,200,true); impact(0.05,true); }); }
+  function tone_soft(){ var c=ac(); if(!c||!soundOn()) return; // 静寂の中のかすかな金の兆し音
+    var o=c.createOscillator(), g=c.createGain(); o.type='sine'; o.frequency.setValueAtTime(1200,c.currentTime);
+    o.frequency.exponentialRampToValueAtTime(1900,c.currentTime+1.6);
+    g.gain.setValueAtTime(0.0001,c.currentTime); g.gain.exponentialRampToValueAtTime(0.03,c.currentTime+0.4); g.gain.exponentialRampToValueAtTime(0.0001,c.currentTime+2.0);
+    o.connect(g); g.connect(master); o.start(); o.stop(c.currentTime+2.1); }
+
+  /* ---- 開閉 / トグル ---- */
+  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background='';
+    orb.style.opacity=''; orb.style.transform=''; prompt.style.opacity=''; prompt.style.display=''; confetti.innerHTML='';
+    Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();});
+    try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
   var lastKey=null;
   document.getElementById('close').addEventListener('click', closeOverlay);
   document.getElementById('replay').addEventListener('click', function(){ if(lastKey) play(lastKey); });
   Array.prototype.forEach.call(document.querySelectorAll('.pbtn'), function(b){
-    b.addEventListener('click', function(){ lastKey=b.getAttribute('data-key'); play(lastKey); });
-  });
-
-  /* ---- 音トグル ---- */
+    b.addEventListener('click', function(){ lastKey=b.getAttribute('data-key'); play(lastKey); }); });
   var tg=document.getElementById('soundToggle');
   function syncToggle(){ var on=soundOn(); tg.dataset.on=on?'1':'0'; tg.textContent=on?'ON':'OFF'; }
   syncToggle();
