@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#05070d">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>ラッキー賞 演出プレビュー</title>
 <style>
   :root{ --bg:#0b1220; --card:#141c2e; --line:#26324a; --fg:#eaf0fb; --mut:#9fb0cc; --rankc:#ffffff; }
@@ -129,6 +132,7 @@
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r3</b> ／ 順序 青→緑→赤→金→虹→黒×金 ／ ホテル二段階</div>
   <p class="lead">演出の中心は「抽選中の緊張感」です。<b>心拍（ドクン…）→ 2〜3秒の静寂 → シャキーン！のカットイン</b>で結果が出ます。<b>カットインの枚数＝賞のランク</b>。紙吹雪は当選確定後の祝福だけに使います。<br><b>抽選結果・履歴・予算・支給には一切記録しません</b>（プレビュー専用）。</p>
 
   <div class="soundbar">
@@ -416,6 +420,24 @@
   function syncToggle(){ var on=soundOn(); tg.dataset.on=on?'1':'0'; tg.textContent=on?'ON':'OFF'; }
   syncToggle();
   tg.addEventListener('click', function(){ try{ localStorage.setItem('lucky_sound', soundOn()?'off':'on'); }catch(e){} syncToggle(); if(soundOn()) ac(); });
+})();
+</script>
+<script>
+(function(){
+  // このプレビューは常に最新を表示する。制御中のService Workerがあればupdateを促し、待機中を即時有効化。
+  try {
+    if ('serviceWorker' in navigator) {
+      var reloaded = false; try { reloaded = sessionStorage.getItem('lp_reloaded') === '1'; } catch(e){}
+      navigator.serviceWorker.getRegistration().then(function(reg){
+        if (!reg) return;
+        try { reg.update(); } catch(e){}
+        if (reg.waiting) { try { reg.waiting.postMessage({type:'SKIP_WAITING'}); } catch(e){} }
+      }).catch(function(){});
+      navigator.serviceWorker.addEventListener('controllerchange', function(){
+        if (!reloaded) { try { sessionStorage.setItem('lp_reloaded','1'); } catch(e){} location.reload(); }
+      });
+    }
+  } catch(e){}
 })();
 </script>
 </body>
