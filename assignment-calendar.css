@@ -1074,3 +1074,18 @@
 .ac-root[data-layout="wide"] .ac-mxtable th.ac-mx-name { min-width: 210px; width: 210px; }
 .ac-root[data-layout="wide"] .ac-mx-rowname { font-size: 14px; }
 .ac-root[data-layout="wide"] .ac-mxtable .ac-mx-total { min-width: 124px; width: 124px; }
+
+/* 日別一覧の末尾。最下部からさらに引き上げると翌日へ進めることを示す。
+   最下部に着いただけでは進まないので、引いている最中だけ強調する。 */
+.ac-pullhint {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 14px 8px calc(18px + var(--ac-safe-bottom));
+  font-size: 12px; font-weight: 700; color: var(--ac-muted);
+  transition: transform .12s ease-out, color .12s ease-out;
+}
+.ac-pullarrow { font-size: 14px; line-height: 1; }
+.ac-pullhint.ac-pulling { color: var(--ac-accent); }
+.ac-pullhint.ac-pullready { color: #0f7a3d; font-weight: 800; }
+.ac-pullhint.ac-pullready .ac-pullarrow { transform: none; }
+/* PCではこの操作を出さない(2カラムで日付は左のカレンダーから選ぶ) */
+.ac-root[data-layout="wide"] .ac-pullhint { display: none; }

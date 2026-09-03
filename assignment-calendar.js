@@ -522,20 +522,28 @@
             if (state.view === 'me' || isWide()) { elWeekNav.style.display = 'none'; return; }
             const wrapEl = elBody.querySelector('.ac-monthwrap');
             if (!wrapEl) { elWeekNav.style.display = 'none'; return; }
-            const bottom = wrapEl.getBoundingClientRect().bottom - elBody.getBoundingClientRect().top;
             const shown = elWeekNav.style.display !== 'none';
-            const threshold = shown ? 24 : 0;
-            // 配置の少ない日は、月グリッドを画面外へ送りきれるだけの高さが無い。
-            // 「月が見えたら消す」だけの判定だと、週表示から日付を選んだ瞬間に
-            // 週表示が消えて月まで戻ってしまう(2026-09-04 実機指摘)。
-            // 一度出したら、先頭まで戻したときだけ月表示へ戻す。
-            const want = bottom <= threshold || (shown && elBody.scrollTop > 4);
+            // 「一定量スクロールしてから週表示を出す」方式をやめた。
+            // その方式だと、月グリッドが上へ流れてから週表示が出るまでの間だけ
+            // 現在週が画面から消え、実機で見失う(2026-09-04 実機指摘)。
+            // 少しでもスクロールした瞬間から現在週を上部へ出し、以後は消さない。
+            // 先頭(スクロール0)まで戻したときだけ月表示へ戻す。
+            const want = elBody.scrollTop > 2;
             if (want === shown) return;
+            const before = elBody.scrollTop;
             elWeekNav.style.display = want ? '' : 'none';
             if (want) {
                 state.weekStart = mondayOf(state.selected);
                 renderWeekStrip();
                 ensureWeekData(state.weekStart);
+                syncHeaderHeight();
+                // 週表示が出たぶんスクロール領域が縮む。そのままだと中身が下へ
+                // ずれて見えるので、同じ高さだけスクロールを進めて位置を保つ
+                // (画面がガクッと動かないようにする)。
+                const h = Math.round(elWeekNav.getBoundingClientRect().height);
+                if (h > 0) elBody.scrollTop = before + h;
+            } else {
+                syncHeaderHeight();
             }
         }
 
@@ -656,7 +664,15 @@
             const num = wide ? DAYNUM_H_WIDE : DAYNUM_H;
             // PCは月カレンダーが左カラムを丸ごと使えるので、そちらの高さを基準にする。
             const colEl = wide ? elBody.querySelector('.ac-monthwrap') : null;
-            const h = (colEl && colEl.clientHeight) || elBody.clientHeight || window.innerHeight || 800;
+            // 週表示が出ている間はスクロール領域がそのぶん狭い。その狭い高さで
+            // 1日セルを計算し直すと、次の再描画で月グリッドが週表示ぶん縮み、
+            // 下の配置一覧が同じだけ跳ね上がる(2026-09-04 実機指摘)。
+            // 月グリッドの寸法は「週表示が無いときの高さ」で固定し、出し入れで動かさない。
+            const stripH = (!wide && elWeekNav.style.display !== 'none')
+                ? Math.round(elWeekNav.getBoundingClientRect().height) : 0;
+            const h = (colEl && colEl.clientHeight)
+                || (elBody.clientHeight ? elBody.clientHeight + stripH : 0)
+                || window.innerHeight || 800;
             const available = Math.max(240, h - (gridTop || 0));
             const cell = Math.max(wide ? 96 : 72, Math.min(wide ? 220 : 170, Math.floor(available / weeks)));
             const chips = Math.max(3, Math.floor((cell - num) / row));
@@ -920,6 +936,12 @@
                     wrap.append(renderSchedule(s, unconfirmedBySchedule.get(s.id)));
                 }
             }
+            // 最下部からさらに引き上げると翌日へ進める、という目印。
+            // ボタンは置かない(指の流れのまま次の日へ行けるようにする)。
+            const hint = el('div', 'ac-pullhint');
+            hint.append(el('span', 'ac-pullarrow', '↑'));
+            hint.append(el('span', 'ac-pulltext', 'さらに引き上げると翌日へ'));
+            wrap.append(hint);
             container.append(wrap);
         }
         // 月グリッドの左右スワイプで前月・翌月へ。LifeBearと同じ手の動きで月を送れるようにする。
@@ -3972,6 +3994,67 @@
                 syncWeekStripVisibility();
             }, 60);
         }, { passive: true });
+
+        // 日別一覧の最下部から、さらに上へ引き上げると翌日へ進む。
+        //
+        // 最下部に着いただけでは進めない(誤操作防止)。本当に最下部で、
+        // そこから一定距離ぶん指を上へ動かしたときだけ翌日へ送る。
+        // 進む前に文言を「離すと翌日へ」に変えて、何が起きるか分かるようにする。
+        const PULL_THRESHOLD = 72;   // iPhoneで自然に感じる距離
+        let pullStartY = null;
+        let pullStartX = null;
+        let pullDist = 0;
+        let pullArmed = false;
+
+        function atListBottom() {
+            return elBody.scrollHeight - (elBody.scrollTop + elBody.clientHeight) <= 2;
+        }
+        function pullHintEl() { return elBody.querySelector('.ac-pullhint'); }
+        function updatePullHint() {
+            const h = pullHintEl();
+            if (!h) return;
+            const ready = pullDist >= PULL_THRESHOLD;
+            h.classList.toggle('ac-pulling', pullDist > 6);
+            h.classList.toggle('ac-pullready', ready);
+            const t = h.querySelector('.ac-pulltext');
+            if (t) t.textContent = ready ? '離すと翌日へ' : 'さらに引き上げると翌日へ';
+            // 指の動きに少しだけ付いてくると、効いていることが分かる
+            h.style.transform = pullDist > 0
+                ? `translateY(${-Math.min(pullDist, PULL_THRESHOLD) * 0.35}px)` : '';
+        }
+        function resetPull() {
+            pullStartY = null; pullStartX = null; pullDist = 0; pullArmed = false;
+            updatePullHint();
+        }
+        elBody.addEventListener('touchstart', (ev) => {
+            if (state.view === 'me' || isWide() || ev.touches.length !== 1) { resetPull(); return; }
+            pullStartY = ev.touches[0].clientY;
+            pullStartX = ev.touches[0].clientX;
+            pullDist = 0;
+            pullArmed = atListBottom();
+        }, { passive: true });
+        elBody.addEventListener('touchmove', (ev) => {
+            if (pullStartY === null || ev.touches.length !== 1) return;
+            const dy = pullStartY - ev.touches[0].clientY;   // 上へ動かすと正
+            const dx = Math.abs(ev.touches[0].clientX - pullStartX);
+            // 指の途中で最下部へ着いた場合も拾う(そこからの距離で数え直す)
+            if (!pullArmed && atListBottom()) {
+                pullArmed = true;
+                pullStartY = ev.touches[0].clientY;
+                pullDist = 0;
+                updatePullHint();
+                return;
+            }
+            if (!pullArmed || dy <= 0 || dx > Math.abs(dy)) return;
+            pullDist = dy;
+            updatePullHint();
+        }, { passive: true });
+        elBody.addEventListener('touchend', () => {
+            const go = pullArmed && pullDist >= PULL_THRESHOLD;
+            resetPull();
+            if (go) selectDate(addDays(state.selected, 1));
+        }, { passive: true });
+        elBody.addEventListener('touchcancel', resetPull, { passive: true });
 
         // 画面の回転・サイズ変更で「1セルに何件入るか」が変わるため、描画をやり直す。
         let resizeTimer = null;
