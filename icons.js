@@ -41,6 +41,8 @@ const ICON_PATHS = {
   lock: '<rect x="5" y="10.5" width="14" height="9" rx="2"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/>',
   'heart-pulse': '<path d="M12 20s-7-4.4-9.5-9A5.5 5.5 0 0 1 12 6a5.5 5.5 0 0 1 9.5 5c-.6 1-1.3 2-2.2 3H16l-1.8-3-2 5-1.6-3H8.5"/>',
   'sparkles': '<path d="M12 3v3M12 18v3M4.5 5.5l2 2M17.5 16.5l2 2M3 12h3M18 12h3M4.5 18.5l2-2M17.5 7.5l2-2"/><circle cx="12" cy="12" r="3"/>',
+  banknote: '<rect x="2.5" y="6" width="19" height="12" rx="2"/><circle cx="12" cy="12" r="2.5"/><path d="M6 12h.01M18 12h.01"/>',
+  gift: '<path d="M20 12v8.5H4V12"/><rect x="2.5" y="7.5" width="19" height="4.5" rx="1"/><path d="M12 7.5v13"/><path d="M12 7.5S10.5 4 8.5 4a2 2 0 0 0 0 3.5H12Z"/><path d="M12 7.5S13.5 4 15.5 4a2 2 0 0 1 0 3.5H12Z"/>',
 };
 
 function icon(name, cls) {

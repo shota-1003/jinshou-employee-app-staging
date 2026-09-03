@@ -1338,3 +1338,55 @@ body.assignment-calendar-open #screen-assignment-calendar .ac-root {
 .login-alt-sep { display:flex; align-items:center; gap:12px; margin:22px 2px 14px; color:var(--text-muted); font-size:13px; }
 .login-alt-sep::before, .login-alt-sep::after { content:''; flex:1; height:1px; background:var(--border-strong); }
 .login-subcontractor-card { border:1px dashed var(--border-strong); }
+
+/* ============ 毎日のラッキー賞 ============ */
+.lucky-home-card{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin:0 0 12px;border:1px solid var(--line,#e5e5e5);border-radius:12px;background:linear-gradient(90deg,rgba(255,215,0,.10),rgba(255,255,255,0));cursor:pointer;text-align:left;}
+.lucky-home-icon{font-size:22px;}
+.lucky-home-body{flex:1;min-width:0;display:flex;flex-direction:column;}
+.lucky-home-title{font-weight:700;font-size:14px;}
+.lucky-home-latest{font-size:13px;color:var(--text-faint,#7a7a7a);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.lucky-home-arrow{color:var(--text-faint,#9a9a9a);font-size:20px;}
+.lucky-preview-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+
+/* 全画面演出 */
+.lucky-overlay{position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;overflow:hidden;background:#0b1020;color:#fff;text-align:center;}
+.lucky-overlay.theme-blue{background:radial-gradient(circle at 50% 40%,#1e5bd6,#0a1f4d 70%);}
+.lucky-overlay.theme-gold{background:radial-gradient(circle at 50% 40%,#caa100,#4a3600 70%);}
+.lucky-overlay.theme-green{background:radial-gradient(circle at 50% 40%,#0e9e6e,#053b2a 70%);}
+.lucky-overlay.theme-red{background:radial-gradient(circle at 50% 40%,#d61e2f,#3a0308 72%);}
+.lucky-overlay.theme-rainbow{background:conic-gradient(from 0deg,#ff004c,#ff8a00,#ffe600,#22d36b,#00b3ff,#8a2be2,#ff004c);animation:luckyRainbowSpin 6s linear infinite;}
+.lucky-overlay.theme-hotel{background:radial-gradient(circle at 50% 45%,#3a2f10,#000 70%);}
+@keyframes luckyRainbowSpin{to{filter:hue-rotate(360deg);}}
+.lucky-overlay.dim{background:#000 !important;transition:background .4s;}
+
+.lucky-stage{position:relative;z-index:2;padding:24px;opacity:0;transform:scale(.8);animation:luckyPop .6s .1s forwards cubic-bezier(.2,1.4,.4,1);}
+@keyframes luckyPop{to{opacity:1;transform:scale(1);}}
+.lucky-badge{font-size:34px;font-weight:900;letter-spacing:4px;text-shadow:0 0 18px rgba(255,255,255,.7);margin-bottom:10px;}
+.lucky-amount{font-size:64px;font-weight:900;line-height:1;margin:8px 0;text-shadow:0 4px 24px rgba(0,0,0,.5);}
+.lucky-winner{font-size:22px;font-weight:700;margin-top:14px;}
+.lucky-sub{font-size:14px;opacity:.85;margin-top:10px;}
+.lucky-overlay.theme-rainbow .lucky-amount{background:linear-gradient(90deg,#ff004c,#ffe600,#22d36b,#00b3ff,#8a2be2);-webkit-background-clip:text;background-clip:text;color:transparent;animation:luckyRainbowText 2s linear infinite;background-size:200% auto;}
+@keyframes luckyRainbowText{to{background-position:200% center;}}
+.lucky-overlay.theme-hotel .lucky-badge{color:#f5d76e;letter-spacing:6px;}
+.lucky-overlay.theme-hotel .lucky-amount{font-size:30px;color:#f5d76e;text-shadow:0 0 22px rgba(245,215,110,.8);}
+.lucky-flash{position:absolute;inset:0;background:#fff;opacity:0;z-index:3;pointer-events:none;}
+.lucky-flash.go{animation:luckyFlash .5s ease-out;}
+@keyframes luckyFlash{0%{opacity:0;}15%{opacity:.95;}100%{opacity:0;}}
+.lucky-ring{position:absolute;inset:6px;border:3px solid rgba(255,255,255,.0);border-radius:20px;z-index:1;}
+.lucky-overlay.theme-green .lucky-ring{border-color:rgba(80,255,180,.6);box-shadow:0 0 30px rgba(80,255,180,.5) inset;animation:luckyRingRun 1.6s linear infinite;}
+@keyframes luckyRingRun{50%{box-shadow:0 0 60px rgba(80,255,180,.8) inset;}}
+.lucky-close{position:absolute;bottom:26px;left:50%;transform:translateX(-50%);z-index:5;background:rgba(255,255,255,.14);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:24px;padding:10px 28px;font-size:15px;cursor:pointer;}
+
+/* 紙吹雪 */
+.lucky-confetti{position:absolute;inset:0;z-index:1;pointer-events:none;overflow:hidden;}
+.lucky-piece{position:absolute;top:-12px;width:9px;height:14px;opacity:.95;will-change:transform;animation:luckyFall linear forwards;}
+@keyframes luckyFall{to{transform:translateY(105vh) rotate(720deg);}}
+
+/* ホテル: 扉が開く */
+.lucky-doors{position:absolute;inset:0;z-index:4;display:flex;pointer-events:none;}
+.lucky-door{flex:1;background:linear-gradient(#1a1204,#000);border:1px solid #3a2f10;}
+.lucky-door.l{transform-origin:left;}.lucky-door.r{transform-origin:right;}
+.lucky-doors.open .lucky-door.l{animation:luckyDoorL 1.1s ease-in forwards;}
+.lucky-doors.open .lucky-door.r{animation:luckyDoorR 1.1s ease-in forwards;}
+@keyframes luckyDoorL{to{transform:perspective(800px) rotateY(105deg);}}
+@keyframes luckyDoorR{to{transform:perspective(800px) rotateY(-105deg);}}

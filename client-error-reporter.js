@@ -84,7 +84,16 @@
     }).then(function (res) { return res.json().catch(function () { return null; }); });
   }
 
-  // fingerprint単位でreport_error()→(新規/再発時のみ)queue_error_notification()を呼ぶ共通経路。
+  // fingerprint単位でreport_error()を呼ぶ共通経路。
+  //
+  // 2026-09-03修正(ユーザー指摘: 「通常の一時的401/403/500/timeout等で自動復旧できたものを
+  // 毎回人間へ通知しないでください」): 以前はここでreport_error()の直後に無条件で
+  // queue_error_notification()を呼んでおり、5xx/401/403は常にseverity=3(即時通知対象)を
+  // 渡していたため、数秒後にwatchdogが自動解決するような一過性エラーでも初回発生時点で
+  // 必ずDiscordへ「🚨 人間確認が必要」が飛ぶ設計になっていた。クライアント側からは
+  // 「まだ自動復旧を試す前」の時点なので、ここでは記録(report_error())のみを行い、
+  // 通知の要否判定はscripts/agent-health-watchdog.js側(一定時間・一定回数再発した
+  // 「自動復旧できなかった」場合のみ既存のqueue_error_notification()を呼ぶ)へ一本化する。
   function sendReport(errorType, message, context, fingerprint, severity) {
     if (!CONFIG) return; // init()未呼び出しでも他機能を壊さない
     var now = Date.now();
@@ -106,11 +115,6 @@
         p_context: context,
         p_fingerprint: fingerprint,
         p_severity: severity,
-      }).then(function (rows) {
-        var row = Array.isArray(rows) ? rows[0] : rows;
-        if (!row || !row.id) return;
-        // 通知cooldownは既存queue_error_notification()へ完全に委譲(独自ロジックを重複させない)。
-        postJson('rpc/queue_error_notification', { p_error_id: row.id, p_min_interval_minutes: 60 }).catch(function () {});
       }).catch(function () {});
     } catch (e) { /* 報告自体の失敗はアプリ動作へ影響させない */ }
   }

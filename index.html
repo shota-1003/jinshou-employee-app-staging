@@ -185,9 +185,20 @@
          今日やること内の同内容の行に一本化する(同じ情報を複数箇所へ出さない)。 -->
     <div class="section-title">今日やること</div>
     <div class="today-list" id="today-list"></div>
+    <div id="home-lucky-hint" style="display:none;margin:2px 2px 10px;font-size:13px;color:var(--text-faint,#7a7a7a);">日報を提出すると本日のラッキー賞抽選対象になります 🎁</div>
 <!-- §2: 「今日は休みとして登録する」は撤去。休日はカレンダー/休暇情報からシステムが判定する。 -->
 
     <div id="announce-banner-area"></div>
+
+    <!-- 毎日のラッキー賞: ホームのコンパクトな1行カード(邪魔しない) -->
+    <button type="button" class="lucky-home-card" id="home-lucky-card" data-nav="lucky-month" style="display:none;">
+      <span class="lucky-home-icon">🎁</span>
+      <span class="lucky-home-body">
+        <span class="lucky-home-title">今月のラッキー賞</span>
+        <span class="lucky-home-latest" id="home-lucky-latest"></span>
+      </span>
+      <span class="lucky-home-arrow">›</span>
+    </button>
 
     <div class="home-announce-header">
       <div class="section-title">会社からのお知らせ</div>
@@ -310,6 +321,11 @@
         <span class="home-card-label">接待・会食</span>
         <span class="home-card-desc">事前申請(接待前に)</span>
       </button>
+      <button type="button" class="home-card" data-nav="loan-request">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <span class="home-card-label">借入申請</span>
+        <span class="home-card-desc">会社への一時借入を申請<br><span style="font-size:.85em;color:var(--text-faint,#8a8a8a);">※必要日の3日前までに申請してください</span></span>
+      </button>
       <button type="button" class="home-card" data-nav="qual-submit">
         <span class="icon-slot" data-icon="graduation-cap"></span>
         <span class="home-card-label">資格・免許</span>
@@ -327,6 +343,136 @@
       </button>
     </div>
   </section>
+
+  <!-- 借入申請(社員) -->
+  <section id="screen-loan-request" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">借入申請</div>
+    <button type="button" class="link" data-nav="loan-history" style="margin-bottom:8px;">借入申請履歴を見る ›</button>
+    <div class="hint" style="margin-bottom:6px;">会社への一時的な借入の申請です。金銭に関わる申請のため、内容は正確にご記入ください。</div>
+    <div class="hint" style="margin-bottom:10px;font-weight:700;color:var(--warning,#b26a00);">※必要日の3日前までに申請してください</div>
+
+    <label>申請日</label>
+    <div id="loan-request-date" style="padding:8px 0;font-weight:700;">-</div>
+
+    <label>借入希望金額<span class="required-mark">(必須)</span></label>
+    <input type="number" id="loan-amount" inputmode="numeric" min="0" step="1000" placeholder="例: 50000">
+
+    <label>先月の給与（総支給額）<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">控除前の総支給額を入力してください。</div>
+    <input type="number" id="loan-salary" inputmode="numeric" min="0" step="1000" placeholder="例: 320000">
+
+    <label>借入が必要になった理由<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">「金欠」「生活費」だけは不可。具体的に(例: 家賃と携帯料金の支払いが重なり生活費が不足したため)。</div>
+    <textarea id="loan-reason" rows="3" placeholder="具体的な理由を入力してください"></textarea>
+
+    <label>借入金の使用目的・内訳<span class="required-mark">(必須)</span></label>
+    <div id="loan-items"></div>
+    <button type="button" class="secondary" id="loan-add-item" style="margin-top:6px;">＋ 使用目的を追加</button>
+    <div style="display:flex;justify-content:space-between;font-weight:700;margin-top:10px;padding:8px;background:var(--surface-2,#f5f5f5);border-radius:8px;">
+      <span>内訳合計</span><span id="loan-items-total">0円</span>
+    </div>
+    <div class="hint-inline" id="loan-total-hint"></div>
+
+    <label>いつまでに必要か<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">借入申請は「必要日の3日前まで」に申請してください。</div>
+    <input type="date" id="loan-needed-by">
+
+    <label>受取方法<span class="required-mark">(必須)</span></label>
+    <div class="checkbox-row"><input type="radio" name="loan-receipt" value="cash" id="loan-receipt-cash"><label for="loan-receipt-cash">現金</label></div>
+    <div class="checkbox-row"><input type="radio" name="loan-receipt" value="bank_transfer" id="loan-receipt-bank"><label for="loan-receipt-bank">銀行振込(登録済みの給与振込口座へ)</label></div>
+
+    <div class="error" id="loan-error"></div>
+    <button type="button" id="loan-to-confirm">確認画面へ</button>
+  </section>
+
+  <!-- 借入申請 確認 -->
+  <section id="screen-loan-confirm" class="screen">
+    <button type="button" class="back-link" data-nav="loan-request">入力に戻る</button>
+    <div class="form-title">借入申請の確認</div>
+    <div class="card" id="loan-confirm-body"></div>
+    <div class="error" id="loan-confirm-error"></div>
+    <button type="button" id="loan-submit">この内容で申請する</button>
+  </section>
+
+  <!-- 借入申請 履歴(本人) -->
+  <section id="screen-loan-history" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
+    <div class="form-title">借入申請履歴</div>
+    <div id="loan-history-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <!-- 借入申請 詳細(本人) -->
+  <section id="screen-loan-detail" class="screen">
+    <button type="button" class="back-link" data-nav="loan-history">履歴に戻る</button>
+    <div class="form-title">借入申請の詳細</div>
+    <div class="card" id="loan-detail-body"></div>
+    <button type="button" id="loan-detail-edit" style="display:none;">この申請を修正する</button>
+  </section>
+
+  <!-- 借入申請 管理(管理者) -->
+  <section id="screen-loan-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">借入申請の管理</div>
+    <div id="loan-admin-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <template id="loan-item-template">
+    <div class="loan-item" style="display:flex;gap:8px;margin-top:6px;align-items:center;">
+      <input type="text" class="loan-item-purpose" placeholder="使用目的(例: 家賃)" style="flex:2;">
+      <input type="number" class="loan-item-amount" inputmode="numeric" min="0" step="1000" placeholder="金額" style="flex:1;">
+      <button type="button" class="loan-item-del secondary" style="width:auto;padding:6px 10px;margin:0;">×</button>
+    </div>
+  </template>
+
+  <!-- 今月のラッキー賞(社員・本人) -->
+  <section id="screen-lucky-month" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">🎁 今月のラッキー賞</div>
+    <div class="hint" style="margin-bottom:8px;">ラッキー賞は、その日の日報を提出した社員の中から抽選されます。</div>
+    <div class="card" id="lucky-today-card" style="display:none;"></div>
+    <div style="display:flex;align-items:center;justify-content:space-between;margin:8px 0;">
+      <button type="button" id="lucky-prev" class="seg" style="width:auto;padding:6px 16px;">＜</button>
+      <div id="lucky-month-label" style="font-weight:700;">-</div>
+      <button type="button" id="lucky-next" class="seg" style="width:auto;padding:6px 16px;">＞</button>
+    </div>
+    <div id="lucky-month-list"></div>
+  </section>
+
+  <!-- ラッキー賞 管理(管理者) -->
+  <section id="screen-lucky-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">ラッキー賞管理</div>
+    <div class="card" id="lucky-admin-summary"></div>
+    <div id="lucky-admin-list"></div>
+  </section>
+
+  <!-- 演出プレビュー(管理者・Stagingのみ) -->
+  <section id="screen-lucky-preview" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">演出プレビュー(テスト)</div>
+    <div class="hint" id="lucky-preview-note" style="margin-bottom:10px;"></div>
+    <div class="lucky-preview-grid">
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:1000">1,000円(青)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:2000">2,000円(金)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:3000">3,000円(緑)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:5000">5,000円(赤)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:10000">10,000円(虹)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="hotel:0" style="background:#111;color:#f5d76e;border-color:#c9a227;">高級ホテル(黒×金)</button>
+    </div>
+  </section>
+
+  <!-- 当選演出 全画面オーバーレイ -->
+  <div id="lucky-overlay" class="lucky-overlay" style="display:none;">
+    <div class="lucky-confetti" id="lucky-confetti"></div>
+    <div class="lucky-stage" id="lucky-stage">
+      <div class="lucky-badge" id="lucky-badge">LUCKY</div>
+      <div class="lucky-amount" id="lucky-amount"></div>
+      <div class="lucky-winner" id="lucky-winner"></div>
+      <div class="lucky-sub" id="lucky-sub"></div>
+    </div>
+    <button type="button" class="lucky-close" id="lucky-close">閉じる</button>
+  </div>
 
   <!-- 2026-08-28(第4弾): 一般社員が新しい現場を登録申請できる画面。日報を経由しなくても、
        事前に現場だけ登録申請できる(ユーザー指示)。既存のadmin_register_siteと同じ重複検出
@@ -493,9 +639,15 @@
       </div>
       <label>勤務区分<span class="required-mark">(必須)</span></label>
       <select class="dr-work-type">
-        <option value="終日">終日(1.0人工)</option>
-        <option value="午前">午前(0.5人工)</option>
-        <option value="午後">午後(0.5人工)</option>
+        <option value="終日">終日</option>
+        <option value="午前">午前</option>
+        <option value="午後">午後</option>
+      </select>
+      <label>人工<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">勤務区分から自動で入ります。2現場の場合は 現場A 0.5 + 現場B 0.5 = 1.0 のように分けられます。</div>
+      <select class="dr-headcount">
+        <option value="1.0">1.0</option>
+        <option value="0.5">0.5</option>
       </select>
       <div class="checkbox-row">
         <input type="checkbox" class="dr-is-leader">
@@ -504,6 +656,11 @@
       <div class="checkbox-row">
         <input type="checkbox" class="dr-is-night-shift">
         <label>夜勤</label>
+      </div>
+      <div class="dr-early-start-wrap" style="display:none;">
+        <label>早出時間(任意)</label>
+        <div class="hint-inline">現場作業で早出が発生した場合に入力してください</div>
+        <input type="number" class="dr-early-start-hours" min="0" step="0.5" placeholder="例: 1.0">
       </div>
       <div class="dr-overtime-wrap" style="display:none;">
         <label>残業時間(任意)</label>
@@ -688,8 +845,16 @@
   <!-- 日報管理(管理者/日報担当): 日付・社員・外注・現場・状態で検索、本日の未提出を確認、
        複数件まとめて確認、外注マスターへの導線。サクミルの日報機能を置き換える中核画面。 -->
   <section id="screen-daily-report-management" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">日報管理</div>
+
+    <!-- 日報管理権限(nippo_admin/executive)で、日報・経費申請から入力された承認待ちの新規現場を確認・承認/却下する入口。
+         現場承認は現場管理画面(site-admin)で行う。executiveは管理者ダッシュボードからも到達できる。 -->
+    <button type="button" class="menu-item" data-nav="site-admin" style="margin-bottom:12px;">
+      <span class="icon-slot" data-icon="map-pin"></span>
+      <div class="menu-item-body">新規現場の確認<span class="desc">日報・経費申請から入力された承認待ちの新規現場を承認/却下</span></div>
+      <span class="icon-slot arrow" data-icon="chevron-right"></span>
+    </button>
 
     <!-- 日付主軸: 選択した1日だけを表示。前後移動・今日・その日の件数要約。 -->
     <div class="card" id="drm-date-nav" style="margin-bottom:10px;"></div>
@@ -854,14 +1019,30 @@
       <select id="sc-worker-company-select"></select>
       <label for="sc-worker-name">作業員名</label>
       <input type="text" id="sc-worker-name" placeholder="例: 山田 太郎">
+      <label for="sc-worker-furigana">フリガナ</label>
+      <input type="text" id="sc-worker-furigana" placeholder="例: ヤマダ タロウ">
       <label for="sc-worker-birth-date">生年月日</label>
       <input type="date" id="sc-worker-birth-date">
+      <label for="sc-worker-blood-type">血液型</label>
+      <input type="text" id="sc-worker-blood-type" placeholder="例: A">
       <label for="sc-worker-phone">連絡先電話番号</label>
       <input type="tel" id="sc-worker-phone">
       <label for="sc-worker-address">住所</label>
       <input type="text" id="sc-worker-address">
-      <label for="sc-worker-qualifications">保有資格</label>
+      <label for="sc-worker-emergency-name">緊急連絡先 氏名</label>
+      <input type="text" id="sc-worker-emergency-name">
+      <label for="sc-worker-emergency-relation">緊急連絡先 続柄</label>
+      <input type="text" id="sc-worker-emergency-relation" placeholder="例: 妻・父 など">
+      <label for="sc-worker-emergency-phone">緊急連絡先 電話</label>
+      <input type="tel" id="sc-worker-emergency-phone">
+      <label for="sc-worker-qualifications">保有資格(自由記入・一覧は本人ポータルの資格選択と共通)</label>
       <input type="text" id="sc-worker-qualifications" placeholder="例: 玉掛け技能講習、フルハーネス特別教育">
+      <label for="sc-worker-qualification-expiry">資格の有効期限(代表的なもの・任意)</label>
+      <input type="date" id="sc-worker-qualification-expiry">
+      <label for="sc-worker-health-checkup-date">健康診断 実施日(任意)</label>
+      <input type="date" id="sc-worker-health-checkup-date">
+      <label for="sc-worker-next-health-checkup">次回健診の目安(任意)</label>
+      <input type="date" id="sc-worker-next-health-checkup">
       <label for="sc-worker-safety-doc">安全書類の提出状況</label>
       <input type="text" id="sc-worker-safety-doc" placeholder="例: 作業員名簿・施工体制台帳提出済み">
       <label for="sc-worker-notes">備考</label>
@@ -888,8 +1069,13 @@
       <input type="hidden" id="qual-category" value="qualification">
 
       <div id="qual-name-wrap">
-        <label for="qual-name">資格名<span class="required-mark">(必須)</span></label>
-        <input type="text" id="qual-name" placeholder="例: フォークリフト運転技能講習">
+        <label for="qual-master-select">資格<span class="required-mark">(必須)</span></label>
+        <div class="hint-inline">共通の資格マスターから選べます。一覧にない場合は「その他(自由記入)」を選んでください。</div>
+        <select id="qual-master-select"><option value="">選択してください</option></select>
+        <div id="qual-name-other-wrap" style="display:none; margin-top:6px;">
+          <label for="qual-name">資格名<span class="required-mark">(必須)</span></label>
+          <input type="text" id="qual-name" placeholder="例: フォークリフト運転技能講習">
+        </div>
       </div>
       <div id="qual-license-type-wrap" style="display:none;">
         <label for="qual-license-type">免許種別<span class="required-mark">(必須)</span></label>
@@ -1831,6 +2017,21 @@
       <button type="button" class="menu-item" data-nav="entertainment-admin">
         <span class="icon-slot" data-icon="users-round"></span>
         <div class="menu-item-body">接待交際費 事前申請<span class="desc">承認待ちの接待予定を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="loan-admin">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <div class="menu-item-body">借入申請の管理<span class="desc">社員からの借入申請を承認/却下/差し戻し</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="lucky-admin">
+        <span class="icon-slot" data-icon="gift"></span>
+        <div class="menu-item-body">ラッキー賞管理<span class="desc">当選・支給状況・年間予算を確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item lucky-preview-entry" data-nav="lucky-preview" style="display:none;">
+        <span class="icon-slot" data-icon="sparkles"></span>
+        <div class="menu-item-body">演出プレビュー(テスト)<span class="desc">各賞の当選演出を確認(テスト環境のみ)</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="daily-report-management">
