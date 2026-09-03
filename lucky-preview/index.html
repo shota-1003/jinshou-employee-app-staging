@@ -38,33 +38,36 @@
   .pbtn .amt{ font-size:19px; }
   .foot{ color:var(--mut); font-size:12px; line-height:1.7; margin-top:22px; border-top:1px solid var(--line); padding-top:14px; }
 
-  /* ===== 演出オーバーレイ(r4: 大胆化) ===== */
+  /* ===== 演出オーバーレイ(r5: 心拍=衝撃波・波紋。ハート不使用) ===== */
   .lucky-overlay{ position:fixed; inset:0; display:none; flex-direction:column; align-items:center;
-    justify-content:center; text-align:center; z-index:9999; overflow:hidden; color:#fff;
-    background:#04060c; -webkit-user-select:none; user-select:none; }
+    justify-content:center; text-align:center; z-index:9999; overflow:hidden; color:#fff; background:#04060c;
+    -webkit-user-select:none; user-select:none; }
   .lucky-overlay.show{ display:flex; }
   .lucky-inner{ position:relative; z-index:3; display:flex; flex-direction:column; align-items:center;
     justify-content:center; width:100%; height:100%; }
   .lucky-overlay.shake{ animation:luckyShake .42s cubic-bezier(.36,.07,.19,.97); }
 
-  /* 心拍(大きく明確に) */
-  .beat-flash{ position:absolute; inset:0; z-index:2; pointer-events:none; opacity:0;
-    background:radial-gradient(circle at 50% 46%, rgba(230,60,60,.55), rgba(120,20,20,.15) 55%, transparent 72%); }
-  .heart{ font-size:96px; line-height:1; filter:drop-shadow(0 0 26px rgba(230,60,60,.75)); transform:scale(1);
-    will-change:transform; }
-  .lucky-overlay.tame .heart{ font-size:34px; filter:drop-shadow(0 0 14px rgba(200,120,120,.5)); animation:heartTremble 1.1s ease-in-out infinite; }
-  .lucky-overlay.reveal .heart, .lucky-overlay.cutting .heart{ display:none; }
-  .beat-word{ position:absolute; top:26%; left:0; right:0; z-index:4; font-size:40px; font-weight:900; color:#ff8a80;
-    letter-spacing:.1em; opacity:0; text-shadow:0 2px 18px rgba(0,0,0,.6); pointer-events:none; }
-  .beat-word.on{ animation:beatWord .5s ease; }
+  /* 心拍=中央から広がる圧/波紋 + 全画面のうねり(ハート禁止) */
+  .beat-flash{ position:absolute; inset:0; z-index:2; pointer-events:none; opacity:0; transform:scale(1);
+    background:radial-gradient(circle at 50% 48%, rgba(235,70,60,.6), rgba(120,20,20,.16) 52%, transparent 72%); }
+  .shock{ position:absolute; top:50%; left:50%; width:120px; height:120px; border-radius:50%; z-index:4;
+    transform:translate(-50%,-50%) scale(0); opacity:0; pointer-events:none;
+    border:4px solid #ff5a4c; box-shadow:0 0 40px 6px rgba(255,90,76,.5), inset 0 0 30px rgba(255,90,76,.4); }
+  .core{ position:absolute; top:50%; left:50%; width:60px; height:60px; border-radius:50%; z-index:4;
+    transform:translate(-50%,-50%) scale(.4); opacity:0; pointer-events:none;
+    background:radial-gradient(circle, #fff, #ffb4a8 40%, rgba(255,90,76,.2) 70%, transparent); }
+  .tame-core{ position:absolute; top:50%; left:50%; width:16px; height:16px; border-radius:50%; z-index:4;
+    transform:translate(-50%,-50%); background:radial-gradient(circle,#dfe8ff,#5a6b9a 60%,transparent); opacity:0; display:none; }
+  .lucky-overlay.tame .tame-core{ display:block; opacity:.7; animation:tameCore 1.1s ease-in-out infinite; }
+
+  .prompt-line{ position:absolute; bottom:13%; left:0; right:0; z-index:4; font-size:15px; font-weight:700; color:#aab6d6; letter-spacing:.08em; }
   .beat-dots{ position:absolute; bottom:20%; left:0; right:0; z-index:4; display:flex; gap:12px; justify-content:center; }
-  .beat-dots i{ width:14px; height:14px; border-radius:50%; background:#33405f; box-shadow:0 0 0 1px #223 inset; transition:background .15s, box-shadow .15s; }
-  .beat-dots i.lit{ background:#ff5a4c; box-shadow:0 0 14px #ff5a4c; }
+  .beat-dots i{ width:12px; height:12px; border-radius:50%; background:#2a3550; transition:background .12s, box-shadow .12s, transform .12s; }
+  .beat-dots i.lit{ background:#ff5a4c; box-shadow:0 0 16px #ff5a4c; transform:scale(1.25); }
   .lucky-overlay.reveal .beat-dots, .lucky-overlay.cutting .beat-dots, .lucky-overlay.tame .beat-dots{ opacity:0; }
-  .prompt-line{ position:absolute; bottom:12%; left:0; right:0; z-index:4; font-size:15px; font-weight:700; color:#cdd8ef; letter-spacing:.06em; }
   .tame-dots{ position:absolute; top:52%; left:0; right:0; z-index:4; font-size:34px; font-weight:900; letter-spacing:.3em; color:#fff; display:none; }
   .lucky-overlay.tame .tame-dots{ display:block; animation:tameDots 1.2s ease-in-out infinite; }
-  .lucky-overlay.reveal .prompt-line, .lucky-overlay.cutting .prompt-line, .lucky-overlay.tame .prompt-line{ display:none; }
+  .lucky-overlay.reveal .prompt-line, .lucky-overlay.cutting .prompt-line{ display:none; }
 
   /* カットイン(全画面ハードフラッシュ+白閃光+斜め斬撃) */
   .cut-fill{ position:absolute; inset:0; z-index:5; opacity:0; pointer-events:none; background:var(--rankc); }
@@ -119,9 +122,8 @@
     color:#fff; font-size:15px; font-weight:800; border-radius:999px; padding:12px 26px; backdrop-filter:blur(4px); }
   .lucky-btn.primary{ background:rgba(255,255,255,.92); color:#111; border-color:#fff; }
 
-  @keyframes beatWord{ 0%{ opacity:0; transform:scale(.7);} 25%{ opacity:1; transform:scale(1.1);} 100%{ opacity:0; transform:scale(1);} }
   @keyframes tameDots{ 0%,100%{ opacity:.3;} 50%{ opacity:1;} }
-  @keyframes heartTremble{ 0%,100%{ transform:translate(0,0) scale(1);} 25%{ transform:translate(-2px,1px) scale(1.03);} 60%{ transform:translate(2px,-1px) scale(.98);} }
+  @keyframes tameCore{ 0%,100%{ transform:translate(-50%,-50%) scale(1); opacity:.5;} 50%{ transform:translate(-50%,-50%) scale(1.4); opacity:.85;} }
   @keyframes cutFill{ 0%{ opacity:0;} 10%{ opacity:.92;} 55%{ opacity:.7;} 100%{ opacity:0;} }
   @keyframes cutWhite{ 0%{ opacity:0;} 8%{ opacity:.9;} 100%{ opacity:0;} }
   @keyframes cutStreak{ 0%{ left:-160%; opacity:0;} 12%{ opacity:1;} 60%{ opacity:1;} 100%{ left:160%; opacity:0;} }
@@ -137,11 +139,11 @@
 <body>
 <div class="wrap">
   <div class="top"><span style="font-size:22px">🎁</span><h1>ラッキー賞 演出プレビュー</h1></div>
-  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r4</b> ／ ❤4回→タメ→シャキーン ／ 青→緑→赤→金→虹→黒×金</div>
-  <p class="lead"><b>抽選開始 → ❤ドックン×4（画面全体が脈打つ）→ 2〜3秒の静寂のタメ → シャキーン！の全画面カットイン</b>で結果が出ます。カットインの枚数＝賞のランク。<br><b>音を出すと迫力が出ます（マナーモード解除＋音量）。</b>抽選結果・履歴・予算・支給には一切記録しません。</p>
+  <div id="buildStamp" style="font-size:11px;color:#7ff0b6;background:#0e2018;border:1px solid #2b7a52;border-radius:8px;padding:4px 8px;margin:0 0 10px;display:inline-block;">build: <b id="buildId">LP-2026-09-04-r5</b> ／ 心拍=衝撃波(ハート無し)×4→タメ→シャキーン ／ 青→緑→赤→金→虹→黒×金</div>
+  <p class="lead"><b>暗い画面 → ドクン！（中央から圧・波紋が広がり画面全体がうねる）を4回、進むほど強く</b> → 突然停止して2〜3秒の静寂 → 当たりは<b>シャキーン！の全画面カットイン</b>／ハズレは<b>スーン…と光が消える</b>。<br><b>音を出すと迫力が出ます（マナーモード解除＋音量）。</b>抽選結果・履歴・予算・支給には一切記録しません。</p>
 
   <div class="soundbar">
-    <span class="lbl">🔊 音・振動（重低音の心拍＋鋭いカットイン音／マナーモード解除で鳴ります）</span>
+    <span class="lbl">🔊 音・振動（重低音のドクン＋鋭いカットイン音／マナーモード解除で鳴ります）</span>
     <button class="toggle" id="soundToggle" data-on="1">ON</button>
   </div>
 
@@ -170,8 +172,9 @@
   <div class="beat-flash" id="beatFlash"></div>
   <div class="gold-spread" id="gold"></div>
   <div class="lucky-inner" id="inner">
-    <div class="heart" id="heart">❤</div>
-    <div class="beat-word" id="beatWord">ドックン</div>
+    <div class="shock" id="shock"></div>
+    <div class="core" id="core"></div>
+    <div class="tame-core" id="tameCore"></div>
     <div class="tame-dots" id="tameDots">…</div>
     <div class="prompt-line" id="promptLine">抽選開始…</div>
     <div class="beat-dots" id="beatDots"><i></i><i></i><i></i><i></i></div>
@@ -196,15 +199,16 @@
 <script>
 (function(){
   "use strict";
-  var ov=document.getElementById('ov'), inner=document.getElementById('inner'), heart=document.getElementById('heart'),
-      beatFlash=document.getElementById('beatFlash'), beatWord=document.getElementById('beatWord'), beatDots=document.getElementById('beatDots'),
-      promptLine=document.getElementById('promptLine'), tameDots=document.getElementById('tameDots'),
+  var ov=document.getElementById('ov'), inner=document.getElementById('inner'),
+      beatFlash=document.getElementById('beatFlash'), shock=document.getElementById('shock'), core=document.getElementById('core'),
+      promptLine=document.getElementById('promptLine'), beatDots=document.getElementById('beatDots'), tameDots=document.getElementById('tameDots'),
       badge=document.getElementById('badge'), amount=document.getElementById('amount'), winner=document.getElementById('winner'),
       sub=document.getElementById('sub'), confetti=document.getElementById('confetti'), gold=document.getElementById('gold'),
       cutFill=document.getElementById('cutFill'), cutWhite=document.getElementById('cutWhite'), cutStreak=document.getElementById('cutStreak'), cutLabel=document.getElementById('cutLabel');
   var WINNER='テスト 太郎';
   var RANK={ blue:'#2f6bd6', green:'#0fae6e', red:'#e0392f', gold:'#e0a021', rainbow:'#ffffff', special:'#e6b53a' };
   var RANKJP={ blue:'青', green:'緑', red:'赤', gold:'金', rainbow:'虹', special:'SPECIAL' };
+  var BEATCOL=['#c23a2f','#e0392f','#ff5a4c','#ff7a4c'];
   var THEME_COLS={ blue:['#bcd3ff','#2f6bd6','#ffffff','#7aa8ff'], green:['#b8f5da','#0fae6e','#ffffff','#5be0a8'],
     red:['#ffc2bd','#e0392f','#ffffff','#ff7a6e'], gold:['#ffe9a8','#e0a021','#ffffff','#ffcf5c'],
     rainbow:['#ff3b30','#ff9500','#ffcc00','#34c759','#0a84ff','#5e5ce6','#ff2d55'],
@@ -220,7 +224,7 @@
     o.type='sine'; o.frequency.setValueAtTime(freq*1.7,t0); o.frequency.exponentialRampToValueAtTime(freq,t0+.05);
     f.type='lowpass'; f.frequency.value=170; g.gain.setValueAtTime(.0001,t0); g.gain.exponentialRampToValueAtTime(gain,t0+.02); g.gain.exponentialRampToValueAtTime(.0001,t0+dur);
     o.connect(f); f.connect(g); g.connect(master); o.start(t0); o.stop(t0+dur+.03); }
-  function heartbeat(when,intensity){ intensity=intensity||1; thump(when,58,.18,.6*intensity); thump(when+.16,44,.26,.4*intensity); }
+  function beatSound(intensity){ intensity=intensity||1; thump(0,52,.20,.5*intensity); thump(.13,38,.30,.42*intensity); }
   function shakiin(when,intensity){ var c=ac(); if(!c||!soundOn())return; var t0=c.currentTime+when; intensity=intensity||1;
     var nb=noise(); if(nb){ var s=c.createBufferSource(); s.buffer=nb; var bp=c.createBiquadFilter(); bp.type='bandpass'; bp.Q.value=.7;
       bp.frequency.setValueAtTime(6800,t0); bp.frequency.exponentialRampToValueAtTime(1100,t0+.18);
@@ -255,27 +259,38 @@
   function at(t,fn){ timers.push(setTimeout(fn,t)); }
   function reset(){ clearSeq();
     ov.className='lucky-overlay show'; ov.style.background=''; ov.style.setProperty('--rankc','#ffffff');
-    heart.style.display=''; heart.style.transform='scale(1)'; promptLine.style.display=''; promptLine.textContent='抽選開始…';
-    tameDots.style.display=''; confetti.innerHTML=''; amount.className='lucky-amount';
+    promptLine.style.display=''; promptLine.textContent='抽選開始…'; tameDots.style.display=''; confetti.innerHTML=''; amount.className='lucky-amount';
     cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutStreak.className='cut-streak'; cutLabel.className='cut-label'; gold.className='gold-spread';
     Array.prototype.forEach.call(beatDots.children,function(d){d.className='';});
     Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); }
 
-  function fireBeat(i,intensity){ intensity=intensity||1;
-    try{ heart.animate([{transform:'scale(1)'},{transform:'scale('+(1.45+.05*intensity)+')'},{transform:'scale(1)'}],{duration:380,easing:'ease-out'}); }catch(e){}
-    beatFlash.className='beat-flash'; void beatFlash.offsetWidth; beatFlash.className='beat-flash'; try{ beatFlash.animate([{opacity:0},{opacity:.85},{opacity:0}],{duration:420,easing:'ease-out'}); }catch(e){}
-    beatWord.className='beat-word'; void beatWord.offsetWidth; beatWord.className='beat-word on';
+  /* 心拍1回 = 中央から圧/波紋が広がり画面全体がうねる(進むほど強く)。ハート不使用。 */
+  function fireBeat(i){
+    var lvl=i+1; // 1..4
+    shock.style.borderColor=BEATCOL[i]||'#ff7a4c';
+    try{ shock.animate([
+      {transform:'translate(-50%,-50%) scale(.15)',opacity:0},
+      {transform:'translate(-50%,-50%) scale(.9)',opacity:.9},
+      {transform:'translate(-50%,-50%) scale('+(2.6+i*1.1)+')',opacity:0}],{duration:520,easing:'cubic-bezier(.15,.6,.3,1)'}); }catch(e){}
+    try{ core.animate([
+      {transform:'translate(-50%,-50%) scale(.3)',opacity:0},
+      {transform:'translate(-50%,-50%) scale('+(1+i*.4)+')',opacity:1},
+      {transform:'translate(-50%,-50%) scale(.3)',opacity:0}],{duration:380,easing:'ease-out'}); }catch(e){}
+    // 全画面のうねり(圧)+赤フラッシュ、進むほど強く
+    try{ beatFlash.animate([
+      {opacity:0,transform:'scale(1)'},
+      {opacity:(.35+i*.17),transform:'scale('+(1.06+i*.04)+')'},
+      {opacity:0,transform:'scale(1)'}],{duration:440,easing:'ease-out'}); }catch(e){}
     if(beatDots.children[i]) beatDots.children[i].className='lit';
-    heartbeat(0,intensity); vibe(40); }
+    beatSound(1+i*.4); vibe(28+i*18);
+  }
 
   function startHeart(){ promptLine.textContent='抽選開始…';
-    // 4回の明確な心拍
-    BEATS.forEach(function(t,i){ at(t,function(){ fireBeat(i,1+i*.18); }); });
+    BEATS.forEach(function(t,i){ at(t,function(){ fireBeat(i); }); });
     at(SIL_MARK, function(){ ov.classList.add('tame'); promptLine.textContent=''; }); }
 
   function cutIn(colorKey,big){
-    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
-    ov.classList.add('cutting');
+    ov.style.setProperty('--rankc', RANK[colorKey]||'#fff'); ov.classList.add('cutting');
     cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
     var fc='cut-fill'+(colorKey==='rainbow'?' rainbow':colorKey==='special'?' special':''); cutFill.className=fc; void cutFill.offsetWidth; cutFill.className=fc+' on';
     cutStreak.className='cut-streak'; void cutStreak.offsetWidth; cutStreak.className='cut-streak on';
@@ -294,7 +309,7 @@
     p.style.width=(7+Math.random()*8)+'px'; if(!p.classList.contains('lucky-coin')) p.style.height=(10+Math.random()*12)+'px'; confetti.appendChild(p); } }
   function showStage(bd,amt,win,sb,small){ badge.textContent=bd||''; amount.textContent=amt||''; if(small) amount.classList.add('small');
     winner.textContent=win?(win+' さん'):''; winner.style.display=win?'':'none'; sub.textContent=sb||''; }
-  function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; heart.style.display='none'; }
+  function blackout(){ ov.className='lucky-overlay show cutting'; ov.style.background='#000'; }
   function reveal(theme,amt,bd,sb,small,cols,coin,big){ ov.className='lucky-overlay show reveal theme-'+theme; ov.style.background='';
     cutWhite.className='cut-white'; void cutWhite.offsetWidth; cutWhite.className='cut-white on';
     showStage(bd,amt,WINNER,sb,small); impact(0,big); confettiBurst(cols||THEME_COLS[theme]||THEME_COLS.blue, small?200:130, coin); }
@@ -313,16 +328,16 @@
     if(key==='hotel') return seqHotel();
   }
   function teaseGlow(colorKey,peak){ ov.style.setProperty('--rankc', RANK[colorKey]||'#fff');
-    cutFill.className='cut-fill'; try{ cutFill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:560,easing:'ease-in-out'});}catch(e){} thump(0,58,.16,.36); }
+    cutFill.className='cut-fill'; try{ cutFill.animate([{opacity:0},{opacity:peak},{opacity:0}],{duration:560,easing:'ease-in-out'});}catch(e){} thump(0,54,.16,.34); }
   function seqMiss(pat){ startHeart();
     if(pat==='A'){ at(SIL,function(){ teaseGlow('blue',.28); });
-      at(SIL+560,function(){ ov.classList.remove('tame'); heart.style.display='none'; sunMiss(0); });
+      at(SIL+560,function(){ sunMiss(0); });
       at(SIL+1080,revealMiss); }
     else if(pat==='B'){ ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*300,function(){ teaseGlow(c,.22+i*.06); }); });
-      at(SIL+1300,function(){ heart.style.display='none'; sunMiss(0); });
+      at(SIL+1300,function(){ sunMiss(0); });
       at(SIL+1820,revealMiss); }
-    else { at(SIL,function(){ teaseGlow('gold',.6); fireBeat(3,1.6); });
-      at(SIL+820,function(){ heart.style.display='none'; sunMiss(0); });
+    else { at(SIL,function(){ teaseGlow('gold',.6); }); at(SIL+300,function(){ ov.classList.remove('tame'); ov.classList.add('tame'); });
+      at(SIL+820,function(){ sunMiss(0); });
       at(SIL+1340,revealMiss); } }
   function revealMiss(){ ov.className='lucky-overlay show reveal theme-miss'; showStage('','今回はハズレ！',null,'明日も日報提出でチャンス 🎁', true); }
 
@@ -334,7 +349,7 @@
   }
   function seq10000(){ startHeart();
     ['blue','green','red','gold'].forEach(function(c,i){ at(SIL+i*STEP,function(){ cutIn(c,false); }); });
-    var hold=SIL+4*STEP; at(hold,function(){ ov.classList.add('tame'); promptLine.style.display=''; promptLine.textContent='…まだ続く…？'; heart.style.display='none'; });
+    var hold=SIL+4*STEP; at(hold,function(){ ov.classList.add('tame'); promptLine.style.display=''; promptLine.textContent='…まだ続く…？'; });
     var fifth=hold+780;
     at(fifth,function(){ ov.classList.remove('tame'); promptLine.style.display='none'; cutIn('rainbow',true); impact(.02,true); vibe([0,60,40,100,40,140]); });
     at(fifth+600-150,function(){ blackout(); });
@@ -343,7 +358,7 @@
     ['blue','green','red','gold','rainbow'].forEach(function(c,i){ var big=c==='rainbow'; at(SIL+i*STEP,function(){ cutIn(c,big); if(big) impact(.02,true); }); });
     var rainbowT=SIL+4*STEP;
     var die=rainbowT+560;
-    at(die,function(){ pushun(0); ov.className='lucky-overlay show'; ov.style.background='#000'; heart.style.display='none'; promptLine.style.display='none';
+    at(die,function(){ pushun(0); ov.className='lucky-overlay show'; ov.style.background='#000'; promptLine.style.display='none';
       cutFill.className='cut-fill'; cutWhite.className='cut-white'; cutStreak.className='cut-streak'; cutLabel.className='cut-label';
       Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); });
     at(die+950,function(){ goldGather(); toneSoft(); });
@@ -360,7 +375,7 @@
     at(1250,function(){ golds.forEach(function(s){ try{ s.animate([{transform:s.style.transform,opacity:1},{transform:'translate(-50%,-50%) scale(.6)',opacity:1}],{duration:380,easing:'cubic-bezier(.5,0,.2,1)',fill:'forwards'});}catch(e){} }); });
     at(1700,function(){ golds.forEach(function(s){s.remove();}); }); }
 
-  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; heart.style.display=''; promptLine.style.display=''; confetti.innerHTML='';
+  function closeOverlay(){ clearSeq(); ov.className='lucky-overlay'; ov.style.background=''; promptLine.style.display=''; confetti.innerHTML='';
     Array.prototype.forEach.call(document.querySelectorAll('.spark'),function(s){s.remove();}); try{ if(navigator.vibrate) navigator.vibrate(0); }catch(e){} }
   var lastKey=null;
   document.getElementById('close').addEventListener('click', closeOverlay);
