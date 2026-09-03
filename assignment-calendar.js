@@ -171,6 +171,9 @@
             maxChipsOverride: null,   // null = 画面の高さから自動計算
             mine: [],
             offline: false,
+            // 日別配置の連続タイムライン用。日付ごとのデータを貯めて使い回す。
+            days: new Map(),
+            tl: { from: null, to: null },
         };
 
         root.classList.add('ac-root');
@@ -274,10 +277,12 @@
             Promise.all([loadMonth(), loadDay()]).then(render);
         }
         function jumpTo(dateStr) {
+            state.view = 'month';
+            // スマホは連続タイムライン。離れた日へ飛ぶときはその日を中心に組み直す。
+            if (!isWide()) { rebuildTimeline(dateStr); return; }
             state.year = Number(dateStr.slice(0, 4));
             state.month = Number(dateStr.slice(5, 7));
             state.selected = dateStr;
-            state.view = 'month';
             Promise.all([loadMonth(), loadDay()]).then(render);
         }
 
@@ -394,6 +399,7 @@
                 + (date === todayJST() ? ' ac-today' : '')
                 + (d === 6 ? ' ac-sat' : '') + (d === 0 ? ' ac-sun' : '')
                 + (hol ? ' ac-holiday' : ''));
+            cell.dataset.date = date;
             const head = el('div', 'ac-wnum');
             head.append(el('span', 'ac-wdow', DOW_JP[d]));
             head.append(el('span', null, Number(date.slice(8, 10))));
@@ -517,39 +523,27 @@
         }
         function isWide() { return root.dataset.layout === 'wide'; }
 
+        // 週表示は出し入れしない。スマホ/タブレットでは最初から常に出しておく。
+        // 「スクロールし始めてから別のパネルを出す」方式は、出た瞬間に高さが変わって
+        // 一覧がカクつく・一瞬消える、という指摘の原因そのものだった(2026-09-05)。
         function syncWeekStripVisibility() {
-            // PCは月カレンダーが常に左側に出ているので、縮小版の週ストリップは要らない。
-            if (state.view === 'me' || isWide()) { elWeekNav.style.display = 'none'; return; }
-            const wrapEl = elBody.querySelector('.ac-monthwrap');
-            if (!wrapEl) { elWeekNav.style.display = 'none'; return; }
+            const want = !(state.view === 'me' || isWide());
             const shown = elWeekNav.style.display !== 'none';
-            // 「一定量スクロールしてから週表示を出す」方式をやめた。
-            // その方式だと、月グリッドが上へ流れてから週表示が出るまでの間だけ
-            // 現在週が画面から消え、実機で見失う(2026-09-04 実機指摘)。
-            // 少しでもスクロールした瞬間から現在週を上部へ出し、以後は消さない。
-            // 先頭(スクロール0)まで戻したときだけ月表示へ戻す。
-            const want = elBody.scrollTop > 2;
             if (want === shown) return;
-            const before = elBody.scrollTop;
             elWeekNav.style.display = want ? '' : 'none';
             if (want) {
                 state.weekStart = mondayOf(state.selected);
                 renderWeekStrip();
                 ensureWeekData(state.weekStart);
-                syncHeaderHeight();
-                // 週表示が出たぶんスクロール領域が縮む。そのままだと中身が下へ
-                // ずれて見えるので、同じ高さだけスクロールを進めて位置を保つ
-                // (画面がガクッと動かないようにする)。
-                const h = Math.round(elWeekNav.getBoundingClientRect().height);
-                if (h > 0) elBody.scrollTop = before + h;
-            } else {
-                syncHeaderHeight();
             }
+            syncHeaderHeight();
         }
 
         // 日付バーやカレンダーから日を選んだときの共通処理。
         // 月をまたいだ場合は月データも読み直す(操作としては日付が連続して見える)。
         function selectDate(date) {
+            // スマホは連続タイムライン。日付を選んでも作り直さず、その日の区画へ送る。
+            if (!isWide() && state.view !== 'me' && timelineEl()) { goToDaySection(date, true); return; }
             const monthChanged = Number(date.slice(0, 4)) !== state.year || Number(date.slice(5, 7)) !== state.month;
             state.selected = date;
             state.year = Number(date.slice(0, 4));
@@ -567,9 +561,20 @@
         // -----------------------------------------------------------
         // データ取得
         // -----------------------------------------------------------
+        // 読み取り専用のRPCだけ、失敗しても1回だけ静かに取り直す。
+        // 書き込みは二重登録になるので、ここを通してはいけない。
+        async function readRpc(name, params) {
+            try {
+                return await rpc(name, params);
+            } catch (e) {
+                await new Promise((r) => { setTimeout(r, 500); });
+                return rpc(name, params);
+            }
+        }
+
         async function loadMonth() {
             try {
-                state.month_data = await rpc('assignment_get_month', {
+                state.month_data = await readRpc('assignment_get_month', {
                     p_employee_code: me, p_year: state.year, p_month: state.month,
                 });
                 state.isAdmin = !!state.month_data.is_admin;
@@ -583,14 +588,18 @@
         }
         async function loadDay() {
             try {
-                state.day_data = await rpc('assignment_get_day', { p_employee_code: me, p_date: state.selected });
+                state.day_data = await readRpc('assignment_get_day', { p_employee_code: me, p_date: state.selected });
                 if (state.canEdit) {
                     const [issues, conf] = await Promise.all([
-                        rpc('assignment_validate_day', { p_employee_code: me, p_date: state.selected }),
-                        rpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: state.selected }),
+                        readRpc('assignment_validate_day', { p_employee_code: me, p_date: state.selected }),
+                        readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: state.selected }),
                     ]);
                     state.issues = issues; state.confirmation = conf;
                 }
+                // 連続タイムラインは日付ごとのキャッシュから描くので、ここも更新する。
+                state.days.set(state.selected, {
+                    day: state.day_data, issues: state.issues, confirmation: state.confirmation, full: true,
+                });
             } catch (e) { fail(e); }
         }
         async function loadMine() {
@@ -785,6 +794,264 @@
         // -----------------------------------------------------------
         // 日別詳細
         // -----------------------------------------------------------
+        // ---------------------------------------------------------------
+        // 日別配置の連続タイムライン(スマホ/タブレット)
+        //
+        // 以前は「その日1日ぶんだけを描き、最下部で翌日へ切り替える」方式だった。
+        // 実機では切り替えのたびに画面が作り直され、前日へ自然に戻れず、
+        // 週表示の出し入れでカクついた(2026-09-05 実機指摘)。
+        //
+        // そこで、日ごとの区画を縦に並べた1本のタイムラインにした。
+        // 普通に下へスクロールすれば翌日、上へスクロールすれば前日へ続く。
+        // 画面の切り替えは起きない。前後は近づいたときだけ足す(必要なぶんだけ読む)。
+        // ---------------------------------------------------------------
+        // 最初は選んだ日だけを描き、前後は描いたあとに TL_STEP 日ずつ足していく。
+        const TL_STEP = 3;        // 一度に足す日数
+        const TL_MAX_DAYS = 45;   // DOMが無限に伸びないための上限
+        const TL_EDGE = 800;      // 端まで何pxに近づいたら足すか
+
+        function timelineEl() { return elBody.querySelector('.ac-timeline'); }
+
+        // その日のデータを取ってキャッシュへ入れる。既にあれば何もしない。
+        async function loadDayData(date, force) {
+            if (!force && state.days.has(date)) return state.days.get(date);
+            try {
+                const day = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
+                const rec = { day, issues: null, confirmation: null, full: !state.canEdit };
+                state.days.set(date, rec);
+                state.offline = false;
+                return rec;
+            } catch (e) { fail(e); return null; }
+        }
+
+        // 警告・確認状況は「いま見ている日」だけ取りに行く。全区画ぶん先に取ると
+        // 1日3本×十数日ぶんの問い合わせになり、実際に検証環境が応答しきれなかった。
+        async function loadDayDetail(date) {
+            const rec = state.days.get(date);
+            if (!rec || rec.full || !state.canEdit) return;
+            rec.full = true;
+            try {
+                const [issues, confirmation] = await Promise.all([
+                    readRpc('assignment_validate_day', { p_employee_code: me, p_date: date }),
+                    readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: date }),
+                ]);
+                rec.issues = issues;
+                rec.confirmation = confirmation;
+            } catch (e) { rec.full = false; return; }
+            if (state.selected === date) focusDate(date);
+            // その区画だけ描き直す。増えた高さぶんスクロールを送り、見ている位置を保つ。
+            const tl = timelineEl();
+            const old = tl && tl.querySelector(`.ac-daysec[data-date="${date}"]`);
+            if (!old) return;
+            const topBefore = old.getBoundingClientRect().top;
+            const scrollBefore = elBody.scrollTop;
+            const fresh = buildDaySection(date);
+            old.replaceWith(fresh);
+            const delta = fresh.getBoundingClientRect().top - topBefore;
+            if (delta) elBody.scrollTop = scrollBefore + delta;
+            focusDate(state.selected);
+        }
+
+        // 既存の各種操作(配置追加・編集・職長・確認・役割変更…)は
+        // state.selected / state.day_data を見て動く。区画を触ったときに
+        // まずここで「現在の日」をその区画の日付へ合わせる。通信も再描画もしない。
+        function focusDate(date) {
+            const rec = state.days.get(date);
+            state.selected = date;
+            state.day_data = rec ? rec.day : null;
+            state.issues = rec ? rec.issues : null;
+            state.confirmation = rec ? rec.confirmation : null;
+        }
+
+        function buildDaySection(date) {
+            const sec = el('div', 'ac-daysec');
+            sec.dataset.date = date;
+            // 区画内のどこを押しても、まずその日を「現在の日」にしてから既存処理へ渡す。
+            // capture段階なので、中のボタンの処理より必ず先に走る。
+            sec.addEventListener('click', () => focusDate(date), true);
+            const keep = [state.selected, state.day_data, state.issues, state.confirmation];
+            focusDate(date);
+            renderDay(sec);
+            [state.selected, state.day_data, state.issues, state.confirmation] = keep;
+            return sec;
+        }
+
+        function renderTimeline(container) {
+            if (!state.tl.from || !state.tl.to) { renderDay(container); return; }
+            const tl = el('div', 'ac-timeline');
+            const cur = state.selected;
+            for (let d = state.tl.from; d <= state.tl.to; d = addDays(d, 1)) {
+                tl.append(buildDaySection(d));
+            }
+            container.append(tl);
+            focusDate(cur);
+        }
+
+        // いま画面の上部に来ている区画の日付。スクロール位置から決める。
+        function viewedDate() {
+            const tl = timelineEl();
+            if (!tl) return null;
+            const top = elBody.getBoundingClientRect().top;
+            for (const sec of tl.children) {
+                if (sec.getBoundingClientRect().bottom - top > 8) return sec.dataset.date;
+            }
+            return tl.lastElementChild ? tl.lastElementChild.dataset.date : null;
+        }
+
+        // 閲覧中の日が変わったときの同期。全体の再描画はしない
+        // (スクロール中に月グリッドを作り直すとカクつくため)。
+        let monthSyncTimer = null;
+        function syncViewedDate(date) {
+            if (!date || date === state.selected) return;
+            focusDate(date);
+            loadDayDetail(date);
+            state.weekStart = mondayOf(date);
+            // 週表示: 選択の印だけ動かし、週が変わったときだけ週を送る
+            markWeekSelection(date);
+            // 月グリッド: 選択の印だけ動かす。月が変わったら少し落ち着いてから読み直す。
+            markMonthSelection(date);
+            const y = Number(date.slice(0, 4));
+            const m = Number(date.slice(5, 7));
+            const monthChanged = (y !== state.year || m !== state.month);
+            // 年月はヘッダーを描く前に入れる(後だと1手遅れて前の月が残る)
+            state.year = y; state.month = m;
+            renderHeader();
+            if (monthChanged) {
+                clearTimeout(monthSyncTimer);
+                monthSyncTimer = setTimeout(() => {
+                    loadMonth().then(() => { refreshMonthGrid(); renderWeekStrip(); });
+                }, 350);
+            }
+        }
+
+        function markWeekSelection(date) {
+            let inTrack = false;
+            elWeekTrack.querySelectorAll('.ac-wcell').forEach((c) => {
+                const on = c.dataset.date === date;
+                if (on) inTrack = true;
+                c.classList.toggle('ac-on', on);
+            });
+            // 表示中の週から外れたら、その週へ寄せる(週またぎ)
+            if (!inTrack) renderWeekStrip();
+        }
+        function markMonthSelection(date) {
+            elBody.querySelectorAll('.ac-cell').forEach((c) => {
+                c.classList.toggle('ac-sel', c.dataset.date === date);
+            });
+        }
+
+        // 月グリッドの中身だけを差し替える。行数もセル高も変わらないので高さは動かない。
+        function refreshMonthGrid() {
+            const wrap = elBody.querySelector('.ac-monthwrap');
+            if (!wrap) return;
+            const before = elBody.scrollHeight;
+            const top = elBody.scrollTop;
+            const holder = el('div');
+            renderMonth(holder);
+            const fresh = holder.querySelector('.ac-monthwrap');
+            if (fresh) wrap.replaceWith(fresh);
+            // 念のため高さが動いたぶんだけ補正する(見ている位置を動かさない)
+            elBody.scrollTop = top + (elBody.scrollHeight - before);
+        }
+
+        // 前後へ日を足す。上へ足すときは、増えた高さぶんスクロールを送って
+        // 「見ている現場が突然動く」ことがないようにする。
+        let tlBusy = false;
+        async function extendTimeline(dir) {
+            const tl = timelineEl();
+            if (!tl || tlBusy) return;
+            const span = Math.round((Date.parse(state.tl.to) - Date.parse(state.tl.from)) / 86400000) + 1;
+            if (span >= TL_MAX_DAYS) return;
+            tlBusy = true;
+            try {
+                const dates = [];
+                for (let i = 1; i <= TL_STEP; i += 1) {
+                    dates.push(dir > 0 ? addDays(state.tl.to, i) : addDays(state.tl.from, -i));
+                }
+                for (const d of dates) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await loadDayData(d);
+                }
+                if (dir > 0) {
+                    for (const d of dates) { tl.append(buildDaySection(d)); state.tl.to = d; }
+                } else {
+                    const beforeH = elBody.scrollHeight;
+                    const beforeTop = elBody.scrollTop;
+                    for (const d of dates) {
+                        tl.prepend(buildDaySection(d));
+                        state.tl.from = d;
+                    }
+                    elBody.scrollTop = beforeTop + (elBody.scrollHeight - beforeH);
+                }
+                focusDate(state.selected);
+            } finally { tlBusy = false; }
+        }
+
+        function onTimelineScroll() {
+            if (isWide() || state.view === 'me') return;
+            const tl = timelineEl();
+            if (!tl) return;
+            syncViewedDate(viewedDate());
+            const bodyTop = elBody.getBoundingClientRect().top;
+            const bottomGap = elBody.scrollHeight - (elBody.scrollTop + elBody.clientHeight);
+            const first = tl.firstElementChild;
+            const firstTop = first ? first.getBoundingClientRect().top - bodyTop : 0;
+            if (bottomGap < TL_EDGE) extendTimeline(1);
+            else if (elBody.scrollTop > 200 && firstTop > -TL_EDGE) extendTimeline(-1);
+        }
+
+        // 週表示や月グリッドから日を選んだとき。画面を作り直さず、その日の区画へ送る。
+        async function goToDaySection(date, smooth) {
+            const tl = timelineEl();
+            if (!tl) { selectDate(date); return; }
+            // 範囲の外なら、そこを中心に組み直す(遠い日へ飛んだ場合)
+            if (date < state.tl.from || date > state.tl.to) {
+                const gapDays = Math.abs(Math.round(
+                    (Date.parse(date) - Date.parse(state.selected)) / 86400000));
+                if (gapDays > TL_MAX_DAYS / 2) { await rebuildTimeline(date); return; }
+                const dir = date > state.tl.to ? 1 : -1;
+                while ((dir > 0 ? date > state.tl.to : date < state.tl.from)) {
+                    // eslint-disable-next-line no-await-in-loop
+                    await extendTimeline(dir);
+                    if (tlBusy) break;
+                }
+            }
+            const sec = tl.querySelector(`.ac-daysec[data-date="${date}"]`);
+            if (!sec) { await rebuildTimeline(date); return; }
+            const top = sec.getBoundingClientRect().top - elBody.getBoundingClientRect().top
+                + elBody.scrollTop;
+            if (smooth && typeof elBody.scrollTo === 'function') {
+                elBody.scrollTo({ top: Math.max(0, top), behavior: 'smooth' });
+            } else {
+                elBody.scrollTop = Math.max(0, top);
+            }
+            syncViewedDate(date);
+        }
+
+        async function rebuildTimeline(date) {
+            state.selected = date;
+            state.year = Number(date.slice(0, 4));
+            state.month = Number(date.slice(5, 7));
+            state.weekStart = mondayOf(date);
+            // 起動時と同じ理由で、まず選んだ日だけ描いてから前後を足す。
+            state.tl.from = date;
+            state.tl.to = date;
+            await Promise.all([loadMonth(), loadDayData(date)]);
+            focusDate(date);
+            render();
+            // 組み直した直後は、選んだ日の先頭から見せる
+            const tl = timelineEl();
+            const sec = tl && tl.querySelector(`.ac-daysec[data-date="${date}"]`);
+            if (sec) {
+                elBody.scrollTop = Math.max(0, sec.getBoundingClientRect().top
+                    - elBody.getBoundingClientRect().top + elBody.scrollTop);
+            }
+            renderWeekStrip();
+            await extendTimeline(1);
+            await extendTimeline(1);
+            await extendTimeline(-1);
+        }
+
         function renderDay(container) {
             const day = state.day_data;
             const wrap = el('div', 'ac-day');
@@ -936,12 +1203,6 @@
                     wrap.append(renderSchedule(s, unconfirmedBySchedule.get(s.id)));
                 }
             }
-            // 最下部からさらに引き上げると翌日へ進める、という目印。
-            // ボタンは置かない(指の流れのまま次の日へ行けるようにする)。
-            const hint = el('div', 'ac-pullhint');
-            hint.append(el('span', 'ac-pullarrow', '↑'));
-            hint.append(el('span', 'ac-pulltext', 'さらに引き上げると翌日へ'));
-            wrap.append(hint);
             container.append(wrap);
         }
         // 月グリッドの左右スワイプで前月・翌月へ。LifeBearと同じ手の動きで月を送れるようにする。
@@ -990,6 +1251,7 @@
 
         function renderSchedule(s, conf) {
             const box = el('div', 'ac-sched');
+            box.dataset.id = s.id;
             // 左帯は種別色。下請け応援・下請け請負は専用色にして、流し見でも区別できる。
             const smode = modeInfo(s);
             box.style.borderLeftColor = modeColor(s);
@@ -3952,9 +4214,39 @@
         // 「岩崎さんを直す→隣の徳永さんを直す」のような連続操作で毎回スクロール
         // し直すのは実機でかなり使いにくいので、既定でスクロール位置を保つ。
         // 日付移動のように意図的に先頭へ戻したい場合だけ resetScroll を渡す。
+        // いま画面上部に見えているものを覚えておく。
+        // 日別区画そのものより、その中の現場カードのほうが「見ているもの」に近いので、
+        // 画面の上端をまたいでいる要素のうち、いちばん内側(下端寄り)を選ぶ。
+        function scrollAnchor() {
+            if (isWide() || state.view === 'me') return null;
+            const top = elBody.getBoundingClientRect().top;
+            const selOf = (node) => (node.dataset.id
+                ? `.ac-sched[data-id="${node.dataset.id}"]`
+                : `.ac-daysec[data-date="${node.dataset.date}"]`);
+            let straddling = null;
+            let below = null;
+            for (const node of elBody.querySelectorAll('.ac-sched, .ac-daysec')) {
+                const r = node.getBoundingClientRect();
+                if (r.bottom - top <= 8) continue;
+                if (r.top - top <= 8) straddling = node;
+                else if (!below) below = node;
+            }
+            const node = straddling || below;
+            if (!node) return null;
+            return { sel: selOf(node), offset: node.getBoundingClientRect().top - top };
+        }
+        function restoreAnchor(a) {
+            if (!a) return;
+            const node = elBody.querySelector(a.sel);
+            if (!node) return;
+            const top = elBody.getBoundingClientRect().top;
+            elBody.scrollTop += (node.getBoundingClientRect().top - top) - a.offset;
+        }
+
         function render(opts) {
             const keep = !(opts && opts.resetScroll);
             const prev = keep ? elBody.scrollTop : 0;
+            const anchor = keep ? scrollAnchor() : null;
             // PCは月カレンダーと日別詳細が別々にスクロールするので、両方とも保つ。
             const prevCols = keep && isWide() ? {
                 month: (elBody.querySelector('.ac-monthwrap') || {}).scrollTop || 0,
@@ -3970,10 +4262,12 @@
                 renderMine(elBody);
             } else {
                 renderMonth(elBody);
-                renderDay(elBody);
+                if (isWide()) renderDay(elBody);
+                else renderTimeline(elBody);
                 reflowMonthIfNeeded();
             }
             if (prev > 0) elBody.scrollTop = prev;
+            restoreAnchor(anchor);
             if (prevCols) {
                 const mw = elBody.querySelector('.ac-monthwrap');
                 const dw = elBody.querySelector('.ac-day');
@@ -3992,69 +4286,12 @@
             stripTimer = setTimeout(() => {
                 stripTimer = null;
                 syncWeekStripVisibility();
+                onTimelineScroll();
             }, 60);
         }, { passive: true });
 
-        // 日別一覧の最下部から、さらに上へ引き上げると翌日へ進む。
-        //
-        // 最下部に着いただけでは進めない(誤操作防止)。本当に最下部で、
-        // そこから一定距離ぶん指を上へ動かしたときだけ翌日へ送る。
-        // 進む前に文言を「離すと翌日へ」に変えて、何が起きるか分かるようにする。
-        const PULL_THRESHOLD = 72;   // iPhoneで自然に感じる距離
-        let pullStartY = null;
-        let pullStartX = null;
-        let pullDist = 0;
-        let pullArmed = false;
-
-        function atListBottom() {
-            return elBody.scrollHeight - (elBody.scrollTop + elBody.clientHeight) <= 2;
-        }
-        function pullHintEl() { return elBody.querySelector('.ac-pullhint'); }
-        function updatePullHint() {
-            const h = pullHintEl();
-            if (!h) return;
-            const ready = pullDist >= PULL_THRESHOLD;
-            h.classList.toggle('ac-pulling', pullDist > 6);
-            h.classList.toggle('ac-pullready', ready);
-            const t = h.querySelector('.ac-pulltext');
-            if (t) t.textContent = ready ? '離すと翌日へ' : 'さらに引き上げると翌日へ';
-            // 指の動きに少しだけ付いてくると、効いていることが分かる
-            h.style.transform = pullDist > 0
-                ? `translateY(${-Math.min(pullDist, PULL_THRESHOLD) * 0.35}px)` : '';
-        }
-        function resetPull() {
-            pullStartY = null; pullStartX = null; pullDist = 0; pullArmed = false;
-            updatePullHint();
-        }
-        elBody.addEventListener('touchstart', (ev) => {
-            if (state.view === 'me' || isWide() || ev.touches.length !== 1) { resetPull(); return; }
-            pullStartY = ev.touches[0].clientY;
-            pullStartX = ev.touches[0].clientX;
-            pullDist = 0;
-            pullArmed = atListBottom();
-        }, { passive: true });
-        elBody.addEventListener('touchmove', (ev) => {
-            if (pullStartY === null || ev.touches.length !== 1) return;
-            const dy = pullStartY - ev.touches[0].clientY;   // 上へ動かすと正
-            const dx = Math.abs(ev.touches[0].clientX - pullStartX);
-            // 指の途中で最下部へ着いた場合も拾う(そこからの距離で数え直す)
-            if (!pullArmed && atListBottom()) {
-                pullArmed = true;
-                pullStartY = ev.touches[0].clientY;
-                pullDist = 0;
-                updatePullHint();
-                return;
-            }
-            if (!pullArmed || dy <= 0 || dx > Math.abs(dy)) return;
-            pullDist = dy;
-            updatePullHint();
-        }, { passive: true });
-        elBody.addEventListener('touchend', () => {
-            const go = pullArmed && pullDist >= PULL_THRESHOLD;
-            resetPull();
-            if (go) selectDate(addDays(state.selected, 1));
-        }, { passive: true });
-        elBody.addEventListener('touchcancel', resetPull, { passive: true });
+        // 「最下部で翌日へ切り替える」操作は、日別配置を縦に連続させたことで
+        // 不要になったため廃止した(普通に下へスクロールすれば翌日、上で前日)。
 
         // 画面の回転・サイズ変更で「1セルに何件入るか」が変わるため、描画をやり直す。
         let resizeTimer = null;
@@ -4081,8 +4318,25 @@
             syncLayoutMode();
             await loadMonth();
             if (!state.canEdit && !ctx.defaultView) state.view = 'me';
-            if (state.view === 'me') await loadMine(); else await loadDay();
+            if (state.view === 'me') { await loadMine(); render(); return; }
+            await loadDay();
+            // 連続タイムライン用に、選択日の前後を先に読んでおく
+            state.days.set(state.selected, {
+                day: state.day_data, issues: state.issues, confirmation: state.confirmation, full: true,
+            });
+            // まず選んだ日だけで描いて、前後は描いたあとに少しずつ足す。
+            // 起動時に前後ぶんをまとめて問い合わせると、検証環境が応答しきれず
+            // assignment_get_day が500を返すことが実際に起きた(2026-09-05)。
+            state.tl.from = state.selected;
+            state.tl.to = state.selected;
+            focusDate(state.selected);
             render();
+            syncWeekStripVisibility();
+            if (isWide()) return;
+            await extendTimeline(1);
+            await extendTimeline(1);
+            await extendTimeline(-1);
+            goToDaySection(state.selected, false);
         })();
 
         return {
