@@ -1115,3 +1115,16 @@
 /* PCは左右2カラムのままなのでタイムラインは使わない */
 .ac-root[data-layout="wide"] .ac-daysec { border-top: 0; }
 .ac-root[data-layout="wide"] .ac-daysec .ac-dayhead { position: static; box-shadow: none; }
+
+/* 外注の詳細設定(役割・時間帯、2026-09-04)。
+   通常は会社と人数だけで登録できるので、既定では閉じておく。 */
+.ac-subsummary { margin-top: 4px; font-size: 12px; font-weight: 700; color: var(--ac-muted); }
+.ac-submore { margin-top: 6px; }
+.ac-subdetail {
+  margin-top: 8px; padding: 8px; border-radius: 8px;
+  background: #f4f7fb; border: 1px solid var(--ac-line);
+}
+.ac-subdetail .ac-label { margin-top: 6px; }
+.ac-subdetail .ac-label:first-child { margin-top: 0; }
+.ac-subtimes { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+.ac-timeinput { flex: 0 0 auto; width: 116px; height: 34px; }

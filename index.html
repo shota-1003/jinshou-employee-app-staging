@@ -2925,9 +2925,9 @@
       <input type="text" id="employee-search-input" placeholder="氏名・社員番号で検索">
     </div>
     <div class="filter-row" id="employee-status-filter">
-      <button type="button" class="filter-chip active" data-status="active">在籍中</button>
+      <button type="button" class="filter-chip active" data-status="active">在職中</button>
+      <button type="button" class="filter-chip" data-status="retired">退職者</button>
       <button type="button" class="filter-chip" data-status="">すべて</button>
-      <button type="button" class="filter-chip" data-status="inactive">退職等</button>
     </div>
     <div id="employee-directory-list"></div>
   </section>
@@ -3095,6 +3095,81 @@
       <div class="hint">ログイン中の端末を一覧表示します。不審な端末や紛失した端末は無効化できます。無効化された端末は、次回利用時に暗証番号の再入力が必要になります。</div>
       <button type="button" class="secondary danger" id="employee-detail-revoke-all-devices-btn">この社員の全端末を無効化する</button>
       <div id="employee-detail-devices-list"></div>
+
+      <!-- 雇用状態(退職処理)。「アカウント停止(在職のまま一時停止・復旧可)」とは明確に別概念。 -->
+      <div class="section-title" style="margin-top:22px;">雇用状態</div>
+      <div class="card" id="employee-detail-employment-card" style="border:1px solid var(--border);">
+        <div class="row1"><span>現在の雇用状態</span><span id="employee-detail-employment-status" class="mini-tag">-</span></div>
+
+        <!-- 在職中: 退職処理 -->
+        <div id="ed-retire-block">
+          <div class="hint" style="margin:6px 0;">退職は「雇用関係の終了」です。アカウント停止(在職のまま一時的にログインを止める・復旧可能)とは別物です。退職すると退職日の翌日以降、社員として新規業務の対象外になります。過去の勤務・日報・給与・申請履歴は削除されません。</div>
+          <button type="button" class="secondary danger" id="ed-retire-open-btn">退職処理を行う</button>
+          <div id="ed-retire-form" style="display:none; margin-top:12px;">
+            <label for="ed-retire-date">退職日 <span style="color:var(--danger,#c0392b);">*必須</span></label>
+            <input type="date" id="ed-retire-date">
+            <label for="ed-retire-reason">退職理由(任意)</label>
+            <input type="text" id="ed-retire-reason" placeholder="例: 契約満了・自己都合 など">
+            <label for="ed-retire-note">備考(任意)</label>
+            <input type="text" id="ed-retire-note" placeholder="例: 退職後は外注会社所属として継続予定 など">
+            <div id="ed-retire-warning" style="display:none; margin:10px 0; padding:10px; border-radius:8px; background:#fff4e5; color:#8a5300; font-size:13px;"></div>
+            <div class="hint" style="margin:10px 0;">この社員を退職扱いにします。過去の勤務・日報・給与・申請履歴は削除されません。</div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="secondary" id="ed-retire-cancel-btn">やめる</button>
+              <button type="button" class="danger" id="ed-retire-confirm-btn">退職を確定する</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 退職済み: 退職情報 + 退職取消 / 再入社 / 外注登録 -->
+        <div id="ed-retired-block" style="display:none;">
+          <div id="ed-retired-info" class="hint" style="margin:6px 0;"></div>
+          <div style="display:flex; flex-direction:column; gap:8px; margin-top:8px;">
+            <button type="button" class="secondary" id="ed-cancel-retire-btn">退職を取り消す(誤操作の場合)</button>
+            <button type="button" class="secondary" id="ed-rehire-open-btn">再入社として登録する</button>
+            <button type="button" class="secondary" id="ed-to-sub-open-btn">退職後、外注作業員として登録</button>
+          </div>
+
+          <!-- 再入社 -->
+          <div id="ed-rehire-form" style="display:none; margin-top:12px;">
+            <label for="ed-rehire-date">再入社日 <span style="color:var(--danger,#c0392b);">*必須</span></label>
+            <input type="date" id="ed-rehire-date">
+            <div class="hint" style="margin:8px 0;">過去の雇用期間は履歴として保持し、新しい在職期間として扱います(過去の社員時代の履歴とは混同しません)。</div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" class="secondary" id="ed-rehire-cancel-btn">やめる</button>
+              <button type="button" id="ed-rehire-confirm-btn">再入社を確定する</button>
+            </div>
+          </div>
+
+          <!-- 退職後、外注作業員として登録 -->
+          <div id="ed-to-sub-form" style="display:none; margin-top:12px;">
+            <div class="hint" style="margin:6px 0;">社員としての履歴は残したまま、外注会社所属の作業員として新規登録します(社員IDと外注作業員IDは別。人物としての関連のみ記録されます)。</div>
+            <label for="ed-sub-company">所属外注会社 <span style="color:var(--danger,#c0392b);">*必須</span></label>
+            <select id="ed-sub-company"></select>
+            <label for="ed-sub-name">氏名 *必須</label>
+            <input type="text" id="ed-sub-name">
+            <label for="ed-sub-furigana">フリガナ</label>
+            <input type="text" id="ed-sub-furigana">
+            <label for="ed-sub-phone">電話番号</label>
+            <input type="text" id="ed-sub-phone">
+            <label for="ed-sub-birth">生年月日</label>
+            <input type="date" id="ed-sub-birth">
+            <label for="ed-sub-emg-name">緊急連絡先(氏名)</label>
+            <input type="text" id="ed-sub-emg-name">
+            <label for="ed-sub-emg-rel">緊急連絡先(続柄)</label>
+            <input type="text" id="ed-sub-emg-rel">
+            <label for="ed-sub-emg-phone">緊急連絡先(電話)</label>
+            <input type="text" id="ed-sub-emg-phone">
+            <label for="ed-sub-qual">資格</label>
+            <input type="text" id="ed-sub-qual">
+            <div style="display:flex; gap:8px; margin-top:10px;">
+              <button type="button" class="secondary" id="ed-to-sub-cancel-btn">やめる</button>
+              <button type="button" id="ed-to-sub-submit-btn">外注作業員として登録する</button>
+            </div>
+            <div id="ed-to-sub-result" class="hint" style="display:none; margin-top:8px;"></div>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -3633,6 +3708,7 @@
      app.js より先に読み込む(app.js の初期化時点で mount() を呼べるようにするため)。 -->
 <script src="rokuyou.js"></script>
 <script src="assignment-calendar.js"></script>
+<script src="qr.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

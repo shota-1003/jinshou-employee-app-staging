@@ -77,6 +77,47 @@
         haul: { key: 'own-haul', label: '運搬' },
         other: { key: 'own-other', label: 'その他' },
     };
+    // 外注の役割。数え方は assignment_kind('work'/'haul')で決まる。
+    // 将来ほかの役割を足すときは、ここに1行足し、集計側の扱いも一緒に決める。
+    const SUB_ROLES = [
+        { kind: 'work', role: '', label: '外注作業' },
+        { kind: 'haul', role: 'haul', label: '運搬' },
+    ];
+    // 半日入力を毎回時刻で打たなくて済むようにする。時間は現場の予定時間に合わせる。
+    const SUB_SLOTS = [
+        { key: 'all', label: '終日' },
+        { key: 'am', label: '午前' },
+        { key: 'pm', label: '午後' },
+        { key: 'custom', label: '時間指定' },
+    ];
+    const NOON_END = '12:00';
+    const NOON_START = '13:00';
+    function slotTimes(key, sched) {
+        const st = (sched && sched.start_time) || '08:00';
+        const en = (sched && sched.end_time) || '17:00';
+        if (key === 'am') return { start_time: st, end_time: NOON_END };
+        if (key === 'pm') return { start_time: NOON_START, end_time: en };
+        // 終日は時刻を持たせない(現場の予定時間をそのまま使う)
+        return { start_time: '', end_time: '' };
+    }
+    function slotOf(sub, sched) {
+        if (!sub.start_time && !sub.end_time) return 'all';
+        const am = slotTimes('am', sched);
+        const pm = slotTimes('pm', sched);
+        if (sub.start_time === am.start_time && sub.end_time === am.end_time) return 'am';
+        if (sub.start_time === pm.start_time && sub.end_time === pm.end_time) return 'pm';
+        return 'custom';
+    }
+    function subRoleLabel(sub) {
+        const r = SUB_ROLES.find((x) => x.kind === (sub.assignment_kind || 'work'));
+        return r ? r.label : '外注作業';
+    }
+    function subSlotLabel(sub, sched) {
+        const k = slotOf(sub, sched);
+        if (k === 'custom') return `${sub.start_time || ''}〜${sub.end_time || ''}`;
+        return (SUB_SLOTS.find((x) => x.key === k) || {}).label || '終日';
+    }
+
     function memberRoleTag(m) {
         const isSub = m.member_type === 'subcontractor' || m.member_type === 'subcontractor_company';
         if (isSub) {
@@ -2616,6 +2657,9 @@
                     // 下請け応援・請負では協力会社の行に職長が付くことがあるので落とさない
                     role: x.role || '',
                     assignment_kind: x.assignment_kind || 'work',
+                    headcount_role: x.headcount_role || '',
+                    start_time: x.start_time || '',
+                    end_time: x.end_time || '',
                     workers: (x.workers || []).map((w) => ({
                         subcontractor_worker_id: w.subcontractor_worker_id || null,
                         name: w.name || '', phone: w.phone || '',
@@ -3030,6 +3074,10 @@
                         // null は「下請け請負で人数未把握」。1人に化けさせない。
                         headcount: (m.headcount === null || m.headcount === undefined)
                             ? null : m.headcount,
+                        assignment_kind: m.assignment_kind || 'work',
+                        headcount_role: m.headcount_role || '',
+                        start_time: m.start_time || '',
+                        end_time: m.end_time || '',
                         workers: (m.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
@@ -3242,6 +3290,91 @@
                     });
                     cnt.append(el('span', 'ac-steplabel', '人数'), minus, num, plus);
                     card.append(cnt);
+
+                    // 通常は会社と人数だけで登録できる。役割・時間帯は「詳細設定」の中。
+                    // 毎回開かなくていいように、既定(終日・外注作業)なら閉じたまま出す。
+                    const detail = el('div', 'ac-subdetail');
+                    const isDefault = (sub.assignment_kind || 'work') === 'work'
+                        && !sub.start_time && !sub.end_time;
+                    detail.style.display = isDefault ? 'none' : '';
+                    const moreBtn = el('button', 'ac-btn ac-sm ac-submore',
+                        isDefault ? '詳細設定（役割・時間帯）▾' : '詳細設定 ▴');
+                    moreBtn.addEventListener('click', () => {
+                        const open = detail.style.display === 'none';
+                        detail.style.display = open ? '' : 'none';
+                        moreBtn.textContent = open ? '詳細設定 ▴' : '詳細設定（役割・時間帯）▾';
+                    });
+                    const summary = el('div', 'ac-subsummary');
+                    const syncSummary = () => {
+                        summary.textContent = `${subSlotLabel(sub, draft)} ／ ${subRoleLabel(sub)}`;
+                    };
+                    syncSummary();
+                    card.append(summary, moreBtn, detail);
+
+                    // 役割
+                    detail.append(el('div', 'ac-label', '役割'));
+                    const roleRow = el('div', 'ac-tokens');
+                    for (const r of SUB_ROLES) {
+                        const t = el('button', 'ac-token'
+                            + ((sub.assignment_kind || 'work') === r.kind ? ' ac-on' : ''), r.label);
+                        t.addEventListener('click', () => {
+                            sub.assignment_kind = r.kind;
+                            sub.headcount_role = r.role || '';
+                            roleRow.querySelectorAll('.ac-token').forEach((x) => x.classList.remove('ac-on'));
+                            t.classList.add('ac-on');
+                            syncSummary();
+                        });
+                        roleRow.append(t);
+                    }
+                    detail.append(roleRow);
+
+                    // 時間帯
+                    detail.append(el('div', 'ac-label', '時間帯'));
+                    const slotRow = el('div', 'ac-tokens');
+                    const timeRow = el('div', 'ac-subtimes');
+                    const stIn = el('input', 'ac-input ac-timeinput');
+                    stIn.type = 'time'; stIn.value = sub.start_time || '';
+                    const enIn = el('input', 'ac-input ac-timeinput');
+                    enIn.type = 'time'; enIn.value = sub.end_time || '';
+                    stIn.addEventListener('change', () => {
+                        sub.start_time = stIn.value; syncSlotTokens(); syncSummary();
+                    });
+                    enIn.addEventListener('change', () => {
+                        sub.end_time = enIn.value; syncSlotTokens(); syncSummary();
+                    });
+                    timeRow.append(el('span', 'ac-steplabel', '開始'), stIn,
+                        el('span', 'ac-steplabel', '終了'), enIn);
+                    function syncSlotTokens() {
+                        const cur = slotOf(sub, draft);
+                        slotRow.querySelectorAll('.ac-token').forEach((x) => {
+                            x.classList.toggle('ac-on', x.dataset.slot === cur);
+                        });
+                        timeRow.style.display = cur === 'custom' ? '' : 'none';
+                    }
+                    for (const sl of SUB_SLOTS) {
+                        const t = el('button', 'ac-token', sl.label);
+                        t.dataset.slot = sl.key;
+                        t.addEventListener('click', () => {
+                            if (sl.key === 'custom') {
+                                if (!sub.start_time && !sub.end_time) {
+                                    const am = slotTimes('am', draft);
+                                    sub.start_time = am.start_time;
+                                    sub.end_time = am.end_time;
+                                }
+                            } else {
+                                const tt = slotTimes(sl.key, draft);
+                                sub.start_time = tt.start_time;
+                                sub.end_time = tt.end_time;
+                            }
+                            stIn.value = sub.start_time || '';
+                            enIn.value = sub.end_time || '';
+                            syncSlotTokens();
+                            syncSummary();
+                        });
+                        slotRow.append(t);
+                    }
+                    detail.append(slotRow, timeRow);
+                    syncSlotTokens();
                     if (contractMode) {
                         const unk = el('button', 'ac-btn ac-sm', '人数は未把握にする');
                         unk.title = '下請け請負は人数を把握していなくて構いません。人工には数えず「現場日」で数えます。';
@@ -3294,12 +3427,15 @@
                         }
                         const list = el('div', 'ac-list');
                         list.style.maxHeight = 'none';
+                        // 同じ会社でも「午前は作業・午後は運搬」のように分けて入れるため、
+                        // すでに入っている会社も選べるままにする(重複ではなく別の行として扱う)。
                         for (const co of rows) {
-                            if (draft.subs.some((x) => x.subcontractor_company_id === co.id)) continue;
+                            const already = draft.subs.filter((x) => x.subcontractor_company_id === co.id).length;
                             const it = el('div', 'ac-listitem');
                             it.append(el('div', 'ac-menutitle', co.company_name));
-                            it.append(el('div', 'ac-sub2',
-                                `月表示では「${co.label}3」のように出ます${co.recently_used ? ' ／ 最近使用' : ''}`));
+                            it.append(el('div', 'ac-sub2', already
+                                ? `この現場に ${already}行 入っています ／ 時間帯や役割を分けて追加できます`
+                                : `月表示では「${co.label}3」のように出ます${co.recently_used ? ' ／ 最近使用' : ''}`));
                             it.addEventListener('click', () => {
                                 draft.subs.push({
                                     member_type: 'subcontractor_company',
@@ -3307,6 +3443,11 @@
                                     company_name: co.company_name,
                                     short_name: co.short_name,
                                     headcount: 1,
+                                    // 既定は今までどおり「終日・外注作業」。詳細設定を開いたときだけ変える。
+                                    assignment_kind: 'work',
+                                    headcount_role: '',
+                                    start_time: '',
+                                    end_time: '',
                                     workers: [],
                                 });
                                 api.close();
@@ -3618,6 +3759,10 @@
                         subcontractor_company_id: x.subcontractor_company_id,
                         // 下請け請負の「未把握」は null のまま送る(サーバー側で人工に数えない)
                         headcount: (x.headcount === null || x.headcount === undefined) ? null : x.headcount,
+                        assignment_kind: x.assignment_kind || 'work',
+                        headcount_role: x.headcount_role || '',
+                        start_time: x.start_time || '',
+                        end_time: x.end_time || '',
                         workers: (x.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
