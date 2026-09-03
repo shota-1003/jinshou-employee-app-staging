@@ -54,6 +54,9 @@ self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return; // Supabase API等の外部通信はキャッシュしない
   if (event.request.method !== 'GET') return;
+  // lucky-preview(Staging専用の演出プレビュー)はSWのキャッシュ対象から完全に除外し、
+  // 常にブラウザのネイティブfetchで最新を取得させる(古い版がキャッシュから出続けるのを防ぐ)。
+  if (url.pathname.includes('/lucky-preview')) return;
 
   // {cache: 'reload'}でブラウザのHTTPキャッシュ(GitHub Pagesのmax-age等)を無視して
   // 必ずネットワークへ再取得しにいく。これを指定しないと、SW自体はnetwork-firstでも
