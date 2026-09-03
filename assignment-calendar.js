@@ -954,38 +954,51 @@
             elBody.scrollTop = top + (elBody.scrollHeight - before);
         }
 
+        // タイムラインの組み替えは1つずつ順番に行う。
+        // 起動直後に前後の日を足している最中に日付を押されると、両方が同時に
+        // 区画を足し引きして並びが壊れる(実際に区画が欠けた状態を確認、2026-09-05)。
+        let tlQueue = Promise.resolve();
+        // 日付の移動が待っている間は、前後の日の読み込みを途中で切り上げて先を譲る。
+        // (起動直後の読み込みが終わるまでタップが待たされると、反応が鈍く感じる)
+        let tlNavWaiting = 0;
+        function tlRun(fn) {
+            const next = tlQueue.then(fn, fn);
+            tlQueue = next.catch(() => {});
+            return next;
+        }
+        function tlRunNav(fn) {
+            tlNavWaiting += 1;
+            return tlRun(() => { tlNavWaiting -= 1; return fn(); });
+        }
+
         // 前後へ日を足す。上へ足すときは、増えた高さぶんスクロールを送って
         // 「見ている現場が突然動く」ことがないようにする。
-        let tlBusy = false;
-        async function extendTimeline(dir) {
-            const tl = timelineEl();
-            if (!tl || tlBusy) return;
-            const span = Math.round((Date.parse(state.tl.to) - Date.parse(state.tl.from)) / 86400000) + 1;
-            if (span >= TL_MAX_DAYS) return;
-            tlBusy = true;
-            try {
-                const dates = [];
-                for (let i = 1; i <= TL_STEP; i += 1) {
-                    dates.push(dir > 0 ? addDays(state.tl.to, i) : addDays(state.tl.from, -i));
-                }
-                for (const d of dates) {
-                    // eslint-disable-next-line no-await-in-loop
-                    await loadDayData(d);
-                }
+        async function extendTimelineNow(dir) {
+            // 1日ずつ読んでは並べる。途中で日付の移動が入ったらそこで切り上げる。
+            for (let i = 0; i < TL_STEP; i += 1) {
+                const tl = timelineEl();
+                if (!tl || tlNavWaiting) break;
+                const span = Math.round((Date.parse(state.tl.to) - Date.parse(state.tl.from)) / 86400000) + 1;
+                if (span >= TL_MAX_DAYS) break;
+                const d = dir > 0 ? addDays(state.tl.to, 1) : addDays(state.tl.from, -1);
+                // eslint-disable-next-line no-await-in-loop
+                await loadDayData(d);
+                const tl2 = timelineEl();
+                if (!tl2) break;
                 if (dir > 0) {
-                    for (const d of dates) { tl.append(buildDaySection(d)); state.tl.to = d; }
+                    tl2.append(buildDaySection(d));
+                    state.tl.to = d;
                 } else {
                     const beforeH = elBody.scrollHeight;
                     const beforeTop = elBody.scrollTop;
-                    for (const d of dates) {
-                        tl.prepend(buildDaySection(d));
-                        state.tl.from = d;
-                    }
+                    tl2.prepend(buildDaySection(d));
+                    state.tl.from = d;
                     elBody.scrollTop = beforeTop + (elBody.scrollHeight - beforeH);
                 }
-                focusDate(state.selected);
-            } finally { tlBusy = false; }
+            }
+            focusDate(state.selected);
         }
+        function extendTimeline(dir) { return tlRun(() => extendTimelineNow(dir)); }
 
         function onTimelineScroll() {
             if (isWide() || state.view === 'me') return;
@@ -1001,23 +1014,28 @@
         }
 
         // 週表示や月グリッドから日を選んだとき。画面を作り直さず、その日の区画へ送る。
-        async function goToDaySection(date, smooth) {
+        function goToDaySection(date, smooth) { return tlRunNav(() => goToDaySectionNow(date, smooth)); }
+        async function goToDaySectionNow(date, smooth) {
             const tl = timelineEl();
             if (!tl) { selectDate(date); return; }
-            // 範囲の外なら、そこを中心に組み直す(遠い日へ飛んだ場合)
+            // 範囲の外なら、届くまで足す。遠すぎる場合はそこを中心に組み直す。
             if (date < state.tl.from || date > state.tl.to) {
                 const gapDays = Math.abs(Math.round(
                     (Date.parse(date) - Date.parse(state.selected)) / 86400000));
-                if (gapDays > TL_MAX_DAYS / 2) { await rebuildTimeline(date); return; }
+                if (gapDays > TL_MAX_DAYS / 2) { await rebuildTimelineNow(date); return; }
                 const dir = date > state.tl.to ? 1 : -1;
-                while ((dir > 0 ? date > state.tl.to : date < state.tl.from)) {
+                let guard = 0;
+                while ((dir > 0 ? date > state.tl.to : date < state.tl.from) && guard < 20) {
+                    guard += 1;
+                    const from = state.tl.from; const to = state.tl.to;
                     // eslint-disable-next-line no-await-in-loop
-                    await extendTimeline(dir);
-                    if (tlBusy) break;
+                    await extendTimelineNow(dir);
+                    // 上限に達して1日も増えなかった場合は、組み直しへ回す
+                    if (state.tl.from === from && state.tl.to === to) break;
                 }
             }
-            const sec = tl.querySelector(`.ac-daysec[data-date="${date}"]`);
-            if (!sec) { await rebuildTimeline(date); return; }
+            const sec = timelineEl() && timelineEl().querySelector(`.ac-daysec[data-date="${date}"]`);
+            if (!sec) { await rebuildTimelineNow(date); return; }
             const top = sec.getBoundingClientRect().top - elBody.getBoundingClientRect().top
                 + elBody.scrollTop;
             if (smooth && typeof elBody.scrollTo === 'function') {
@@ -1028,7 +1046,8 @@
             syncViewedDate(date);
         }
 
-        async function rebuildTimeline(date) {
+        function rebuildTimeline(date) { return tlRunNav(() => rebuildTimelineNow(date)); }
+        async function rebuildTimelineNow(date) {
             state.selected = date;
             state.year = Number(date.slice(0, 4));
             state.month = Number(date.slice(5, 7));
@@ -1047,9 +1066,9 @@
                     - elBody.getBoundingClientRect().top + elBody.scrollTop);
             }
             renderWeekStrip();
-            await extendTimeline(1);
-            await extendTimeline(1);
-            await extendTimeline(-1);
+            await extendTimelineNow(1);
+            await extendTimelineNow(1);
+            await extendTimelineNow(-1);
         }
 
         function renderDay(container) {
