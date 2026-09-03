@@ -175,10 +175,11 @@
             days: new Map(),
             tl: { from: null, to: null },
             // スマホ/タブレットの表示状態(2026-09-05)。
-            //   month = 1か月のカレンダー全体
-            //   day   = 週間固定 + 日別配置の連続スクロール
-            // 月表示で日付を押すと day へ入り、週間表示の「∨ 月表示」で month へ戻る。
-            mobileMode: 'month',
+            //   day   = コンパクトな週表示 + 日別配置の連続スクロール(既定)
+            //   month = 1か月のカレンダー全体(必要なときだけ開く)
+            // スマホで最初に見たいのは配置一覧なので、開いた直後は day から始める。
+            // 月全体は上部バーの「月表示」か、上部を下へ引く操作で開く。
+            mobileMode: 'day',
             // 手元にある月データがどの年月のものか(月表示へ戻るときの読み直し判定)
             monthLoaded: null,
         };
@@ -210,15 +211,32 @@
         // 週間表示の上に「月全体へ戻る」操作を1つ置く(2026-09-05)。
         // 週間表示に入ると1週間ぶんしか見えず、月全体へ戻る手段が無かった。
         const elWeekBar = el('div', 'ac-weekbar');
-        const elWeekBack = el('button', 'ac-weekback', '∨ 月表示');
-        elWeekBack.setAttribute('aria-label', '月全体のカレンダーへ戻る');
-        elWeekBack.addEventListener('click', () => backToMonth());
+        const elWeekBack = el('button', 'ac-weekback', '▼ 月表示');
+        elWeekBack.addEventListener('click', () => toggleMonthPanel());
         const elWeekLabel = el('div', 'ac-weeklabel');
         elWeekBar.append(elWeekBack, elWeekLabel);
         const elWeekRow = el('div', 'ac-weekrow');
         elWeekRow.append(elWeekPrev, elWeekTrack, elWeekNext);
         elWeekNav.append(elWeekBar, elWeekRow);
         elWeekNav.style.display = 'none';
+
+        // 上部の固定エリアを下へ引くと月間カレンダーが開く(閉じるときは上へ引く)。
+        // 週の横スワイプと取り合わないよう、縦の動きが横より明確に大きいときだけ効かせる。
+        let barTouch = null;
+        elWeekBar.addEventListener('touchstart', (e) => {
+            const t = e.touches[0];
+            barTouch = { x: t.clientX, y: t.clientY };
+        }, { passive: true });
+        elWeekBar.addEventListener('touchend', (e) => {
+            if (!barTouch) return;
+            const t = e.changedTouches[0];
+            const dy = t.clientY - barTouch.y;
+            const dx = Math.abs(t.clientX - barTouch.x);
+            barTouch = null;
+            if (Math.abs(dy) < 24 || dx > Math.abs(dy)) return;
+            if (dy > 0 && state.mobileMode !== 'month') openMonthPanel();
+            if (dy < 0 && state.mobileMode === 'month') closeMonthPanel();
+        }, { passive: true });
         const elOffline = el('div', 'ac-offline', '通信できないため、端末に保存された最後の内容を表示しています');
         elOffline.style.display = 'none';
         const elBody = el('div', 'ac-bodywrap');
@@ -555,14 +573,23 @@
         // 「スクロールし始めてから別のパネルを出す」方式は、出た瞬間に高さが変わって
         // 一覧がカクつく・一瞬消える、という指摘の原因そのものだった(2026-09-05)。
         function syncWeekStripVisibility() {
-            const want = !(state.view === 'me' || isWide() || state.mobileMode === 'month');
+            const want = !(state.view === 'me' || isWide());
             const shown = elWeekNav.style.display !== 'none';
-            if (want === shown) return;
-            elWeekNav.style.display = want ? '' : 'none';
-            if (want) {
-                state.weekStart = mondayOf(state.selected);
-                renderWeekStrip();
-                ensureWeekData(state.weekStart);
+            const monthOpen = state.mobileMode === 'month';
+            // 月間カレンダーを開いているあいだは7日の帯を畳み、
+            // 「一覧へ戻る」ボタンだけ残す(戻る手段を必ず画面に残す)。
+            elWeekRow.style.display = monthOpen ? 'none' : '';
+            elWeekBack.textContent = monthOpen ? '▲ 一覧へ' : '▼ 月表示';
+            elWeekBack.setAttribute('aria-label',
+                monthOpen ? '配置一覧へ戻る' : '月間カレンダーを開く');
+            elWeekLabel.style.display = monthOpen ? 'none' : '';
+            if (want !== shown) {
+                elWeekNav.style.display = want ? '' : 'none';
+                if (want) {
+                    state.weekStart = mondayOf(state.selected);
+                    renderWeekStrip();
+                    ensureWeekData(state.weekStart);
+                }
             }
             syncHeaderHeight();
         }
@@ -962,14 +989,34 @@
 
         function markWeekSelection(date) {
             syncWeekLabel(date);
-            let inTrack = false;
             elWeekTrack.querySelectorAll('.ac-wcell').forEach((c) => {
-                const on = c.dataset.date === date;
-                if (on) inTrack = true;
-                c.classList.toggle('ac-on', on);
+                c.classList.toggle('ac-on', c.dataset.date === date);
             });
-            // 表示中の週から外れたら、その週へ寄せる(週またぎ)
-            if (!inTrack) renderWeekStrip();
+            // いま出ている7日から外れたら、その日の週へ寄せる。
+            // トラックは前後4週ぶんを持っているので「どこかのペインに在る」だけでは足りず、
+            // 実際に表示中のペインを見て判断する(見ている日が9/7に入ったのに
+            // 上部が8/31〜9/6のまま、という状態を作らない)。
+            focusWeekPane(date);
+        }
+
+        // 表示中のペインを date の週に合わせる。縦のスクロール位置には触れない。
+        function focusWeekPane(date) {
+            const want = mondayOf(date);
+            if (!weekBase) { buildWeekTrack(want); return; }
+            const paneW = elWeekTrack.clientWidth;
+            const diff = Math.round((Date.parse(want) - Date.parse(weekBase)) / 86400000 / 7);
+            if (Math.abs(diff) > WEEK_SPAN) {
+                state.weekStart = want;
+                ensureWeekData(want).then(() => buildWeekTrack(want));
+                return;
+            }
+            state.weekStart = want;
+            const idx = WEEK_SPAN + diff;
+            if (paneW && Math.round(elWeekTrack.scrollLeft / paneW) !== idx) centerWeekTrack(idx);
+            // 端まで来たら、その週を中心に作り直して先へ進めるようにする
+            if (idx <= 1 || idx >= WEEK_PANES - 2) {
+                ensureWeekData(want).then(() => buildWeekTrack(want));
+            }
         }
         function markMonthSelection(date) {
             elBody.querySelectorAll('.ac-cell').forEach((c) => {
@@ -1062,8 +1109,15 @@
             if (wasMonth) fadeModeSwitch();
         }
 
+        // 上部バーのボタン。開いていれば閉じ、閉じていれば開く。
+        function toggleMonthPanel() {
+            return state.mobileMode === 'month' ? closeMonthPanel() : openMonthPanel();
+        }
+        // 配置一覧へ戻る(いま選んでいる日の位置から見せる)。
+        function closeMonthPanel() { return enterDayMode(state.selected); }
+
         // 週間固定+日別 → 月全体表示。いま見ていた日をそのまま選択日として残す。
-        function backToMonth() { return tlRunNav(() => backToMonthNow()); }
+        function openMonthPanel() { return tlRunNav(() => backToMonthNow()); }
         async function backToMonthNow() {
             const date = viewedDate() || state.selected;
             focusDate(date);
@@ -4439,10 +4493,15 @@
             state.tl.from = state.selected;
             state.tl.to = state.selected;
             focusDate(state.selected);
-            // スマホ/タブレットは月全体表示から始める(日付を押すと日別表示へ入る)。
-            // PCは左右2カラムなので、これまでどおり月と日別を同時に出す。
+            // スマホ/タブレットは、開いた直後から「週表示 + その日の配置一覧」を見せる。
+            // 月間カレンダーは上部バーから開く(PCは左右2カラムで月と日別を同時に出す)。
             render();
             syncWeekStripVisibility();
+            if (isWide()) return;
+            await extendTimeline(1);
+            await extendTimeline(1);
+            await extendTimeline(-1);
+            goToDaySection(state.selected, false);
         })();
 
         return {
