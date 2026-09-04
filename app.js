@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v142-staging';
-const BUILD_DEPLOYED_AT = '2026-09-04T21:02:36.835Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v143-staging';
+const BUILD_DEPLOYED_AT = '2026-09-04T21:31:03.174Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1802,20 +1802,26 @@ function fillCardFromReceipt(card, receipt) {
   if (receipt.counterparty_raw) storeInput.value = receipt.counterparty_raw;
   if (receipt.tax_amount != null) taxInput.value = receipt.tax_amount;
 
-  // 金額: 高=入力 / 中=最有力を入れて要確認 / 低=空にして要確認(誤値を確定しない)
+  // 金額: 高=確定入力 / 中=入れて要確認(黄) / 低=候補値を入れて要確認(黄)。
+  // 【不変条件】内部(detail)に値または候補があるなら UI にも必ず表示する。低confidenceでも空欄にしない
+  //  (「内部=300, UI=空欄」を禁止)。値も候補も無いときだけ空欄+警告。要確認はupdateExpenseTotalで明示。
   const amtConf = ocrFieldStatus(receipt.amount_confidence || receipt.confidence);
   const amtCands = (receipt.amount_candidates || receipt.total_amount_candidates || []).filter((c) => c && c.amount != null);
-  if (receipt.total_amount != null && amtConf !== 'low') amountInput.value = receipt.total_amount;
-  else if (amtConf === 'low') amountInput.value = '';
+  const amtValue = receipt.total_amount != null ? receipt.total_amount : (amtCands[0] ? amtCands[0].amount : null);
+  amountInput.value = amtValue != null ? amtValue : '';
+  amountInput.dataset.ocrConfidence = amtConf; // 整合性チェック用(high=ok/medium=review/low)
+  amountInput.dataset.ocrInternal = amtValue != null ? String(amtValue) : ''; // detail内部値(UIとの一致検証用)
   updateExpenseTotal();
-  renderOcrFieldCandidates(card, 'amount', amountInput, amtCands.map((c) => ({ v: c.amount, label: c.label })), amtConf, '金額を確認してください', (v) => { amountInput.value = Number(v); updateExpenseTotal(); });
+  renderOcrFieldCandidates(card, 'amount', amountInput, amtCands.map((c) => ({ v: c.amount, label: c.label })), amtConf, amtConf === 'low' ? '金額の確信度が低いです。金額をご確認ください' : '金額を確認してください', (v) => { amountInput.value = Number(v); amountInput.dataset.ocrConfidence = 'ok'; updateExpenseTotal(); });
 
-  // 利用日: 日付が無い/曖昧なら推測で埋めない。他の領収書の日付をコピーしない。
+  // 利用日: 内部に候補があるなら UI へ表示する(低confidenceでも空欄にしない)。他の領収書の日付はコピーしない。
   const dateConf = ocrFieldStatus(receipt.date_confidence || (receipt.document_date ? receipt.confidence : 'low'));
   const dateCands = (receipt.date_candidates || []).filter((c) => c && c.date);
-  if (receipt.document_date && dateConf !== 'low') dateInput.value = receipt.document_date;
-  else if (dateConf === 'low') dateInput.value = '';
-  renderOcrFieldCandidates(card, 'date', dateInput, dateCands.map((c) => ({ v: c.date, label: c.label })), dateConf, '領収書に日付がありません。利用日を確認してください', (v) => { dateInput.value = v; });
+  const dateValue = receipt.document_date || (dateCands[0] ? dateCands[0].date : null);
+  dateInput.value = dateValue || '';
+  dateInput.dataset.ocrConfidence = dateConf;
+  dateInput.dataset.ocrInternal = dateValue || '';
+  renderOcrFieldCandidates(card, 'date', dateInput, dateCands.map((c) => ({ v: c.date, label: c.label })), dateConf, dateValue ? '利用日の確信度が低いです。日付をご確認ください' : '領収書に日付がありません。利用日を確認してください', (v) => { dateInput.value = v; dateInput.dataset.ocrConfidence = 'ok'; });
 
   // 総合: すべて確定できたときだけ「読み取り完了」。それ以外は要確認項目を明示。
   const needs = [];
@@ -2200,14 +2206,27 @@ function updateExpenseTotal() {
   const cards = document.querySelectorAll('.expense-item-card');
   let total = 0;
   let validCount = 0;
+  let needsConfirmCount = 0; // 金額/利用日の確信度が高くない=人間が確認すべき明細数
   cards.forEach((card) => {
     if (isExpenseItemEmpty(card)) return;
     validCount += 1;
-    const amount = Number(card.querySelector('.item-amount').value || 0);
+    const amountEl = card.querySelector('.item-amount');
+    const amount = Number(amountEl.value || 0);
     total += amount;
+    // 整合性チェック(不変条件): detail内部値があるのに UI が空欄、という状態を検出して警告する。
+    const internal = amountEl.dataset.ocrInternal;
+    if (internal && internal !== '' && (amountEl.value === '' || amountEl.value == null)) {
+      console.warn(`[OCR整合性] 明細に内部金額(${internal})があるがUIが空欄。state/UI反映バグの可能性`, card.dataset.itemId);
+    }
+    const aConf = amountEl.dataset.ocrConfidence;
+    const dConf = (card.querySelector('.item-date') || {}).dataset ? card.querySelector('.item-date').dataset.ocrConfidence : null;
+    if ((aConf && aConf !== 'ok') || (dConf && dConf !== 'ok')) needsConfirmCount += 1;
   });
   document.getElementById('expense-total-count').textContent = `${validCount}件`;
   document.getElementById('expense-total-amount').textContent = `${total.toLocaleString()}円`;
+  // 要確認(黄)の明細数を明示して、人間が確認すべき箇所を隠さない。
+  const countEl = document.getElementById('expense-total-count');
+  if (countEl) countEl.textContent = needsConfirmCount > 0 ? `${validCount}件（うち要確認 ${needsConfirmCount}件）` : `${validCount}件`;
   updateExpenseBulkSetVisibility();
 }
 
