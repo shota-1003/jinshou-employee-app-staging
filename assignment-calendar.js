@@ -14,6 +14,7 @@
  *         employeeName: '関口 翔太',
  *         onOpenSite: (siteId) => {},       // 将来の現場管理アプリへの遷移(任意)
  *         defaultView: 'month' | 'me',
+ *         initialDate: '2026-09-05',        // 省略時は今日。ホームウィジェットからの遷移で使う
  *     });
  *
  *   統合時にこのファイルを書き換える必要はない(app.jsから上記の形で呼ぶだけ)。
@@ -188,11 +189,14 @@
         const store = ctx.storage || window.localStorage;
 
         const today = todayJST();
+        // ホームウィジェット等から「この日を開いてほしい」と指定された日付。
+        // 形式が合わないものは無視して、これまでどおり今日から始める。
+        const wanted = /^\d{4}-\d{2}-\d{2}$/.test(String(ctx.initialDate || '')) ? ctx.initialDate : today;
         const state = {
             view: ctx.defaultView || 'month',
-            year: Number(today.slice(0, 4)),
-            month: Number(today.slice(5, 7)),
-            selected: today,
+            year: Number(wanted.slice(0, 4)),
+            month: Number(wanted.slice(5, 7)),
+            selected: wanted,
             // スクロール時に上部へ残す1週間の起点(月曜)。月では区切らない。
             weekStart: null,
             // 月表示・週ストリップの両方がここだけを見る日付ごとのキャッシュ。

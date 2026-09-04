@@ -29,8 +29,27 @@ const IS_STAGING = true;
 
 const DEVICE_AUTH_KEY = 'jinshou_device_auth'; // 社員ポータルと同じキー(共通の端末認証)
 const PORTAL_URL = '../index.html';
+// ホームウィジェットから「この日を開いて」と渡されたときに一時的に覚えておく場所。
+// ログインを挟むとURLのクエリが消えるため、同一オリジンのsessionStorageで受け渡す。
+const WANT_DATE_KEY = 'jinshou_calendar_want_date';
 
 let currentDeviceToken = null;
+
+// ?date=YYYY-MM-DD を取り出す。形式が違うものは無視する(不正な値で画面を壊さない)。
+function wantedDate() {
+    let d = null;
+    try {
+        d = new URLSearchParams(location.search).get('date');
+        if (!d) d = sessionStorage.getItem(WANT_DATE_KEY);
+    } catch (e) { return null; }
+    return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? d : null;
+}
+
+function consumeWantedDate() {
+    const d = wantedDate();
+    try { sessionStorage.removeItem(WANT_DATE_KEY); } catch (e) { /* 消せなくても表示はできる */ }
+    return d;
+}
 
 function getDeviceAuth() {
     try { return JSON.parse(localStorage.getItem(DEVICE_AUTH_KEY)); } catch (e) { return null; }
@@ -76,6 +95,9 @@ function showNeedLogin(message) {
 
 function goPortalLogin() {
     // ログインが終わったらこのページへ戻ってくる(app.js側が ?next=calendar を見て戻す)。
+    // 開きたい日付は戻り先URLに乗らないので、こちら側で預かっておく。
+    const d = wantedDate();
+    if (d) { try { sessionStorage.setItem(WANT_DATE_KEY, d); } catch (e) { /* 覚えられなくてもログインは進む */ } }
     location.href = `${PORTAL_URL}?next=calendar`;
 }
 
@@ -125,6 +147,8 @@ async function start() {
             rpc,
             employeeCode: auth.employeeCode,
             employeeName: info.out_employee_name,
+            // ホームウィジェットの行をタップして来たときは、その日を開いた状態で始める
+            initialDate: consumeWantedDate(),
             // 現場管理アプリはまだ無い。用意できたらここで site_id を渡して遷移させる
             // (社員ポータル内から開いたときと同じ扱いにする)。
             onOpenSite: null,

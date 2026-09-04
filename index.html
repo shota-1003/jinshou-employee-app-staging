@@ -779,7 +779,7 @@
   <section id="screen-daily-report-needs-review-admin" class="screen">
     <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
     <div class="form-title">日報の要確認一覧</div>
-    <div class="hint" style="margin-bottom:10px;">同日・同現場の他社員の日報と食い違いが検知された日報です。内容を確認し、問題なければ「確認済みにする」、修正が必要なら理由を添えて「修正依頼」してください。</div>
+    <div class="hint" style="margin-bottom:10px;">配置・人工・勤務区分・他社員との整合などに確認事項がある日報です（各カードに「理由」を表示します）。現場が一致していて他に問題がなければ自動で確認済みになります。内容を確認し、問題なければ「確認済みにする」、修正が必要なら理由を添えて「修正依頼」してください。</div>
     <div id="daily-report-needs-review-list"></div>
   </section>
 
@@ -886,7 +886,7 @@
       <button type="button" class="home-card" data-nav="daily-report-needs-review-admin">
         <span class="icon-slot" data-icon="alert-triangle"></span>
         <span class="home-card-label">要確認一覧</span>
-        <span class="home-card-desc">同日同現場の食い違い</span>
+        <span class="home-card-desc">配置・人工・整合などの確認事項</span>
       </button>
       <button type="button" class="home-card" data-nav="daily-report-edit-requests-admin">
         <span class="icon-slot" data-icon="alert-triangle"></span>
@@ -1267,32 +1267,20 @@
   <section id="screen-expense-select" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">経費</div>
-    <div class="hint" style="margin-bottom:6px;">領収書1枚だけをその場で申請する場合</div>
-    <div class="home-card-grid" style="margin-bottom:18px;">
-      <button type="button" class="home-card" data-nav="expense-advance">
-        <span class="icon-slot" data-icon="receipt"></span>
-        <span class="home-card-label">かんたん申請</span>
-        <span class="home-card-desc">経費立替(領収書1枚〜)</span>
-      </button>
+    <div class="hint" style="margin-bottom:12px;">どちらのお金を使いましたか？（撮影方法は自由。領収書1枚でも、複数まとめてでもOK）</div>
+    <div class="home-card-grid">
       <button type="button" class="home-card" data-nav="expense-company">
         <span class="icon-slot" data-icon="building"></span>
-        <span class="home-card-label">会社経費</span>
-        <span class="home-card-desc">会社が支払った経費</span>
+        <span class="home-card-label">会社のお金を使った</span>
+        <span class="home-card-desc">経費使用報告（会社現金・法人カード・会社口座など／返金なし）</span>
+      </button>
+      <button type="button" class="home-card" data-nav="expense-advance">
+        <span class="icon-slot" data-icon="receipt"></span>
+        <span class="home-card-label">自分のお金で立替えた</span>
+        <span class="home-card-desc">立替経費精算（あとで会社から返金されます）</span>
       </button>
     </div>
-    <div class="hint" style="margin-bottom:6px;">駐車場代など、複数の領収書を月まとめて1回で申請する場合</div>
-    <div class="home-card-grid">
-      <button type="button" class="home-card" data-nav="expense-bulk-advance">
-        <span class="icon-slot" data-icon="clipboard-list"></span>
-        <span class="home-card-label">まとめて精算</span>
-        <span class="home-card-desc">経費立替・複数枚の領収書をまとめて1件で申請</span>
-      </button>
-      <button type="button" class="home-card" data-nav="expense-bulk-company">
-        <span class="icon-slot" data-icon="clipboard-list"></span>
-        <span class="home-card-label">まとめて精算(会社経費)</span>
-        <span class="home-card-desc">会社経費を複数枚まとめて1件で申請</span>
-      </button>
-    </div>
+    <div class="hint" style="margin-top:16px; text-align:center;">どちらも同じ画面で、<b>領収書1枚</b>・<b>複数の領収書を1枚の写真</b>・<b>写真を複数選択</b>・<b>続けて撮影</b>のどれでも申請できます。写真内の領収書を自動で判別して明細に分けます。</div>
   </section>
 
   <section id="screen-expense" class="screen">
@@ -1305,7 +1293,23 @@
       <span>複数の領収書をまとめて選ぶ</span>
       <input type="file" accept="image/*" multiple id="expense-batch-input">
     </label>
-    <div class="hint" style="margin: 0 0 14px; text-align:center;">選んだ写真1枚ごとに、自動で明細を1件作成します</div>
+    <div class="hint" style="margin: 0 0 14px; text-align:center;">写真内の領収書を自動で判別し、領収書ごとに明細を作成します（1枚の写真に複数の領収書が写っていてもOK）</div>
+
+    <details class="card" id="expense-bulkset-panel" style="margin-bottom:12px; display:none;">
+      <summary style="cursor:pointer; font-weight:600;">全明細へ一括設定（現場・使用目的）</summary>
+      <div style="margin-top:10px;">
+        <label>現場（全明細へ）</label>
+        <input type="text" id="expense-bulkset-site-search" placeholder="現場名で検索...">
+        <select id="expense-bulkset-site"></select>
+        <label style="margin-top:8px;">使用目的（全明細へ）</label>
+        <input type="text" id="expense-bulkset-purpose-search" placeholder="使用目的を検索...">
+        <select id="expense-bulkset-purpose"></select>
+        <label style="margin-top:8px;">備考（全明細へ・任意）</label>
+        <input type="text" id="expense-bulkset-note" placeholder="全明細に付ける備考">
+        <button type="button" class="secondary" id="expense-bulkset-apply" style="margin-top:10px;">この内容を全明細に適用する</button>
+        <div class="hint" style="margin-top:6px;">適用後も、各明細を個別に変更できます。接待交際費など追加入力が必要な使用目的を選ぶと、明細ごとに必要項目（取引先・参加者・人数・事前申請の紐付け等）が表示されます。</div>
+      </div>
+    </details>
 
     <div id="expense-item-list"></div>
 
@@ -3099,6 +3103,13 @@
       <div class="hint">ログイン中の端末を一覧表示します。不審な端末や紛失した端末は無効化できます。無効化された端末は、次回利用時に暗証番号の再入力が必要になります。</div>
       <button type="button" class="secondary danger" id="employee-detail-revoke-all-devices-btn">この社員の全端末を無効化する</button>
       <div id="employee-detail-devices-list"></div>
+
+      <!-- 経費等の承認免除(self_approval_exempt)。代表取締役のみ設定可。氏名ハードコードでなく属性で管理。 -->
+      <div class="card" id="employee-detail-approval-exempt-card" style="border:1px solid var(--border); display:none;">
+        <div class="row1"><span>経費等の承認免除</span><span id="employee-detail-approval-exempt-status" class="mini-tag">-</span></div>
+        <div class="hint" style="margin:6px 0;">オンにすると、この社員の経費・会議・支給品・接待事前申請は本人登録時点で自動的に承認済みになり、承認待ちキューへ入りません(記録・監査ログは通常どおり残ります)。代表取締役のみ設定できます。</div>
+        <button type="button" class="secondary" id="employee-detail-approval-exempt-toggle-btn">-</button>
+      </div>
 
       <!-- 雇用状態(退職処理)。「アカウント停止(在職のまま一時停止・復旧可)」とは明確に別概念。 -->
       <div class="section-title" style="margin-top:22px;">雇用状態</div>

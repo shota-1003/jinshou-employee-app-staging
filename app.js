@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v130-staging';
-const BUILD_DEPLOYED_AT = '2026-09-04T00:47:49.403Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v141-staging';
+const BUILD_DEPLOYED_AT = '2026-09-04T20:09:22.003Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -52,6 +52,9 @@ window.ClientErrorReporter.init({
 
 // 任意/本番未提供の機能RPC。DBに未適用の環境では404になるが、呼び出し側でgraceful degradeするため
 // 監視へは報告しない(例: ラッキー賞は本番DB未適用のため404。有効化されれば200が返る)。
+// ブラウザ用コードのためscripts/lib/optional-degrade-rpcs.js(QA側の正本)をrequireできず値を
+// 複製している。このSetを変更する際は必ずscripts/lib/optional-degrade-rpcs.jsも同時に更新すること
+// (2026-09-04: 更新漏れでQAが想定内の404を障害として誤検知した教訓、errors.id=1300)。
 const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule']);
 async function rpc(name, params) {
   const headers = {
@@ -1585,6 +1588,26 @@ function createEmployeeCardPicker(container) {
 const participantSelects = new Map(); // itemId -> インスタンス(経費明細ごとの自社参加者選択)
 
 // 領収書の日付・店舗・金額から、承認済みの接待事前申請を検索して紐付け候補を出す。
+// Phase 3(照合): 事前申請の予定金額と本人が入力した実際額を即時にクライアント側で照合し(backendと同じ閾値)、
+// 差異が大きい明細には「要確認」を表示する。誤って大きく異なる金額のまま確定させないための即時フィードバック。
+function renderPreapprovalDiscrepancy(card, state) {
+  const block = card.querySelector('.item-entertainment-block');
+  if (!block) return;
+  let warn = block.querySelector('.preapproval-discrepancy-warn');
+  const planned = state && state.preapprovalPlanned;
+  const amt = Number(card.querySelector('.item-amount').value || 0);
+  if (!planned || !state.entertainmentPreapprovalId || !amt || planned.amount == null) { if (warn) warn.remove(); return; }
+  const diff = amt - Number(planned.amount);
+  const pct = Number(planned.amount) !== 0 ? Math.abs(diff) / Number(planned.amount) * 100 : null;
+  let level = 'none';
+  if (Math.abs(diff) >= 30000 || (pct != null && pct >= 50)) level = 'major';
+  else if (Math.abs(diff) >= 10000 || (pct != null && pct >= 20)) level = 'attention';
+  if (level === 'none') { if (warn) warn.remove(); return; }
+  if (!warn) { warn = document.createElement('div'); warn.className = 'preapproval-discrepancy-warn'; block.appendChild(warn); }
+  warn.style.cssText = 'margin-top:8px; padding:8px 10px; border-radius:8px; background:#fff8e1; color:#8a5300; font-size:13px; font-weight:600;';
+  warn.textContent = `⚠️ 事前申請の予定金額 ${Number(planned.amount).toLocaleString()}円 に対し、実際 ${amt.toLocaleString()}円（差 ${diff >= 0 ? '+' : ''}${diff.toLocaleString()}円${pct != null ? '・' + pct.toFixed(0) + '%' : ''}）と${level === 'major' ? '大きく異なります' : '差があります'}。内容をご確認ください。`;
+}
+
 async function searchAndShowPreapprovals(card, itemId) {
   const area = card.querySelector('.preapproval-search-area');
   const session = getSession();
@@ -1633,6 +1656,9 @@ async function searchAndShowPreapprovals(card, itemId) {
             card.querySelector('.item-our-count').textContent = pSelect.getCount();
           });
         }
+        // Phase 3: 事前申請の予定金額・予定人数を控え、実際額との差異を即時に照合表示する。
+        state.preapprovalPlanned = { amount: c.planned_amount, count: (c.partner_participant_count || 0) + (c.our_participant_count || 0) };
+        renderPreapprovalDiscrepancy(card, state);
       });
     });
   } else {
@@ -1656,7 +1682,57 @@ function enterExpenseScreen(category) {
   resetExpenseForm();
   hideError('expense-error');
   populateVendorList();
+  setupExpenseBulkSet();
   showScreen('expense');
+}
+
+// 統一エンジンの「全明細へ一括設定」(Phase 2)。現場・使用目的・備考を全明細へ適用する。
+// 適用後も各明細を個別に上書きできる。接待交際費等を選ぶと、各明細で必要な追加項目が表示される
+// (per-cardの purpose-category change ハンドラを dispatch して発火させるため)。
+let expenseBulkSetWired = false;
+async function setupExpenseBulkSet() {
+  const panel = document.getElementById('expense-bulkset-panel');
+  if (!panel) return;
+  const siteSel = document.getElementById('expense-bulkset-site');
+  const purposeSel = document.getElementById('expense-bulkset-purpose');
+  const siteSearch = document.getElementById('expense-bulkset-site-search');
+  const purposeSearch = document.getElementById('expense-bulkset-purpose-search');
+  try { await populateSiteSelect(siteSel, ''); } catch (e) {}
+  try { await populatePurposeSelect(purposeSel, ''); } catch (e) {}
+  if (!expenseBulkSetWired) {
+    let t1, t2;
+    siteSearch.addEventListener('input', () => { clearTimeout(t1); t1 = setTimeout(() => populateSiteSelect(siteSel, siteSearch.value.trim()), 250); });
+    purposeSearch.addEventListener('input', () => { clearTimeout(t2); t2 = setTimeout(() => populatePurposeSelect(purposeSel, purposeSearch.value.trim()), 250); });
+    document.getElementById('expense-bulkset-apply').addEventListener('click', applyExpenseBulkSetToAll);
+    expenseBulkSetWired = true;
+  }
+  updateExpenseBulkSetVisibility();
+}
+
+// 明細が2件以上のときだけ一括設定パネルを出す(1件なら不要)。
+function updateExpenseBulkSetVisibility() {
+  const panel = document.getElementById('expense-bulkset-panel');
+  if (!panel) return;
+  const count = document.querySelectorAll('#expense-item-list .expense-item-card').length;
+  panel.style.display = count >= 2 ? 'block' : 'none';
+}
+
+function applyExpenseBulkSetToAll() {
+  const siteSel = document.getElementById('expense-bulkset-site');
+  const purposeSel = document.getElementById('expense-bulkset-purpose');
+  const noteVal = (document.getElementById('expense-bulkset-note').value || '').trim();
+  const siteVal = siteSel.value;
+  const siteName = siteSel.selectedOptions[0] ? (siteSel.selectedOptions[0].dataset.name || siteSel.selectedOptions[0].textContent) : '';
+  const purposeVal = purposeSel.value;
+  const ensureOption = (sel, val, name) => { if (![...sel.options].some((o) => o.value === val)) { const o = document.createElement('option'); o.value = val; if (name) o.dataset.name = name; o.textContent = name || val; sel.appendChild(o); } };
+  document.querySelectorAll('#expense-item-list .expense-item-card').forEach((card) => {
+    if (siteVal) { const cs = card.querySelector('.item-site-select'); if (cs) { ensureOption(cs, siteVal, siteName); cs.value = siteVal; cs.dispatchEvent(new Event('change')); } }
+    if (purposeVal) { const cp = card.querySelector('.item-purpose-category'); if (cp) { ensureOption(cp, purposeVal, purposeVal); cp.value = purposeVal; cp.dispatchEvent(new Event('change')); } }
+    if (noteVal) { const nEl = card.querySelector('.item-note'); if (nEl && !nEl.value.trim()) nEl.value = noteVal; }
+  });
+  updateExpenseTotal();
+  const box = document.getElementById('expense-bulkset-panel');
+  if (box) { const h = document.createElement('div'); h.className = 'hint'; h.style.cssText = 'margin-top:6px;color:#2e7d32;font-weight:600;'; h.textContent = '全明細へ適用しました。必要な明細だけ個別に変更できます。'; const old = box.querySelector('.bulkset-applied'); if (old) old.remove(); h.classList.add('bulkset-applied'); box.querySelector('div').appendChild(h); }
 }
 
 async function populateSiteSelect(selectEl, query, dailyReportOnly) {
@@ -1703,6 +1779,87 @@ async function showExpenseSuggestion(card, storeName) {
   } catch (e) { /* 候補が引けなくても致命的ではないため無視 */ }
 }
 
+// 項目ごとのconfidenceを ok/review/low に正規化。high=確定, medium=要確認(最有力を入れる),
+// low=推測で確定しない(空にして要確認+候補提示)。
+function ocrFieldStatus(conf) { conf = conf || 'low'; return conf === 'high' ? 'ok' : (conf === 'medium' ? 'review' : 'low'); }
+
+// 1件の領収書データを1枚の明細カードへ反映する。金額と利用日は「項目ごとに独立して」判定し、
+// 読めたものは自動入力、読めない/曖昧なものだけ要確認にして候補をワンタップ選択できるようにする
+// (勝手に誤値を確定しない)。1件の低信頼で他の明細を失敗させない。
+function fillCardFromReceipt(card, receipt) {
+  // Phase 4: AIの勘定科目候補+確信度を明細stateへ控える(submit時にreceiptsへ保存し、経理確認へ回す)。
+  const _st = expenseItemState.get(card.dataset.itemId);
+  if (_st) { _st.accountCategoryCandidate = receipt.account_category_candidate || null; _st.accountCategoryConfidence = receipt.account_category_confidence || receipt.confidence || null; }
+  const ocrStatus = card.querySelector('.ocr-status');
+  const dateInput = card.querySelector('.item-date');
+  const storeInput = card.querySelector('.item-store');
+  const amountInput = card.querySelector('.item-amount');
+  const taxInput = card.querySelector('.item-tax');
+
+  if (receipt.counterparty_raw) storeInput.value = receipt.counterparty_raw;
+  if (receipt.tax_amount != null) taxInput.value = receipt.tax_amount;
+
+  // 金額: 高=入力 / 中=最有力を入れて要確認 / 低=空にして要確認(誤値を確定しない)
+  const amtConf = ocrFieldStatus(receipt.amount_confidence || receipt.confidence);
+  const amtCands = (receipt.amount_candidates || receipt.total_amount_candidates || []).filter((c) => c && c.amount != null);
+  if (receipt.total_amount != null && amtConf !== 'low') amountInput.value = receipt.total_amount;
+  else if (amtConf === 'low') amountInput.value = '';
+  updateExpenseTotal();
+  renderOcrFieldCandidates(card, 'amount', amountInput, amtCands.map((c) => ({ v: c.amount, label: c.label })), amtConf, '金額を確認してください', (v) => { amountInput.value = Number(v); updateExpenseTotal(); });
+
+  // 利用日: 日付が無い/曖昧なら推測で埋めない。他の領収書の日付をコピーしない。
+  const dateConf = ocrFieldStatus(receipt.date_confidence || (receipt.document_date ? receipt.confidence : 'low'));
+  const dateCands = (receipt.date_candidates || []).filter((c) => c && c.date);
+  if (receipt.document_date && dateConf !== 'low') dateInput.value = receipt.document_date;
+  else if (dateConf === 'low') dateInput.value = '';
+  renderOcrFieldCandidates(card, 'date', dateInput, dateCands.map((c) => ({ v: c.date, label: c.label })), dateConf, '領収書に日付がありません。利用日を確認してください', (v) => { dateInput.value = v; });
+
+  // 総合: すべて確定できたときだけ「読み取り完了」。それ以外は要確認項目を明示。
+  const needs = [];
+  if (amtConf !== 'ok') needs.push('金額');
+  if (dateConf !== 'ok') needs.push('利用日');
+  if (needs.length === 0) { ocrStatus.textContent = '読み取り完了(内容をご確認ください)。'; ocrStatus.style.color = ''; }
+  else { ocrStatus.textContent = `⚠️ ${needs.join('・')}を確認してください。`; ocrStatus.style.color = '#8a5300'; }
+
+  if (receipt.counterparty_raw && amtConf === 'ok') showExpenseSuggestion(card, receipt.counterparty_raw);
+}
+
+// 金額/利用日の候補チップ+要確認表示(項目共通)。低〜中confidence、または候補が複数のとき出す。
+function renderOcrFieldCandidates(card, kind, input, cands, status, warnMsg, onPick) {
+  if (!input) return;
+  let box = card.querySelector('.item-' + kind + '-candidates');
+  if (!box) {
+    box = document.createElement('div');
+    box.className = 'item-' + kind + '-candidates';
+    box.style.cssText = 'margin:4px 0 6px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;';
+    input.insertAdjacentElement('afterend', box);
+  }
+  box.innerHTML = '';
+  const review = status !== 'ok';
+  input.style.background = review ? '#fff8e1' : '';
+  if (review) {
+    const w = document.createElement('span');
+    w.textContent = '⚠️ ' + warnMsg;
+    w.style.cssText = 'color:#8a5300; font-size:12px; font-weight:600;';
+    box.appendChild(w);
+  }
+  const distinct = [];
+  for (const c of cands) { if (c.v != null && !distinct.some((d) => String(d.v) === String(c.v))) distinct.push(c); }
+  if (distinct.length && (review || distinct.length > 1)) {
+    distinct.slice(0, 6).forEach((c) => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'mini-tag';
+      chip.style.cssText = 'cursor:pointer; border:1px solid var(--border); background:#fff;';
+      chip.textContent = (kind === 'amount' ? '¥' + Number(c.v).toLocaleString() : c.v) + (c.label ? '（' + c.label + '）' : '');
+      chip.onclick = () => { onPick(c.v); input.style.background = ''; };
+      box.appendChild(chip);
+    });
+  }
+}
+
+// 1枚の写真をOCRし、検出したすべての領収書(receipts[])を返す。先頭領収書はこのカードへ反映する。
+// 2枚目以降は呼び出し側(handlePhotoFile)が同じ写真を共有する明細カードへ分割する(1画像:N領収書)。
 async function runOcrForItem(card, file) {
   const ocrStatus = card.querySelector('.ocr-status');
   ocrStatus.textContent = 'AIが内容を読み取っています...';
@@ -1715,31 +1872,120 @@ async function runOcrForItem(card, file) {
       body: JSON.stringify({ employeeCode: session.employeeCode, mimeType: file.type || 'image/jpeg', base64 }),
     });
     const json = await res.json().catch(() => null);
-    const receipt = json && json.receipts && json.receipts[0];
-    if (!receipt) { ocrStatus.textContent = ''; return; }
-
-    // 読み取れた事実だけをフォームへ候補入力する(現場・使用目的・取引先はプロンプト側で
-    // 出力させていないため、ここで埋まることはない=AIが推測で確定しない設計)。
-    if (receipt.document_date) card.querySelector('.item-date').value = receipt.document_date;
-    if (receipt.counterparty_raw) card.querySelector('.item-store').value = receipt.counterparty_raw;
-    if (receipt.total_amount != null) { card.querySelector('.item-amount').value = receipt.total_amount; updateExpenseTotal(); }
-    if (receipt.tax_amount != null) card.querySelector('.item-tax').value = receipt.tax_amount;
-
-    const confidence = receipt.confidence || 'low';
-    if (confidence === 'high') {
-      ocrStatus.textContent = 'AIが内容を読み取りました。内容を確認してください(間違っていれば修正できます)。';
-    } else if (confidence === 'medium') {
-      ocrStatus.textContent = '読み取り精度が高くありません。内容を必ず確認・修正してください。';
-    } else {
-      ocrStatus.textContent = '読み取りに自信が持てませんでした。手入力で確認してください。';
-      // 低信頼は候補として埋めない方が安全なため、金額以外はクリアする
-      card.querySelector('.item-date').value = '';
-      card.querySelector('.item-store').value = '';
-    }
-
-    if (receipt.counterparty_raw && confidence !== 'low') showExpenseSuggestion(card, receipt.counterparty_raw);
+    const receipts = (json && Array.isArray(json.receipts)) ? json.receipts : [];
+    if (!receipts.length) { ocrStatus.textContent = ''; return []; }
+    fillCardFromReceipt(card, receipts[0]);
+    return receipts;
   } catch (e) {
     ocrStatus.textContent = '';
+    return [];
+  }
+}
+
+// 同じ写真から検出した2枚目以降の領収書を、写真(driveFileId)を共有する明細カードへ分割する。
+// 通常利用では自動で進む(人間操作を増やさない)。重複の可能性は削除せず注意表示する。
+function expandExtraReceiptsIntoItems(originCard, originState, extraReceipts) {
+  const created = [];
+  for (const receipt of extraReceipts) {
+    const itemId = addExpenseItem(); // 空カードを作る
+    const card = document.querySelector(`[data-item-id="${itemId}"]`);
+    if (!card) continue;
+    const st = expenseItemState.get(itemId);
+    // 同じ写真を証憑として共有する(社員が撮り直す必要はない)。
+    st.driveFileId = originState.driveFileId;
+    st.driveFileUrl = originState.driveFileUrl;
+    st.uploading = false;
+    const photoStep = card.querySelector('.item-photo-step');
+    const photoAttached = card.querySelector('.item-photo-attached');
+    const details = card.querySelector('.item-details');
+    if (photoStep) photoStep.style.display = 'none';
+    if (photoAttached) photoAttached.style.display = 'block';
+    if (details) details.style.display = 'block';
+    const ps = card.querySelector('.photo-status'); if (ps) { ps.textContent = '同じ写真から検出した領収書です'; ps.className = 'photo-status ok'; }
+    fillCardFromReceipt(card, receipt);
+    flagPossibleDuplicateCard(card);
+    created.push(card);
+  }
+  updateExpenseTotal();
+  return created;
+}
+
+// 検出した領収書のbbox領域を、元の高解像度画像から切り出して1枚の領収書だけを大きく写した画像にする。
+// 複数領収書写真では各領収書が小さく写り、圧縮後は桁が潰れて誤読(900→200等)しやすいため、
+// 1枚ずつ高解像度でcropして読み直す(1領収書がフレーム全体を占める=実効解像度が大きく上がる)。
+async function cropReceiptFromFile(file, bbox) {
+  try {
+    if (!Array.isArray(bbox) || bbox.length !== 4) return null;
+    let [x, y, w, h] = bbox.map(Number);
+    if ([x, y, w, h].some((n) => isNaN(n)) || w <= 0 || h <= 0) return null;
+    const pad = 0.02;
+    x = Math.max(0, x - pad); y = Math.max(0, y - pad);
+    w = Math.min(1 - x, w + pad * 2); h = Math.min(1 - y, h + pad * 2);
+    const bmp = await createImageBitmap(file);
+    const sx = Math.round(x * bmp.width), sy = Math.round(y * bmp.height);
+    const sw = Math.round(w * bmp.width), sh = Math.round(h * bmp.height);
+    if (sw < 20 || sh < 20) return null;
+    // cropは高解像度を保つ(単一領収書なので最大辺1800px程度でも1枚に十分な精細さ)。
+    const maxSide = 1800; const scale = Math.min(1, maxSide / Math.max(sw, sh));
+    const cw = Math.round(sw * scale), ch = Math.round(sh * scale);
+    const canvas = document.createElement('canvas'); canvas.width = cw; canvas.height = ch;
+    canvas.getContext('2d').drawImage(bmp, sx, sy, sw, sh, 0, 0, cw, ch);
+    bmp.close && bmp.close();
+    const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.92));
+    return blob ? new File([blob], 'crop.jpg', { type: 'image/jpeg' }) : null;
+  } catch (e) { return null; }
+}
+
+async function ocrCropReceipt(cropFile) {
+  try {
+    const base64 = await fileToBase64(cropFile);
+    const session = getSession();
+    const res = await fetch(`${N8N_BASE_URL}/webhook/receipt-ocr-proxy`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ employeeCode: session.employeeCode, mimeType: 'image/jpeg', base64 }),
+    });
+    const json = await res.json().catch(() => null);
+    const rs = (json && Array.isArray(json.receipts)) ? json.receipts : [];
+    return rs[0] || null; // cropは1領収書のはず
+  } catch (e) { return null; }
+}
+
+// 複数領収書のとき、各カードをbbox cropの高解像度再OCR結果で上書きする(精度優先)。
+// 元画像fileから切り出すので、圧縮で失われた桁を取り戻せる。低コスト化のため単票(1枚)では行わない。
+async function refineReceiptCardsByCrop(file, cards, receipts) {
+  const n = Math.min(cards.length, receipts.length);
+  for (let i = 0; i < n; i++) {
+    const rec = receipts[i];
+    if (!rec || !Array.isArray(rec.bbox)) continue;
+    const crop = await cropReceiptFromFile(file, rec.bbox);
+    if (!crop) continue;
+    const refined = await ocrCropReceipt(crop);
+    if (refined && refined.total_amount != null) {
+      // 元の店舗名が空なら補完(cropで店舗が切れる場合の保険)
+      if (!refined.counterparty_raw && rec.counterparty_raw) refined.counterparty_raw = rec.counterparty_raw;
+      fillCardFromReceipt(cards[i], refined);
+    }
+  }
+  updateExpenseTotal();
+}
+
+// 明細カードの内容(利用日・支払先・金額)が他の明細と一致していれば重複候補として注意表示する。
+function flagPossibleDuplicateCard(card) {
+  const d = (card.querySelector('.item-date') || {}).value;
+  const s = ((card.querySelector('.item-store') || {}).value || '').trim();
+  const a = (card.querySelector('.item-amount') || {}).value;
+  if (!a) return;
+  let dup = false;
+  document.querySelectorAll('#expense-item-list .expense-item-card').forEach((other) => {
+    if (other === card) return;
+    const od = (other.querySelector('.item-date') || {}).value;
+    const os = ((other.querySelector('.item-store') || {}).value || '').trim();
+    const oa = (other.querySelector('.item-amount') || {}).value;
+    if (oa === a && od === d && os === s) dup = true;
+  });
+  if (dup) {
+    const st = card.querySelector('.ocr-status');
+    if (st) st.textContent = '⚠️ 他の明細と同じ内容です。重複撮影の可能性があります(必要なら削除してください)。' + (st.textContent ? ' / ' + st.textContent : '');
   }
 }
 
@@ -1860,7 +2106,7 @@ function addExpenseItem(initialFile) {
     const state = expenseItemState.get(itemId);
     state.uploading = true;
     const cardEl = document.querySelector(`[data-item-id="${itemId}"]`);
-    runOcrForItem(cardEl, file); // 並行実行(アップロード完了を待たずにOCRも進める)
+    const ocrPromise = runOcrForItem(cardEl, file); // 並行実行(アップロード完了を待たずにOCRも進める)
     try {
       const session = getSession();
       const result = await uploadReceiptPhoto(session.employeeCode, file);
@@ -1874,6 +2120,25 @@ function addExpenseItem(initialFile) {
     } finally {
       state.uploading = false;
     }
+    // 1画像:N領収書。写真内に複数の領収書を検出したら、同じ写真を共有する明細へ自動分割する。
+    try {
+      const receipts = await ocrPromise;
+      if (receipts && receipts.length > 1) {
+        let cards = [cardEl];
+        if (state.driveFileId) {
+          cards = cards.concat(expandExtraReceiptsIntoItems(cardEl, state, receipts.slice(1)));
+        }
+        const os = cardEl.querySelector('.ocr-status');
+        const head = `この写真から${receipts.length}枚の領収書を検出しました。明細を${receipts.length}件に分けました。`;
+        if (os) os.textContent = head + (os.textContent ? ' / ' + os.textContent : '');
+        // 精度優先: 各領収書をbbox cropの高解像度で読み直す(複数領収書で桁が潰れる誤読を防ぐ)。
+        if (cards.length > 1) {
+          if (os) os.textContent = head + ' 各領収書を精査中...';
+          await refineReceiptCardsByCrop(file, cards, receipts);
+          if (os) os.textContent = head;
+        }
+      }
+    } catch (e) { /* 分割・精査に失敗しても先頭明細はそのまま使える */ }
   }
 
   clone.querySelector('.item-photo-input').addEventListener('change', (e) => handlePhotoFile(e.target.files[0]));
@@ -1891,7 +2156,11 @@ function addExpenseItem(initialFile) {
     updateExpenseTotal(); // 再び空明細に戻るので明細件数の表示に反映する
   });
 
-  clone.querySelector('.item-amount').addEventListener('input', updateExpenseTotal);
+  clone.querySelector('.item-amount').addEventListener('input', () => {
+    updateExpenseTotal();
+    const st = expenseItemState.get(itemId); const cardEl = document.querySelector(`[data-item-id="${itemId}"]`);
+    if (st && cardEl) renderPreapprovalDiscrepancy(cardEl, st);
+  });
   clone.querySelector('.item-store').addEventListener('blur', (e) => {
     const cardEl = document.querySelector(`[data-item-id="${itemId}"]`);
     if (e.target.value.trim()) showExpenseSuggestion(cardEl, e.target.value.trim());
@@ -1901,6 +2170,7 @@ function addExpenseItem(initialFile) {
   renumberExpenseItems();
   updateExpenseTotal();
   if (initialFile) handlePhotoFile(initialFile);
+  return itemId;
 }
 
 // 複数の領収書写真を一度に選択したとき、写真1枚ごとに明細を1件自動作成してOCRを走らせる
@@ -1935,6 +2205,7 @@ function updateExpenseTotal() {
   });
   document.getElementById('expense-total-count').textContent = `${validCount}件`;
   document.getElementById('expense-total-amount').textContent = `${total.toLocaleString()}円`;
+  updateExpenseBulkSetVisibility();
 }
 
 function resetExpenseForm() {
@@ -2034,6 +2305,7 @@ async function doSubmitExpense() {
       our_participant_employee_codes: ourCodes,
       entertainment_preapproval_id: entertainmentPreapprovalId, admin_override_reason: overrideReason,
       payment_method: payment, content_description: note || null,
+      account_category_candidate: state.accountCategoryCandidate || null, account_category_confidence: state.accountCategoryConfidence || null,
       drive_file_id: state.driveFileId, drive_file_url: state.driveFileUrl,
     });
   }
@@ -2131,6 +2403,34 @@ function bulkItemSummaryHtml(item) {
   return `${item.amount != null ? Number(item.amount).toLocaleString('ja-JP') + '円' : '金額未読取'} ${badgeHtml}${item.siteName ? `・現場: ${item.siteName}` : ''}${item.purposeCategory ? `・${item.purposeCategory}` : ''}${traceHtml}`;
 }
 
+// まとめて精算の各明細に、対応する領収書画像(bboxがあればcrop、無ければ元写真)を表示する。
+// タップで元写真全体を拡大(openImageZoom)。元写真とcropの対応が目で分かるようにする。
+function attachBulkItemPhoto(row, item) {
+  if (!item._file || typeof URL === 'undefined' || !URL.createObjectURL) return;
+  let holder = row.querySelector('.bulk-item-photo');
+  if (!holder) {
+    holder = document.createElement('div');
+    holder.className = 'bulk-item-photo';
+    holder.style.cssText = 'flex:0 0 auto; margin-right:8px;';
+    const labelRow = row.querySelector('.item-label') && row.querySelector('.item-label').parentElement;
+    (labelRow || row).insertAdjacentElement('afterbegin', holder);
+  }
+  const img = document.createElement('img');
+  img.alt = '領収書';
+  img.loading = 'lazy';
+  img.style.cssText = 'width:76px; height:76px; object-fit:cover; border-radius:8px; border:1px solid var(--border); background:#f4f4f4; cursor:zoom-in;';
+  holder.innerHTML = '';
+  holder.appendChild(img);
+  const origUrl = URL.createObjectURL(item._file);
+  // まず元写真を即時表示 → bboxがあればcropに差し替え(高解像度で該当領収書だけを見せる)。
+  img.src = origUrl;
+  if (item._bbox) {
+    cropReceiptFromFile(item._file, item._bbox).then((crop) => { if (crop) img.src = URL.createObjectURL(crop); }).catch(() => {});
+  }
+  // タップで元写真全体(分割前)を拡大表示 → どの写真のどの領収書かが分かる。
+  img.addEventListener('click', () => { try { openImageZoom(origUrl); } catch (e) {} });
+}
+
 function renderBulkItemRow(item) {
   const tpl = document.getElementById('expense-bulk-item-template');
   const row = tpl.content.firstElementChild.cloneNode(true);
@@ -2138,6 +2438,10 @@ function renderBulkItemRow(item) {
   if (item.photoQueueId) row.dataset.photoQueueId = item.photoQueueId;
   row.querySelector('.item-label').textContent = `${item.date || '日付未読取'}・${item.store || '支払先不明'}`;
   row.querySelector('.bulk-item-summary').innerHTML = bulkItemSummaryHtml(item);
+
+  // 領収書画像を表示する(まとめて精算でも「この明細はこの領収書から読み取った」と目で確認できるように)。
+  // 複数領収書を1枚から分割した場合は、その明細のcrop画像を出し、タップで元写真全体を拡大表示する。
+  attachBulkItemPhoto(row, item);
 
   row.querySelector('.remove-item-btn').addEventListener('click', () => {
     bulkItems = bulkItems.filter((it) => it.id !== item.id);
@@ -2235,7 +2539,7 @@ function addBulkItemsFromPhoto(entry, uploadResult, receipts, fileHash) {
       id: 'bulk-item-' + bulkItemSeq, date: null, store: null, amount: null, tax: null, confidence: 'low',
       driveFileId: uploadResult.driveFileId, driveFileUrl: uploadResult.driveFileUrl, fileHash,
       siteId: null, siteName: null, purposeCategory: null, note: null, photoLabel: `${entry.photoLabel}(自動検出なし・要手動入力)`,
-      photoQueueId: entry.id,
+      photoQueueId: entry.id, _file: entry.file, _bbox: null,
     };
     bulkItems.push(item);
     renderBulkItemRow(item);
@@ -2249,7 +2553,7 @@ function addBulkItemsFromPhoto(entry, uploadResult, receipts, fileHash) {
         confidence: r.confidence || 'low',
         driveFileId: uploadResult.driveFileId, driveFileUrl: uploadResult.driveFileUrl, fileHash,
         siteId: null, siteName: null, purposeCategory: null, note: r.content_description || null, photoLabel: label,
-        photoQueueId: entry.id,
+        photoQueueId: entry.id, _file: entry.file, _bbox: (r.bbox && r.bbox.length === 4) ? r.bbox : null,
       };
       bulkItems.push(item);
       renderBulkItemRow(item);
@@ -5151,7 +5455,30 @@ async function loadEmployeeDetailPortalAccess() {
     };
 
     renderEmploymentSection(e, code, session);
+    renderApprovalExemptCard(code, session);
   } catch (e) { /* 読み込み失敗時は静かに諦める(端末一覧は別途表示されるため) */ }
+}
+
+// 経費等の承認免除(self_approval_exempt)。代表取締役のみ表示・設定可能。
+async function renderApprovalExemptCard(code, session) {
+  const card = document.getElementById('employee-detail-approval-exempt-card');
+  if (!card) return;
+  if (session.requestRole !== 'executive') { card.style.display = 'none'; return; }
+  const statusEl = document.getElementById('employee-detail-approval-exempt-status');
+  const btn = document.getElementById('employee-detail-approval-exempt-toggle-btn');
+  try {
+    const exempt = await rpc('admin_get_self_approval_exempt', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
+    card.style.display = '';
+    statusEl.textContent = exempt ? '承認免除' : '通常(承認必要)';
+    statusEl.className = 'mini-tag ' + (exempt ? 'info' : '');
+    btn.textContent = exempt ? '承認免除を解除する' : '承認免除にする';
+    btn.onclick = async () => {
+      if (!confirm(exempt ? 'この社員の承認免除を解除します。以後の申請は通常の承認フローに戻ります。よろしいですか？' : 'この社員を承認免除にします。以後の経費等は本人登録時点で自動承認され、承認待ちに入りません。よろしいですか？')) return;
+      btn.disabled = true;
+      try { await rpc('admin_set_self_approval_exempt', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code, p_exempt: !exempt }); await renderApprovalExemptCard(code, session); } catch (e2) { alert(e2.message); }
+      btn.disabled = false;
+    };
+  } catch (e) { card.style.display = 'none'; }
 }
 
 // 雇用状態(退職処理)。アカウント停止(portal_access)とは別概念として明確に分けて扱う。
@@ -8798,6 +9125,30 @@ async function resetDailyReportForm() {
   loadDailyReportForDate(target);
 }
 
+// 日報提出時のエラーを、利用者(社員)にそのまま見せてよい日本語メッセージへ変換する。
+// DBの内部エラー(制約名・violates・SQLSTATE・column/relation等)は絶対に画面へ出さない。
+// 2026-09-04のP0障害(ux_daily_reports_employee_slot_active重複)で、生のDBエラー文字列が
+// そのまま社員の画面に表示されていたため追加。原文はconsoleにだけ残して診断に使う。
+function friendlyDailyReportError(e) {
+  const raw = (e && e.message) ? String(e.message) : '';
+  try { if (raw) console.warn('[daily-report submit] raw error:', raw); } catch (_) {}
+  // 業務的に意味が確定していて、そのまま見せてよい既知の日本語メッセージは通す。
+  if (/修正には理由|理由の入力|現場を|日付を|選択してください|入力してください/.test(raw) && !/duplicate|constraint|violates|null value|column|relation/i.test(raw)) return raw;
+  // 二重登録・重複(unique制約)は「既に提出済み」の可能性が高い。復旧も自動で進む旨を伝える。
+  if (/duplicate key|ux_daily_reports|unique constraint|already exists/i.test(raw)) {
+    return '本日の日報はすでに提出されている可能性があります。日報履歴からご確認ください。表示されない場合は、少し時間をおいてもう一度お試しください（自動で復旧を進めています）。';
+  }
+  // 権限・セッション切れ。
+  if (/permission denied|require_.*session|セッション|not authorized|権限/i.test(raw)) {
+    return 'ログイン状態を確認できませんでした。お手数ですが、一度ログインし直してからもう一度お試しください。';
+  }
+  // それ以外のDB内部エラー・想定外はすべて汎用メッセージに丸める(生のエラーは出さない)。
+  if (/duplicate|constraint|violates|null value|column|relation|syntax|SQLSTATE|pg_|function .* does not exist/i.test(raw)) {
+    return '日報を提出できませんでした。システム側の一時的な問題の可能性があります。少し時間をおいてもう一度お試しください。解消しない場合は管理者へご連絡ください。';
+  }
+  return raw || '送信に失敗しました。もう一度お試しください。';
+}
+
 async function doSubmitDailyReport(isDraft) {
   const session = getSession();
   hideError('daily-report-error');
@@ -8937,7 +9288,7 @@ async function doSubmitDailyReport(isDraft) {
       : `日報を受け付けました(${dateStr}、合計${r ? Number(r.total_headcount).toFixed(1) : ''}人工)。`) + qualWarning + consistencyWarning;
     showDone(msg, 'menu-apply');
   } catch (e) {
-    showError('daily-report-error', e.message || '送信に失敗しました。もう一度お試しください。');
+    showError('daily-report-error', friendlyDailyReportError(e));
   } finally {
     btn.disabled = false;
   }
@@ -9550,7 +9901,13 @@ async function loadDailyReportNeedsReviewAdmin() {
       // §3: 判断に必要な情報(社員番号・対象日・日報現場・配置現場・勤務区分・人工・提出日時・理由)を
       // 出し、各日報に【問題なしとして確定】【修正依頼】【日報を取消】を用意する。
       const memberLines = g.rows.map((r) => {
-        const siteMismatch = r.assignment_site && r.site_name && r.assignment_site !== r.site_name;
+        // 「不一致」タグは表示名の文字列比較ではなく、実際の判定(site_idで突合したCAL_MISMATCH)に従う。
+        // 表示名が違っても同一site_idなら不一致にしない(表示値と判定結果の論理矛盾を避ける)。
+        const reasonRaw = (r.review_reason || '');
+        const siteMismatch = /CAL_MISMATCH|現場が異な/.test(reasonRaw) || (r.consistency_issues || []).some((i) => /現場.*異な|現場.*不一致/.test(i.message || ''));
+        const reasonText = (r.consistency_issues || []).map((iss) => iss.message).join(' / ')
+          || reasonRaw.replace(/\[[A-Z_]+\]/g, '').split('/').map((s) => s.trim()).filter(Boolean).join(' / ')
+          || '要確認';
         return `
         <div class="card" style="margin-top:8px;padding:10px;background:var(--surface-2,rgba(255,255,255,0.03));">
           <div class="row1"><span style="font-weight:700;">${r.employee_name}</span><span class="mini-tag">${r.employee_code}</span></div>
@@ -9558,7 +9915,7 @@ async function loadDailyReportNeedsReviewAdmin() {
           <div class="field-row"><span>配置現場</span><span>${r.assignment_site || '(配置なし)'}${siteMismatch ? ' <span class="mini-tag danger">不一致</span>' : ''}</span></div>
           <div class="field-row"><span>勤務区分 / 人工</span><span>${r.work_type || '-'} / ${Number(r.headcount || 0)}人工${r.overtime_hours ? ' ・残業' + r.overtime_hours + 'h' : ''}</span></div>
           <div class="field-row"><span>提出日時</span><span>${r.submitted_at ? new Date(r.submitted_at).toLocaleString('ja-JP') : '-'}</span></div>
-          <div class="mini-tag danger" style="display:block;margin-top:4px;">⚠ ${(r.consistency_issues || []).map((iss) => iss.message).join(' / ') || r.review_reason || '要確認'}</div>
+          <div class="mini-tag danger" style="display:block;margin-top:4px;">⚠ 理由: ${reasonText}</div>
           <div class="button-row" style="margin-top:8px;">
             <button type="button" class="secondary" data-ack-id="${r.id}">問題なしとして確定</button>
             <button type="button" class="link" data-correct-id="${r.id}">修正依頼</button>
@@ -10113,16 +10470,20 @@ function renderDrmDateNav() {
   if (!nav) return;
   const today = todayJST();
   const shift = (days) => { const d = new Date(drmSelectedDate + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
+  // コンパクトな1行ナビ: [‹] 日付 [今日バッジ] [›] [今日へ]。日付移動は主役にせず高さを最小化する。
+  // 「今日」バッジと「今日へ」ボタンで行の高さが変わらないよう、右端は常に固定幅の枠を確保する。
+  nav.style.padding = '4px 6px';
+  nav.style.marginBottom = '8px';
   nav.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-      <button type="button" class="secondary" id="drm-date-prev" style="flex:none;width:auto;padding:8px 14px;">‹</button>
-      <div style="flex:1;min-width:0;text-align:center;font-weight:700;font-size:16px;">${formatJpDateWithDow(drmSelectedDate)}</div>
-      <button type="button" class="secondary" id="drm-date-next" style="flex:none;width:auto;padding:8px 14px;">›</button>
-    </div>
-    <div style="display:flex;justify-content:center;margin-top:6px;">
-      ${drmSelectedDate === today
-        ? '<span class="mini-tag info">今日</span>'
-        : '<button type="button" class="link" id="drm-date-today">今日へ</button>'}
+    <div style="display:flex;align-items:center;gap:6px;">
+      <button type="button" class="secondary" id="drm-date-prev" style="flex:none;width:auto;padding:5px 11px;">‹</button>
+      <div style="flex:1;min-width:0;text-align:center;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        ${formatJpDateWithDow(drmSelectedDate)}${drmSelectedDate === today ? ' <span class="mini-tag info" style="vertical-align:middle;">今日</span>' : ''}
+      </div>
+      <button type="button" class="secondary" id="drm-date-next" style="flex:none;width:auto;padding:5px 11px;">›</button>
+      <div style="flex:none;width:56px;text-align:right;">
+        ${drmSelectedDate === today ? '' : '<button type="button" class="secondary" id="drm-date-today" style="width:auto;padding:5px 8px;font-size:12px;">今日へ</button>'}
+      </div>
     </div>`;
   // 日付切替時は、選択日のすべての集計(件数要約・内訳バケット・サマリーカード・未提出バナー・一覧)を
   // 選択日で再取得する。renderだけ日付を変えて中身が本日固定のまま、という状態を作らない。
