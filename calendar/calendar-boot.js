@@ -35,14 +35,21 @@ const WANT_DATE_KEY = 'jinshou_calendar_want_date';
 
 let currentDeviceToken = null;
 
-// ?date=YYYY-MM-DD を取り出す。形式が違うものは無視する(不正な値で画面を壊さない)。
+// 実在する日付かどうか。形だけ合っている 2028-13-99 のような値を通さない。
+function isRealDate(d) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(d || ''))) return false;
+    const t = new Date(`${d}T00:00:00Z`);
+    return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d;
+}
+
+// ?date=YYYY-MM-DD を取り出す。実在しない日付は無視する(不正な値で画面を壊さない)。
 function wantedDate() {
     let d = null;
     try {
         d = new URLSearchParams(location.search).get('date');
         if (!d) d = sessionStorage.getItem(WANT_DATE_KEY);
     } catch (e) { return null; }
-    return /^\d{4}-\d{2}-\d{2}$/.test(String(d || '')) ? d : null;
+    return isRealDate(d) ? d : null;
 }
 
 function consumeWantedDate() {

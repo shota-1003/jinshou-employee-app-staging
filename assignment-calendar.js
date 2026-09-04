@@ -190,8 +190,12 @@
 
         const today = todayJST();
         // ホームウィジェット等から「この日を開いてほしい」と指定された日付。
-        // 形式が合わないものは無視して、これまでどおり今日から始める。
-        const wanted = /^\d{4}-\d{2}-\d{2}$/.test(String(ctx.initialDate || '')) ? ctx.initialDate : today;
+        // 実在しない日付(2028-13-99 のような形だけ合った値)は無視して、
+        // これまでどおり今日から始める。
+        const asked = String(ctx.initialDate || '');
+        const askedOk = /^\d{4}-\d{2}-\d{2}$/.test(asked)
+            && new Date(`${asked}T00:00:00Z`).toISOString().slice(0, 10) === asked;
+        const wanted = askedOk ? asked : today;
         const state = {
             view: ctx.defaultView || 'month',
             year: Number(wanted.slice(0, 4)),
