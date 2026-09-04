@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v141-staging';
-const BUILD_DEPLOYED_AT = '2026-09-04T20:46:59.352Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v142-staging';
+const BUILD_DEPLOYED_AT = '2026-09-04T21:02:36.835Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8934,6 +8934,9 @@ async function loadDailyReportAssignmentChips(dateStr) {
   if (!area || !row) return;
   // 本人・社員の日報のみ対象(外注作業員の代理入力は配置カレンダーの社員配置とは別)。
   if (dailyReportTarget.type === 'subcontractor') { area.style.display = 'none'; return; }
+  // 日付が未入力/不正のままRPCへ渡すと Production 400(invalid input syntax for type date: "")に
+  // なる(finding#13/#9)。正しいYYYY-MM-DDのときだけ配置を問い合わせる。
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dateStr || ''))) { area.style.display = 'none'; row.innerHTML = ''; return; }
   try {
     // 代理入力(他の社員)では、対象社員本人の端末トークンが無いため assignment_get_my_schedule
     // (対象社員コードでセッション検証)は使えない(呼ぶと管理者セッションが破棄されログイン画面へ
