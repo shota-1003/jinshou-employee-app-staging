@@ -613,10 +613,16 @@
         // 週表示は出し入れしない。スマホ/タブレットでは最初から常に出しておく。
         // 「スクロールし始めてから別のパネルを出す」方式は、出た瞬間に高さが変わって
         // 一覧がカクつく・一瞬消える、という指摘の原因そのものだった(2026-09-05)。
+        let lastStripState = null;
         function syncWeekStripVisibility() {
             const want = !(state.view === 'me' || isWide());
             const shown = elWeekNav.style.display !== 'none';
             const monthOpen = state.mobileMode === 'month';
+            // スクロールのたびに同じ値を書き込むと、そのつどレイアウトが走って
+            // 上部が数pxぶれる原因になる。変わったときだけ書く(2026-09-04)。
+            const key = String(want) + '/' + String(monthOpen);
+            if (key === lastStripState && want === shown) return;
+            lastStripState = key;
             // 月間カレンダーを開いているあいだは7日の帯を畳み、
             // 「一覧へ戻る」ボタンだけ残す(戻る手段を必ず画面に残す)。
             elWeekRow.style.display = monthOpen ? 'none' : '';
@@ -992,14 +998,25 @@
         }
 
         // いま画面の上部に来ている区画の日付。スクロール位置から決める。
+        // 画面上端ちょうどで判定すると、区画の境目を1px またぐたびに
+        // 9/3 → 9/4 → 9/3 と行き来して落ち着かない(2026-09-04 実機指摘)。
+        // 画面の少し下(1/4あたり)に判定線を置き、そこを覆っている区画を「見ている日」とする。
+        // 次の日がその線まで十分に入って初めて切り替わるので、境目で往復しない。
+        const VIEW_PROBE_RATIO = 0.25;
         function viewedDate() {
             const tl = timelineEl();
             if (!tl) return null;
-            const top = elBody.getBoundingClientRect().top;
+            const r = elBody.getBoundingClientRect();
+            const probe = r.top + r.height * VIEW_PROBE_RATIO;
+            let last = null;
             for (const sec of tl.children) {
-                if (sec.getBoundingClientRect().bottom - top > 8) return sec.dataset.date;
+                const b = sec.getBoundingClientRect();
+                last = sec.dataset.date;
+                if (b.top <= probe && b.bottom > probe) return sec.dataset.date;
+                // 判定線より下にしか区画が無い(先頭付近)ときは、その先頭を見ているとみなす
+                if (b.top > probe) return sec.dataset.date;
             }
-            return tl.lastElementChild ? tl.lastElementChild.dataset.date : null;
+            return last;
         }
 
         // 閲覧中の日が変わったときの同期。全体の再描画はしない
@@ -1019,7 +1036,9 @@
             const monthChanged = (y !== state.year || m !== state.month);
             // 年月はヘッダーを描く前に入れる(後だと1手遅れて前の月が残る)
             state.year = y; state.month = m;
-            renderHeader();
+            // ヘッダーを毎回作り直すとスクロール中に余計なレイアウトが走る。
+            // 表示が変わる(月が変わった)ときだけ描き直す。
+            if (monthChanged) renderHeader();
             if (monthChanged) {
                 clearTimeout(monthSyncTimer);
                 monthSyncTimer = setTimeout(() => {
@@ -1294,7 +1313,10 @@
                 put('ac-hc-sales', '営業', h.sales, '営業の社員、またはその日ずっと営業活動だった社員。');
                 put('ac-hc-doba', '土場', h.doba, '土場担当の社員、またはその日は土場に入った社員。');
                 put('ac-hc-sub', '外注', h.sub, '外注の作業人数。会社まとめの行は登録された人数で数えます。');
-                put('ac-hc-haul', '運搬', h.haul, '運搬だけを担当した人の数(自社＋外注)。運んでそのまま現場で働く人は職人として数えます。');
+                // 運搬は「自社社員の運搬」と「協力会社の運搬」で意味が違うので分けて出す
+                // (2026-09-04)。同じ外注人員が午前作業・午後運搬でも、計では二重に数えない。
+                put('ac-hc-haul', '運搬', h.own_haul, '自社社員のうち、運搬だけを担当した人の数。運んでそのまま現場で働く人は職人として数えます。');
+                put('ac-hc-subhaul', '外注運搬', h.sub_haul, '協力会社・外注人員のうち、運搬を担当した人数。同じ人が午前作業・午後運搬でも「計」では二重に数えません。');
                 // 「その他」は押すと内訳(研修・健康診断など、種別ごと)が開く。
                 // 上部を詰め込まないため、通常は人数だけを出す。
                 if (h.other > 0) {
@@ -2133,8 +2155,9 @@
                     ['事務', d.office, 'ac-hc-office'],
                     ['営業', d.sales, 'ac-hc-sales'],
                     ['土場', d.doba, 'ac-hc-doba'],
-                    ['外注', d.sub, 'ac-hc-sub'],
+                    ['外注', (d.sub_work === undefined ? d.sub : d.sub_work), 'ac-hc-sub'],
                     ['運搬', d.haul, 'ac-hc-haul'],
+                    ['外注運搬', d.sub_haul || 0, 'ac-hc-subhaul'],
                     ['その他', d.other, 'ac-hc-other'],
                 ];
                 const list = el('div', 'ac-list');
@@ -4501,11 +4524,17 @@
         // -----------------------------------------------------------
         // stickyの吸着位置に使うヘッダー高さを実測して反映する。
         // Safe Area(ノッチ)や狭幅時のpadding変更で高さが変わるため、固定値にしない。
+        // 同じ値を書き直すだけでもスタイルの再計算が起きる。1px単位のぶれを
+        // 上部へ伝えないよう、実際に変わったときだけ書き換える(2026-09-04)。
+        let lastHeights = '';
         function syncHeaderHeight() {
             const h = Math.round(elHeader.getBoundingClientRect().height);
-            if (h > 0) root.style.setProperty('--ac-header-h', `${h}px`);
             const d = elWeekNav.style.display === 'none'
                 ? 0 : Math.round(elWeekNav.getBoundingClientRect().height);
+            const key = h + '/' + d;
+            if (key === lastHeights) return;
+            lastHeights = key;
+            if (h > 0) root.style.setProperty('--ac-header-h', `${h}px`);
             root.style.setProperty('--ac-datebar-h', `${d}px`);
             root.style.setProperty('--ac-stick-h', `${h + d}px`);
         }
@@ -4596,13 +4625,15 @@
         // requestAnimationFrame はタブが非表示のときに止まるため、
         // スクロール量に追従できないことがある。単純な間引きにしておく。
         let stripTimer = null;
+        // スクロール中の追従は1フレームに1回にまとめる。タイマーで間引くと
+        // 描画のタイミングとずれて、指を動かしている最中に一瞬遅れて動いて見える。
         elBody.addEventListener('scroll', () => {
             if (stripTimer) return;
-            stripTimer = setTimeout(() => {
+            stripTimer = requestAnimationFrame(() => {
                 stripTimer = null;
                 syncWeekStripVisibility();
                 onTimelineScroll();
-            }, 60);
+            });
         }, { passive: true });
 
         // 「最下部で翌日へ切り替える」操作は、日別配置を縦に連続させたことで

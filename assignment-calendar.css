@@ -730,6 +730,8 @@
 .ac-hc-craft { background: #d3e1f5; border-color: #a9c3e6; color: #14356b; }
 .ac-hc-office { background: #ddd2f5; border-color: #bfaee6; color: #3d2a72; }
 .ac-hc-haul { background: #c7e7df; border-color: #93c8bb; color: #0f5b4d; }
+/* 外注運搬。運搬(自社)と外注の中間の色にして、どちらの仲間かが一目で分かるようにする。 */
+.ac-hc-subhaul { background: #d9ead3; border-color: #a8c99a; color: #3d6b2e; }
 .ac-hc-total { background: #12213f; border-color: #12213f; color: #fff; }
 .ac-hc-own { background: #eef3fb; border-color: #b9cbe6; }
 .ac-hc-sub { background: #fbf1e4; border-color: #dcc3a2; color: #7a4510; }

@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v129-staging';
-const BUILD_DEPLOYED_AT = '2026-09-03T23:51:38.634Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v130-staging';
+const BUILD_DEPLOYED_AT = '2026-09-04T00:47:49.403Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1378,13 +1378,22 @@ async function populateVendorList() {
 // 使用目的マスター(expense_purpose_master、管理者のみ追加・編集・無効化可)から検索して選択する。
 // 表記揺れ(「接待」「接待費」等がバラバラに保存される)を防ぐため、自由入力は許可しない
 // (site-selectと同じ「検索→select」の方式)。
+// 使用目的ごとの「取引先必須(requires_client)」をマスタ由来で保持する(名称ハードコードしない)。
+// 検索は絞り込みで部分集合が返るため、見たものを蓄積する(消さない)。
+const expensePurposeRequiresClient = new Map();
 async function populatePurposeSelect(selectEl, query) {
   try {
     const rows = await rpc('search_expense_purposes', { p_query: query || null });
+    rows.forEach((p) => { if (p && p.name) expensePurposeRequiresClient.set(p.name, p.requires_client === true); });
     const current = selectEl.value;
     selectEl.innerHTML = '<option value="">選択してください</option>' + rows.map((p) => `<option value="${p.name}">${p.name}</option>`).join('');
     if (current && rows.some((p) => p.name === current)) selectEl.value = current;
   } catch (e) { /* 候補が引けなくても他の項目は引き続き入力できる */ }
+}
+// 使用目的が取引先必須か(マスタ由来。未取得時は既知の2項目へフォールバック)。
+function purposeRequiresClient(cat) {
+  if (expensePurposeRequiresClient.has(cat)) return expensePurposeRequiresClient.get(cat);
+  return cat === '取引先との打ち合わせ' || cat === '接待交際費';
 }
 
 // 取引先参加者名を複数登録できる簡易チップ入力(検索は不要な自由記入の氏名リスト)。
@@ -1789,7 +1798,7 @@ function addExpenseItem(initialFile) {
   let lastEntertainmentSearchKey = '';
   function syncPurposeCategory() {
     const cat = purposeCategorySelect.value;
-    const needsMeeting = cat === '取引先との打ち合わせ' || cat === '接待交際費';
+    const needsMeeting = purposeRequiresClient(cat);
     meetingBlock.style.display = needsMeeting ? 'block' : 'none';
     entertainmentBlock.style.display = cat === '接待交際費' ? 'block' : 'none';
     if (needsMeeting && !participantSelects.has(itemId)) {
@@ -1989,9 +1998,9 @@ async function doSubmitExpense() {
     let partnerParticipants = null;
     let partnerCount = null;
     let ourCodes = null;
-    const needsMeeting = purposeCategory === '取引先との打ち合わせ' || purposeCategory === '接待交際費';
+    const needsMeeting = purposeRequiresClient(purposeCategory);
     if (needsMeeting) {
-      if (!businessPartnerId && !newBusinessPartnerName) { showError('expense-error', `${label}: 取引先を選択または入力してください。`); return; }
+      if (!businessPartnerId && !newBusinessPartnerName) { showError('expense-error', `${label}: ${purposeCategory}の場合は取引先を入力してください。`); return; }
       const chipNames = state.partnerParticipantChips ? state.partnerParticipantChips.getNames() : [];
       partnerParticipants = chipNames.length > 0 ? chipNames.join('、') : null;
       partnerCount = Number(card.querySelector('.item-partner-count').value || 0);
@@ -11200,9 +11209,11 @@ async function doSaveSubcontractorWorker() {
 function resetPurposeForm() {
   document.getElementById('purpose-edit-id').value = '';
   document.getElementById('purpose-name').value = '';
+  const rc = document.getElementById('purpose-requires-client'); if (rc) rc.checked = false;
   hideError('purpose-error');
 }
 
+let purposeAdminRows = [];
 async function loadPurposeAdminList() {
   const session = getSession();
   const listEl = document.getElementById('purpose-admin-list');
@@ -11210,11 +11221,14 @@ async function loadPurposeAdminList() {
   resetPurposeForm();
   try {
     const rows = await rpc('admin_list_expense_purposes', { p_admin_employee_code: session.employeeCode });
-    listEl.innerHTML = rows.map((p) => `
+    purposeAdminRows = rows;
+    listEl.innerHTML = rows.map((p, i) => `
       <div class="supply-item" data-id="${p.id}" style="${p.is_active ? '' : 'opacity:.5;'}">
-        <div class="row1"><span>${p.name}</span><span>${p.is_active ? '有効' : '無効'}</span></div>
+        <div class="row1"><span>${p.name}${p.requires_client ? ' <span class="mini-tag info">取引先必須</span>' : ''}</span><span>${p.is_active ? '有効' : '無効'}</span></div>
         <div class="qual-verify-btns">
-          <button type="button" class="edit-purpose-btn" data-name="${p.name}">編集</button>
+          <button type="button" class="secondary reorder-purpose-btn" data-dir="up" data-idx="${i}" ${i === 0 ? 'disabled' : ''}>↑</button>
+          <button type="button" class="secondary reorder-purpose-btn" data-dir="down" data-idx="${i}" ${i === rows.length - 1 ? 'disabled' : ''}>↓</button>
+          <button type="button" class="edit-purpose-btn" data-name="${p.name}" data-rc="${p.requires_client ? '1' : '0'}">編集</button>
           <button type="button" class="reject-btn toggle-purpose-btn" data-active="${p.is_active}">${p.is_active ? '無効化する' : '再開する'}</button>
         </div>
       </div>
@@ -11224,6 +11238,7 @@ async function loadPurposeAdminList() {
         const item = btn.closest('.supply-item');
         document.getElementById('purpose-edit-id').value = item.dataset.id;
         document.getElementById('purpose-name').value = btn.dataset.name;
+        document.getElementById('purpose-requires-client').checked = btn.dataset.rc === '1';
         window.scrollTo({ top: 0, behavior: 'smooth' });
       });
     });
@@ -11232,6 +11247,19 @@ async function loadPurposeAdminList() {
         const item = btn.closest('.supply-item');
         await rpc('admin_set_expense_purpose_active', { p_admin_employee_code: session.employeeCode, p_id: Number(item.dataset.id), p_is_active: btn.dataset.active !== 'true' });
         loadPurposeAdminList();
+      });
+    });
+    listEl.querySelectorAll('.reorder-purpose-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const idx = Number(btn.dataset.idx);
+        const swap = btn.dataset.dir === 'up' ? idx - 1 : idx + 1;
+        if (swap < 0 || swap >= purposeAdminRows.length) return;
+        const arr = purposeAdminRows.slice();
+        const t = arr[idx]; arr[idx] = arr[swap]; arr[swap] = t;
+        try {
+          await rpc('admin_reorder_expense_purposes', { p_admin_employee_code: session.employeeCode, p_ids: arr.map((r) => r.id) });
+          loadPurposeAdminList();
+        } catch (e) { /* 並び替え失敗は一覧そのまま */ }
       });
     });
   } catch (e) {
@@ -11248,7 +11276,8 @@ async function doSavePurpose() {
   const btn = document.getElementById('purpose-submit');
   btn.disabled = true;
   try {
-    await rpc('admin_upsert_expense_purpose', { p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_name: name });
+    const requiresClient = document.getElementById('purpose-requires-client').checked;
+    await rpc('admin_upsert_expense_purpose', { p_admin_employee_code: session.employeeCode, p_id: id ? Number(id) : null, p_name: name, p_requires_client: requiresClient });
     await loadPurposeAdminList();
   } catch (e) {
     showError('purpose-error', e.message || '保存に失敗しました。');
