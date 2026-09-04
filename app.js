@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v141-staging';
-const BUILD_DEPLOYED_AT = '2026-09-04T20:19:08.071Z';
+const BUILD_DEPLOYED_AT = '2026-09-04T20:46:59.352Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -908,6 +908,9 @@ function consumeLoginRedirect() {
 function enterMenu(replace) {
   if (consumeLoginRedirect()) return;
   const session = getSession();
+  // セッションが失効/未確立のまま呼ばれた場合、社員名の参照で
+  // "null is not an object" 例外(finding#14/#10)になりホームが描画されない。ログインへ戻す。
+  if (!session) { showScreen('login'); return; }
   const { greeting, sub } = buildHomeGreeting();
   document.getElementById('menu-greeting-hi').textContent = greeting;
   document.getElementById('menu-greeting-name').textContent = `${session.employeeName}さん`;
