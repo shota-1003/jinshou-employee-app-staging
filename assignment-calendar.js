@@ -844,12 +844,15 @@
         // 入りきらない日は「+N」を出し、その日をタップすれば下の一覧で全部見られる。
         function weekHeights(cells, byDate, holidays, layout) {
             const weeks = Math.ceil(cells.length / 7);
-            // 予定のある日だけを数える。0件の日を混ぜると中央値が0に張り付く。
+            // その月の日を全部数える(0件の日も含める)。予定のある日だけで中央値を取ると、
+            // 月の後半しか稼働していない月(2026年8月は24日以降だけ実データがある)で
+            // 行が伸び、空の週4つが画面を占めて肝心の週が画面外へ出た。
+            // 「半分以上の日が入りきらないときだけ伸ばす」という基準にする。
             const counts = [];
             for (const date of cells) {
                 if (!date) continue;
-                const n = (byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0);
-                if (n > 0) counts.push(n);
+                if (Number(date.slice(5, 7)) !== state.month) continue;
+                counts.push((byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0));
             }
             counts.sort((a, b) => a - b);
             const typical = counts.length ? counts[Math.floor((counts.length - 1) / 2)] : 0;
