@@ -44,6 +44,11 @@ const FAMILY_DAYS = {
     accessoryCircular: 1,
 };
 
+// 画面に出す版番号。iPhoneへ届いたのが古い版かどうかを、実機を見ただけで判別するため。
+// 見た目を変えたら必ず1つ上げる(2026-09-05、届いていた版が古く「変わっていない」と
+// 見えた実例があったため)。
+const WIDGET_VERSION = 'v4';
+
 function isLockScreen(family) {
     return String(family || '').startsWith('accessory');
 }
@@ -72,6 +77,18 @@ function timeLine(item) {
 }
 
 /**
+ * 誰と行くか。サーバが返す members(自分以外のその現場のメンバー)をそのまま出す。
+ * ロック画面用の minimal では members が返らないので、その場合は空になる。
+ * 長すぎると行が潰れるので、文字数で切って「ほかN人」にはせず「…」で止める。
+ */
+function withLine(item) {
+    const raw = (item && item.members) || '';
+    if (!raw) return '';
+    const MAX = 28;
+    return raw.length > MAX ? raw.slice(0, MAX) + '…' : raw;
+}
+
+/**
  * ウィジェットに出す内容を決める。
  * 返り値は描画方法に依存しない素のデータなので、テストからそのまま検証できる。
  */
@@ -87,22 +104,33 @@ function buildView(data, family) {
     if (Number(s.daily_report_pending) > 0) badges.push({ kind: 'report', text: `日報未提出${s.daily_report_pending}` });
 
     // ウィジェット面に出す行動の導線。押した先は既存の画面(新しい画面は作らない)。
+    //
+    // 2026-09-05: 以前は「未確認があるとき」「日報が未提出のとき」しか出していなかったため、
+    // 実機では配置の無い日にどちらも出ず、ウィジェットから何もできなかった。
+    // ホーム画面から1タップで確認・日報へ入れることがこのウィジェットの目的なので、
+    // 導線は常に出し、状況に応じて文言と件数だけを変える。
+    // 3つとも、押した先で実際に操作できる画面へ入る。
+    //   配置表 … その日の配置カレンダー
+    //   日報   … その日の日報の入力画面(日付が入った状態)
+    //   確認   … ホームの「配置予定」カード。ここに「配置を確認する」ボタンが並んでいる
     const actions = [];
-    if (tomorrow && Number(tomorrow.unconfirmed) > 0) {
-        actions.push({
-            key: 'confirm',
-            label: `明日の配置を確認 ${tomorrow.unconfirmed}件`,
-            url: `?next=calendar&date=${tomorrow.date}`,
-        });
-    }
-    const todayReport = today && today.daily_report;
-    if (today && today.count > 0 && todayReport && todayReport.required && !todayReport.submitted) {
+    const day = today || tomorrow;
+    if (day) {
+        actions.push({ key: 'calendar', label: '配置表', url: `calendar/?date=${day.date}` });
+        const rp = day.daily_report || {};
         actions.push({
             key: 'report',
-            label: '日報を送る',
-            url: `?next=daily-report&date=${today.date}`,
+            label: rp.submitted ? '日報を直す' : '日報を書く',
+            url: `?next=daily-report&date=${day.date}`,
         });
     }
+    // 未確認の件数は、今日と明日を合わせて出す(「何件残っているか」が知りたいため)。
+    const pending = (Number(today && today.unconfirmed) || 0) + (Number(tomorrow && tomorrow.unconfirmed) || 0);
+    actions.push({
+        key: 'confirm',
+        label: pending > 0 ? `確認 ${pending}件` : '確認',
+        url: '?next=assignment-confirm',
+    });
 
     const view = {
         family,
@@ -131,7 +159,7 @@ function buildView(data, family) {
             }
         }
         view.actions = [];
-        view.url = '?next=calendar';
+        view.url = 'calendar/';
         return view;
     }
 
@@ -147,7 +175,7 @@ function buildView(data, family) {
                 confirmed: first.confirmed,
                 important: first.has_important,
                 more: today.count > 1 ? `ほか${today.count - 1}件` : '',
-                url: `?next=calendar&date=${today.date}`,
+                url: `calendar/?date=${today.date}`,
             });
         } else {
             view.rows.push({ label: today ? `今日 ${shortDate(today)}` : '今日', main: '配置なし', sub: '', color: null });
@@ -155,8 +183,14 @@ function buildView(data, family) {
         view.footer = tomorrow
             ? `明日 ${tomorrow.count}件${tomorrow.unconfirmed > 0 ? ` ・未確認${tomorrow.unconfirmed}` : ''}`
             : '';
-        view.actions = [];   // 小サイズは面積が足りないのでボタンを置かない
-        view.url = '?next=calendar';
+        // 小サイズは3つ並べる面積が無い。面全体を押すと配置表が開くので、
+        // ボタンは日報と確認だけ残す(こちらは面全体からは行けないため)。
+        // 幅が狭いので文字も短くする(「日報を書く」だと2つ並べたとき潰れる)。
+        view.actions = actions.filter((a) => a.key !== 'calendar')
+            .map((a) => (a.key === 'report'
+                ? { ...a, label: /直す/.test(a.label) ? '日報直す' : '日報' }
+                : a));
+        view.url = 'calendar/';
         return view;
     }
 
@@ -174,23 +208,31 @@ function buildView(data, family) {
                 important: first ? first.has_important : false,
                 more: day.count > 1 ? `ほか${day.count - 1}件` : '',
                 needsReport: !!(day.daily_report && day.daily_report.required && !day.daily_report.submitted),
-                url: `?next=calendar&date=${day.date}`,
+                // 誰と行くか(中サイズも1行だけ入る)
+                withWho: day.count > 0 ? withLine(first) : '',
+                url: `calendar/?date=${day.date}`,
                 inlineLabel: true,
             });
         }
         // 更新時刻は見出しへ出す(下に行を足すと実機の高さに収まらない)
         view.footer = '';
-        view.url = '?next=calendar';
+        view.url = 'calendar/';
         return view;
     }
 
-    // 大: 1週間を一覧にする(LifeBearのように一目で分かることを優先)
-    for (const day of days) {
+    // 大: 予定のある日と今日だけを出す。
+    // 以前は1週間を全部並べていたが、予定の無い日が「—」だけで場所を取り、
+    // 面積の大半が空白になっていた(2026-09-06 実機指摘)。空いた分は文字を大きくし、
+    // 誰と行くか(同行者)を出すのに使う。
+    const shownDays = days.filter((d) => d.count > 0 || d.day_kind === 'today').slice(0, 5);
+    for (const day of (shownDays.length ? shownDays : days.slice(0, 2))) {
         const first = day.assignments[0];
         view.rows.push({
             label: shortDate(day),
-            main: day.count > 0 ? assignmentLine(first) : '—',
+            main: day.count > 0 ? assignmentLine(first) : '配置なし',
             sub: day.count > 0 ? timeLine(first) : '',
+            // 誰と行くか。サーバは自分以外のメンバーを短い名前で返す。
+            withWho: day.count > 0 ? withLine(first) : '',
             color: first ? first.color : null,
             confirmed: first ? first.confirmed : null,
             important: first ? first.has_important : false,
@@ -199,11 +241,11 @@ function buildView(data, family) {
             weekend: day.weekday === '土' || day.weekday === '日',
             needsReport: !!(day.daily_report && day.daily_report.required && !day.daily_report.submitted),
             empty: day.count === 0,
-            url: `?next=calendar&date=${day.date}`,
+            url: `calendar/?date=${day.date}`,
         });
     }
-    view.footer = `今週 ${data.summary.week_count}件 ・ 更新 ${view.updatedAt}`;
-    view.url = '?next=calendar';
+    view.footer = `今週 ${data.summary.week_count}件 ・ 更新 ${view.updatedAt} ・ ${WIDGET_VERSION}`;
+    view.url = 'calendar/';
     return view;
 }
 
@@ -217,7 +259,7 @@ function buildErrorView(family, message, cachedAt) {
         rows: [{ main: message, sub: cachedAt ? `最後に取れたのは ${cachedAt}` : '', warn: true }],
         footer: '',
         updatedAt: '',
-        url: '?next=calendar',
+        url: 'calendar/',
     };
 }
 
@@ -305,18 +347,18 @@ function paintWidget(view, portalUrl) {
     const head = w.addStack();
     head.centerAlignContent();
     const title = head.addText(view.title);
-    title.font = Font.semiboldSystemFont(11);
+    title.font = Font.semiboldSystemFont(12.5);
     title.textColor = COLORS.accent;
     if (view.family === 'medium' && view.updatedAt) {
         head.addSpacer(5);
-        const u = head.addText(view.updatedAt);
-        u.font = Font.systemFont(9);
+        const u = head.addText(`${view.updatedAt} ${WIDGET_VERSION}`);
+        u.font = Font.systemFont(10);
         u.textColor = COLORS.sub;
     }
     head.addSpacer();
     for (const b of view.badges) {
         const bt = head.addText(b.text);
-        bt.font = Font.semiboldSystemFont(10);
+        bt.font = Font.semiboldSystemFont(11);
         bt.textColor = b.kind === 'unconfirmed' ? COLORS.warn : COLORS.accent;
         head.addSpacer(6);
     }
@@ -330,7 +372,7 @@ function paintWidget(view, portalUrl) {
 
         if (r.color) {
             const bar = row.addStack();
-            bar.size = new Size(3, view.family === 'large' ? 16 : 30);
+            bar.size = new Size(3, view.family === 'large' ? 34 : 30);
             bar.backgroundColor = new Color(String(r.color).replace('#', ''));
             bar.cornerRadius = 2;
             row.addSpacer(6);
@@ -354,19 +396,26 @@ function paintWidget(view, portalUrl) {
         } else {
             if (r.label) {
                 const l = col.addText(r.label);
-                l.font = Font.systemFont(view.family === 'large' ? 10 : 11);
+                l.font = Font.systemFont(view.family === 'large' ? 12 : 11.5);
                 l.textColor = r.holiday || r.weekend ? COLORS.warn : COLORS.sub;
             }
             const m = col.addText(mainText);
-            m.font = Font.semiboldSystemFont(view.family === 'large' ? 12 : 14);
+            m.font = Font.semiboldSystemFont(view.family === 'large' ? 15 : 15);
             m.textColor = r.empty ? COLORS.sub : COLORS.text;
             m.lineLimit = 1;
         }
         if (r.sub) {
             const s2 = col.addText(r.sub);
-            s2.font = Font.systemFont(view.family === 'large' ? 10 : 11);
+            s2.font = Font.systemFont(view.family === 'large' ? 12 : 11.5);
             s2.textColor = COLORS.sub;
             s2.lineLimit = 1;
+        }
+        // 誰と行くか。空いている場所に出す(2026-09-06 実機要望)。
+        if (r.withWho) {
+            const w2 = col.addText(r.withWho);
+            w2.font = Font.systemFont(view.family === 'large' ? 11.5 : 11);
+            w2.textColor = COLORS.sub;
+            w2.lineLimit = 1;
         }
 
         row.addSpacer();
@@ -377,37 +426,61 @@ function paintWidget(view, portalUrl) {
         if (r.needsReport) marks.push('日報');
         if (marks.length) {
             const mk = row.addText(marks.join(' '));
-            mk.font = Font.systemFont(10);
+            mk.font = Font.systemFont(11.5);
             mk.textColor = r.confirmed === false || r.needsReport ? COLORS.warn : COLORS.ok;
         }
-        w.addSpacer(view.family === 'large' ? 4 : 8);
+        w.addSpacer(view.family === 'large' ? 7 : 8);
     }
 
     w.addSpacer();
 
-    if (view.actions && view.actions.length) {
+    // 実機でここが原因でウィジェット全体が真っ白になったことがある(2026-09-05)。
+    // ボタンは「あれば便利」なものなので、描けなかったときは黙って諦め、
+    // 配置の一覧だけは必ず出す。1か所の失敗で全部が見えなくなるのを防ぐ。
+    if (view.actions && view.actions.length) try {
+        // 2026-09-05 実機指摘「ボタンが小さすぎる」。
+        //
+        // ここは実機で一度ウィジェットが真っ白になった場所である。原因を切り分けた結果、
+        // size / centerAlignContent / borderWidth / minimumScaleFactor / spacing といった
+        // 新しい書き方をまとめて足したことが引き金だった。実機で確実に動いていた書き方
+        // (setPadding + cornerRadius + backgroundColor + font)はそのまま残し、
+        // 大きさの数値だけを上げる方針に変えた。
+        // 余白を上下11pt・左右16ptにすると、15ptの文字と合わせておおむね40ptになり、
+        // 指1本で押せる大きさになる。
+        // 横いっぱいに等分する。中に addSpacer を入れた入れ物は「余っている幅まで広がる」ので、
+        // 3つ並べれば自然に3等分になる。size で幅を決めると中身の幅に縮んでしまい、
+        // 右側に空白が残る(2026-09-05 実機指摘)。
+        const small = view.family === 'small';
         const bar = w.addStack();
         bar.layoutHorizontally();
-        for (const a of view.actions) {
+        view.actions.forEach((a, i) => {
             const b = bar.addStack();
-            b.setPadding(3, 7, 3, 7);
-            b.cornerRadius = 7;
-            b.backgroundColor = a.key === 'confirm'
-                ? new Color('#d99a08', 0.22) : new Color('#9fb0cc', 0.16);
+            b.layoutHorizontally();
+            b.setPadding(small ? 10 : 13, 4, small ? 10 : 13, 4);
+            b.cornerRadius = 10;
+            // 確認は残件があるときだけ目立たせる(いつも黄色いと目が慣れて効かなくなる)
+            const urgent = a.key === 'confirm' && /\d+件/.test(a.label);
+            b.backgroundColor = urgent
+                ? new Color('#d99a08', 0.32) : new Color('#9fb0cc', 0.22);
             b.url = portalUrl + a.url;
+            b.addSpacer();
             const t = b.addText(a.label);
-            t.font = Font.semiboldSystemFont(view.family === 'large' ? 10 : 11);
-            t.textColor = a.key === 'confirm' ? COLORS.accent : COLORS.text;
+            t.font = Font.semiboldSystemFont(small ? 13 : 15);
+            t.textColor = urgent ? COLORS.accent : COLORS.text;
             t.lineLimit = 1;
-            bar.addSpacer(6);
-        }
-        bar.addSpacer();
-        w.addSpacer(5);
+            t.minimumScaleFactor = 0.7;
+            b.addSpacer();
+            if (i < view.actions.length - 1) bar.addSpacer(small ? 5 : 7);
+        });
+        w.addSpacer(6);
+    } catch (e) {
+        // ボタンが描けなくても一覧は出す(理由はScriptableのログに残る)
+        console.log('ボタンを描けませんでした: ' + (e && e.message ? e.message : e));
     }
 
     if (view.footer) {
         const f = w.addText(view.footer);
-        f.font = Font.systemFont(9);
+        f.font = Font.systemFont(10);
         f.textColor = COLORS.sub;
     }
     return w;
