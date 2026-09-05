@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v147-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T03:02:57.037Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T03:26:55.823Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10080,9 +10080,13 @@ async function loadDailyReportNeedsReviewAdmin() {
         const siteMismatch = /CAL_MISMATCH|現場が異な/.test(reasonRaw) || (r.consistency_issues || []).some((i) => /現場.*異な|現場.*不一致/.test(i.message || ''));
         // [LATE](後日提出)は要確認の理由ではなく別属性(提出日時の横に「後日提出」タグで示す)。理由文には出さない。
         const isLateNote = (s) => /^\[LATE\]/.test(s.trim()) || /^後日提出\(勤務日から日をおいて/.test(s.trim());
-        const reasonText = (r.consistency_issues || []).map((iss) => iss.message).filter((m) => !isLateNote(String(m || ''))).join(' / ')
-          || reasonRaw.split('/').filter((s) => !isLateNote(s)).map((s) => s.replace(/\[[A-Z_]+\]/g, '').trim()).filter(Boolean).join(' / ')
-          || '要確認';
+        // サーバは複数理由を ' / ' で連結する(理由文自体に「確定/通知」のような "/" を含むため、'/' 単体では分割しない)。
+        // admin_list_needs_review_daily_reports は consistency_issues が空のとき auto_confirm_reason 全文を1件の message に
+        // 包んで返すので、consistency_issues 側も同じ分割・[TAG]除去・[LATE]除外を通す(生の "[CAL_MISMATCH]…" を出さない)。
+        const splitReasons = (text) => String(text || '').split(' / ').map((s) => s.trim()).filter(Boolean);
+        const cleanReasons = (parts) => parts.filter((s) => !isLateNote(s)).map((s) => s.replace(/\[[A-Z_]+\]/g, '').trim()).filter(Boolean);
+        const issueParts = (r.consistency_issues || []).flatMap((iss) => splitReasons(iss && iss.message));
+        const reasonText = cleanReasons(issueParts.length ? issueParts : splitReasons(reasonRaw)).join(' / ') || '要確認';
         return `
         <div class="card" style="margin-top:8px;padding:10px;background:var(--surface-2,rgba(255,255,255,0.03));">
           <div class="row1"><span style="font-weight:700;">${r.employee_name}</span><span class="mini-tag">${r.employee_code}</span></div>
@@ -13378,8 +13382,11 @@ function init() {
       if (isBackControl) {
         const cur = currentScreenId();
         if (cur && PARENT_ROUTE[cur]) {
-          if (PARENT_ROUTE[cur] === 'menu') { enterMenu(leavingDone); return; }
-          showScreen(PARENT_ROUTE[cur], { replace: leavingDone });
+          // 「戻る」は履歴を積まない(replace)。push すると、戻るを押すたびに履歴が伸び、ブラウザの戻るで
+          // いま離れた画面へ再入場してしまう(レビュー指摘 2026-09-05)。従来の history.back() と同じく
+          // 履歴が伸びないことを nav-flow(history.length 前後比較)で検証する。
+          if (PARENT_ROUTE[cur] === 'menu') { enterMenu(true); return; }
+          showScreen(PARENT_ROUTE[cur], { replace: true });
           return;
         }
       }
@@ -13487,8 +13494,9 @@ function init() {
   SCREEN_ENTER_HOOKS['loan-admin'] = loadLoanAdminList;
   SCREEN_ENTER_HOOKS['lucky-month'] = () => { wireLucky(); const now = todayJST(); luckyYM = { y: Number(now.slice(0, 4)), m: Number(now.slice(5, 7)) }; loadLuckyMonth(); };
   // 本番(IS_STAGING=false)ではラッキー賞管理を開かせない(直リンク・履歴復元でも RPC を呼ばずホームへ戻す)。
-  SCREEN_ENTER_HOOKS['lucky-admin'] = () => { if (!IS_STAGING) { enterMenu(); return; } wireLucky(); loadLuckyAdmin(); };
-  SCREEN_ENTER_HOOKS['lucky-preview'] = () => { if (!IS_STAGING) { enterMenu(); return; } wireLucky(); loadLuckyPreview(); };
+  // hook は showScreen の pushState 後に走るため、ホームへ戻す際は積まれた lucky 画面の履歴を置き換える(replace)。
+  SCREEN_ENTER_HOOKS['lucky-admin'] = () => { if (!IS_STAGING) { enterMenu(true); return; } wireLucky(); loadLuckyAdmin(); };
+  SCREEN_ENTER_HOOKS['lucky-preview'] = () => { if (!IS_STAGING) { enterMenu(true); return; } wireLucky(); loadLuckyPreview(); };
   SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;

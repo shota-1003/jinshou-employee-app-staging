@@ -802,7 +802,45 @@
             const available = Math.max(240, h - (gridTop || 0));
             const cell = Math.max(wide ? 96 : 72, Math.min(wide ? 220 : 170, Math.floor(available / weeks)));
             const chips = Math.max(3, Math.floor((cell - num) / row));
-            return { cell, chips };
+            // 週ごとに高さを変えるための下限・上限。予定の無い週は詰め、忙しい週は伸ばす。
+            // 上限を置くのは、1日だけ極端に多い週で他の週が画面外へ押し出されないようにするため。
+            return {
+                cell, chips, row, num, available,
+                min: wide ? 76 : 56,
+                max: wide ? 260 : 210,
+            };
+        }
+
+        // その週にいくつ予定が並ぶかを見て、週ごとの高さを決める。
+        // 全週を同じ高さにすると、空いている週が場所を取り、忙しい週だけ「+N」で切れる。
+        // 実データ(2029年11月)では、空き週4つが高いまま、予定のある週だけ +2〜+5 になっていた。
+        function weekHeights(cells, byDate, holidays, layout) {
+            const weeks = Math.ceil(cells.length / 7);
+            const out = [];
+            const needs = [];
+            for (let w = 0; w < weeks; w += 1) {
+                let need = 0;
+                for (let d = 0; d < 7; d += 1) {
+                    const date = cells[w * 7 + d];
+                    if (!date) continue;
+                    const n = (byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0);
+                    if (n > need) need = n;
+                }
+                needs.push(need);
+                const want = layout.num + (need * layout.row) + 4;
+                out.push(Math.max(layout.min, Math.min(layout.max, want)));
+            }
+            // 全部足しても画面が余るときは、週の比率を保ったまま全体を引き伸ばす。
+            // 余りを均等に足すと空いている週まで同じだけ伸び、
+            // 予定の多い週へ寄せて足すとその週だけ間延びする。倍率で伸ばすと両方を避けられる。
+            // 伸ばしすぎないよう1.6倍までにする(それ以上は下に余白が残ってよい)。
+            const total = out.reduce((a, b) => a + b, 0);
+            const avail = layout.available || 0;
+            if (total > 0 && avail > total) {
+                const f = Math.min(1.6, avail / total);
+                for (let i = 0; i < out.length; i += 1) out[i] = Math.round(out[i] * f);
+            }
+            return out;
         }
 
         // グリッドを描いたあとに実際の開始位置を測り、想定とずれていたら1度だけ組み直す。
@@ -843,12 +881,21 @@
             const layout = computeLayout(cells.length / 7, lastGridTop);
             // ユーザーがメニューで表示件数を明示指定した場合はそちらを優先する
             const chipLimit = state.maxChipsOverride || layout.chips;
+            // 週ごとの高さ。件数の指定があるときは、その件数で全週そろえる。
+            const rowH = state.maxChipsOverride
+                ? new Array(Math.ceil(cells.length / 7)).fill(layout.num + chipLimit * layout.row + 4)
+                : weekHeights(cells, byDate, holidays, layout);
+            const limitOfWeek = (w) => (state.maxChipsOverride
+                ? chipLimit
+                : Math.max(2, Math.floor((rowH[w] - layout.num) / layout.row)));
 
             const grid = el('div', 'ac-grid');
-            grid.style.gridAutoRows = `${layout.cell}px`;
+            grid.style.gridTemplateRows = rowH.map((h) => `${h}px`).join(' ');
             attachSwipe(grid);
             const t = todayJST();
-            for (const date of cells) {
+            for (let ci = 0; ci < cells.length; ci += 1) {
+                const date = cells[ci];
+                const weekIdx = Math.floor(ci / 7);
                 const inMonth = Number(date.slice(5, 7)) === state.month;
                 const d = dowOf(date);
                 const hol = holidays.get(date);
@@ -880,7 +927,8 @@
                 // LifeBearと同じく、チップとして予定の先頭に並べる。
                 if (hol) cell.append(el('div', 'ac-chip ac-holchip', hol));
 
-                const base = hol ? Math.max(2, chipLimit - 1) : chipLimit;
+                const weekLimit = limitOfWeek(weekIdx);
+                const base = hol ? Math.max(2, weekLimit - 1) : weekLimit;
                 const limit = state.showNames ? Math.max(2, Math.floor(base / 2)) : base;
                 list.slice(0, limit).forEach((s) => {
                     const mi = modeInfo(s);
