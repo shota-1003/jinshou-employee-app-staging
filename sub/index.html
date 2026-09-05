@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>迅翔興業 外注ポータル</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32-v2.png">
+<link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16-v2.png">
+<link rel="apple-touch-icon" href="icons/app-icon-180-v2.png">
+<meta name="theme-color" content="#12213f">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;800;900&family=Zen+Kaku+Gothic+New:wght@500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="staging-banner" class="staging-banner">先行更新版｜通常版と同じデータです｜新機能を先にお試しいただけます</div>
+<!-- LINEアプリの中で開いていると、次に開いたときにログイン情報が消えることがある。
+     強制はせず、SafariやChromeで開き直す方法とホーム画面への追加を案内する。 -->
+<div id="line-browser-notice" style="display:none;background:#fff6e0;border-bottom:1px solid #f0d9a0;color:#5a4412;padding:10px 14px;font-size:.86rem;line-height:1.6;">
+  <div style="font-weight:700;margin-bottom:4px;">LINEの中で開いています</div>
+  <div>このままでもお使いいただけますが、次に開いたときにログインし直しになることがあります。
+    下のボタンでブラウザで開き直すと、次回から暗証番号の入力も不要になります。</div>
+  <a id="line-open-external" href="#" style="display:inline-block;margin-top:8px;background:#12213f;color:#fff;text-decoration:none;padding:8px 14px;border-radius:8px;font-weight:700;">ブラウザで開き直す</a>
+  <div style="margin-top:8px;font-size:.8rem;">
+    開いたあと、画面下の共有ボタン（<span style="font-weight:700;">⬆</span>）から「ホーム画面に追加」をしておくと、次からアプリのように開けます。
+  </div>
+  <button type="button" id="line-notice-close" style="margin-top:8px;background:none;border:none;color:#7a6a45;text-decoration:underline;padding:0;font-size:.8rem;width:auto;">閉じる</button>
+</div>
+<header class="app-header">
+  <img src="brand/logo-gold.png" alt="迅翔興業" class="app-header-logo">
+  <span class="app-header-title" id="app-header-title">外注ポータル</span>
+</header>
+<main>
+
+  <!-- 入口: はじめての方=外注登録 / 登録済みの方=機種変更。IDは入力させない(自動採番・端末保持)。 -->
+  <section id="screen-welcome" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company">株式会社 迅翔興業 外注ポータル</div>
+      <div class="card">
+        <div class="hint" style="margin-top:0;">外注作業員の方の入口です。所属会社を選んで登録を始めてください。会社からIDを受け取る必要はありません。</div>
+        <button id="welcome-register-btn">はじめての方はこちら（外注登録）</button>
+        <button class="menu-btn secondary" id="welcome-recover-btn" style="margin-top:12px;">登録済みの方（暗証番号でログイン）</button>
+        <button class="menu-btn secondary" id="welcome-first-login-btn" style="margin-top:12px;">会社で登録済みの方（登録コードではじめる）</button>
+        <button class="menu-btn secondary" id="welcome-relink-btn" style="margin-top:12px;">機種変更・別の端末で登録済みの方</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ① 外注 初回登録(自己登録・ID自動採番) -->
+  <section id="screen-register" class="screen">
+    <button class="back-btn" data-back="welcome">← もどる</button>
+    <div class="card">
+      <div class="section-title">① 外注 初回登録</div>
+      <div class="hint" style="margin-top:0;">所属している外注会社を選び、基本情報と暗証番号を登録してください。登録が完了すると、あなた専用の作業員IDが自動で発行されます（入力は不要です）。</div>
+      <label for="reg-company" style="margin-top:10px">所属する外注会社<span style="color:#e23b3b">（必須）</span></label>
+      <select id="reg-company"></select>
+      <label for="reg-name" style="margin-top:10px">氏名<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="reg-name" autocomplete="off">
+      <label for="reg-furigana" style="margin-top:8px">フリガナ</label>
+      <input type="text" id="reg-furigana" autocomplete="off">
+      <label for="reg-phone" style="margin-top:8px">電話番号<span style="color:#e23b3b">（必須）</span></label>
+      <input type="tel" id="reg-phone" inputmode="tel" autocomplete="off">
+      <label for="reg-pin" style="margin-top:10px">暗証番号を決めてください(4〜6桁)<span style="color:#e23b3b">（必須）</span></label>
+      <input type="password" id="reg-pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <label for="reg-pin2" style="margin-top:8px">暗証番号(確認のためもう一度)</label>
+      <input type="password" id="reg-pin2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <div class="error" id="register-error"></div>
+      <button id="register-submit">登録してはじめる</button>
+    </div>
+  </section>
+
+  <!-- 登録済みの方の復帰: 作業員IDを知らなくても 会社+氏名+暗証番号 で戻れる入口。
+       端末のログイン情報が消えた利用者が行き止まりにならないための画面(2026-09-05)。 -->
+  <section id="screen-recover" class="screen">
+    <button class="back-btn" data-back="welcome">← もどる</button>
+    <div class="card">
+      <div class="section-title">登録済みの方のログイン</div>
+      <div class="hint" style="margin-top:0;">前に登録したことがある方はこちらです。作業員IDを覚えていなくても大丈夫です。</div>
+      <label for="rec-company" style="margin-top:10px">所属する外注会社<span style="color:#e23b3b">（必須）</span></label>
+      <select id="rec-company"></select>
+      <label for="rec-name" style="margin-top:10px">氏名<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="rec-name" autocomplete="off">
+      <label for="rec-pin" style="margin-top:10px">暗証番号<span style="color:#e23b3b">（必須）</span></label>
+      <input type="password" id="rec-pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <div id="rec-phone-wrap" style="display:none">
+        <label for="rec-phone" style="margin-top:10px">電話番号</label>
+        <input type="tel" id="rec-phone" inputmode="tel" autocomplete="off">
+        <div class="hint">同じ氏名の方が複数いるため、電話番号でご本人を確認します。ハイフンはあってもなくても大丈夫です。</div>
+      </div>
+      <div class="error" id="recover-error"></div>
+      <button id="recover-submit">ログイン</button>
+      <button class="link" id="recover-to-register" style="margin-top:10px;">はじめての方はこちら（外注登録）</button>
+    </div>
+  </section>
+
+  <!-- 機種変更/別端末: 会社+氏名+電話+暗証番号で本人再確認 -->
+  <section id="screen-relink" class="screen">
+    <button class="back-btn" data-back="welcome">← もどる</button>
+    <div class="card">
+      <div class="section-title">機種変更・別の端末でログイン</div>
+      <div class="hint" style="margin-top:0;">以前この外注ポータルに登録した方は、所属会社・氏名・電話番号・暗証番号で本人確認するとこの端末でも使えるようになります。</div>
+      <label for="relink-company" style="margin-top:10px">所属する外注会社</label>
+      <select id="relink-company"></select>
+      <label for="relink-name" style="margin-top:8px">氏名</label>
+      <input type="text" id="relink-name" autocomplete="off">
+      <label for="relink-phone" style="margin-top:8px">電話番号</label>
+      <input type="tel" id="relink-phone" inputmode="tel" autocomplete="off">
+      <label for="relink-pin" style="margin-top:8px">暗証番号</label>
+      <input type="password" id="relink-pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <div class="error" id="relink-error"></div>
+      <button id="relink-submit">本人確認してログイン</button>
+    </div>
+  </section>
+
+  <!-- 会社が先に登録した方(パターンB): 作業員ID + 初回登録コードで本人確認し、自分で暗証番号を設定 -->
+  <section id="screen-first-login" class="screen">
+    <button class="back-btn" data-back="welcome">← もどる</button>
+    <div class="card">
+      <div class="section-title">会社で登録済みの方の初回登録</div>
+      <div class="hint" style="margin-top:0;">会社から受け取った<b>作業員ID</b>と<b>初回登録コード</b>を入力し、自分だけの暗証番号を設定してください。QRを読み取って開いた場合は自動で入力されています。暗証番号はあなたしか知りません（会社・管理者は見られません）。</div>
+      <label for="fl-login-code" style="margin-top:10px">作業員ID<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="fl-login-code" autocomplete="off" placeholder="例: 12-003">
+      <label for="fl-code" style="margin-top:8px">初回登録コード（6桁）<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="fl-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <label for="fl-pin" style="margin-top:10px">暗証番号を決めてください(4〜6桁)<span style="color:#e23b3b">（必須）</span></label>
+      <input type="password" id="fl-pin" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <label for="fl-pin2" style="margin-top:8px">暗証番号(確認のためもう一度)</label>
+      <input type="password" id="fl-pin2" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+      <div class="error" id="first-login-error"></div>
+      <button id="first-login-submit">本人確認して暗証番号を設定</button>
+    </div>
+  </section>
+
+  <!-- 2回目以降: 暗証番号ログイン(IDは端末が記憶・入力不要) -->
+  <section id="screen-pin-entry" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company" id="pin-entry-name">読み込み中...</div>
+      <div class="card">
+        <label for="pin-entry-code">暗証番号を入力してください</label>
+        <input type="password" id="pin-entry-code" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        <div class="error" id="pin-entry-error"></div>
+        <button id="pin-entry-submit">ログイン</button>
+        <button class="link" id="pin-entry-switch">別の方・機種変更はこちら</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ホーム -->
+  <section id="screen-home" class="screen">
+    <div class="card">
+      <div class="home-greeting">こんにちは、<span id="home-worker-name">-</span> さん</div>
+      <div class="home-company" id="home-company-name" style="color:#5b6b8a;font-size:.9rem;margin-bottom:14px"></div>
+      <button class="menu-btn" id="home-attendance-btn" style="font-size:19px;padding:20px;background:var(--primary);color:#fff;border-color:var(--primary);">📋 今日の出勤を報告する</button>
+      <div class="hint" style="margin:6px 2px 0;">毎日はこれだけでOK（現場→勤務区分→残業→出張→送信）</div>
+      <button class="menu-btn" id="home-profile-btn" style="margin-top:16px;">👤 個人情報・資格・健康診断（登録・確認）</button>
+      <button class="menu-btn secondary" id="home-logout-btn">ログアウト</button>
+    </div>
+    <div class="card" id="home-recent-wrap" style="display:none">
+      <div class="section-title">最近の提出</div>
+      <div id="home-recent-list"></div>
+      <button class="menu-btn secondary" id="home-history-btn" style="margin-top:12px;">🗓 出勤履歴をすべて見る</button>
+    </div>
+  </section>
+
+  <!-- 出勤履歴(月単位・本人のみ) -->
+  <section id="screen-history" class="screen">
+    <button class="back-btn" data-back="home">← もどる</button>
+    <div class="card">
+      <div class="section-title">出勤履歴</div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin:6px 0 12px;">
+        <button type="button" id="hist-prev" class="seg" style="width:auto;padding:6px 16px;">＜</button>
+        <div id="hist-month" style="font-weight:700;font-size:1.05rem;">-</div>
+        <button type="button" id="hist-next" class="seg" style="width:auto;padding:6px 16px;">＞</button>
+      </div>
+      <div id="hist-stats" style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center;margin-bottom:12px;">
+        <div><div style="font-size:.8rem;color:#5b6b8a;">出勤日数</div><div id="hist-days" style="font-weight:700;">-</div></div>
+        <div><div style="font-size:.8rem;color:#5b6b8a;">合計人工</div><div id="hist-mandays" style="font-weight:700;">-</div></div>
+        <div><div style="font-size:.8rem;color:#5b6b8a;">残業合計</div><div id="hist-overtime" style="font-weight:700;">-</div></div>
+      </div>
+      <div id="hist-list"></div>
+    </div>
+  </section>
+
+  <!-- 出勤報告 詳細(本人のみ・訂正/取消) -->
+  <section id="screen-att-detail" class="screen">
+    <button class="back-btn" data-back="history">← 履歴にもどる</button>
+    <div class="card">
+      <div class="section-title" id="detail-date">-</div>
+      <div id="detail-status" style="margin-bottom:10px;"></div>
+      <div id="detail-entries"></div>
+      <button class="menu-btn" id="detail-edit-btn" style="margin-top:14px;background:var(--primary);color:#fff;border-color:var(--primary);">✏️ この出勤報告を訂正する</button>
+      <button class="menu-btn secondary" id="detail-cancel-btn" style="margin-top:10px;color:var(--danger);border-color:var(--danger);">🗑 この出勤報告を取り消す</button>
+    </div>
+  </section>
+
+  <!-- ②③④ 個人情報・会社・資格 -->
+  <section id="screen-profile" class="screen">
+    <button class="back-btn" data-back="home">← もどる</button>
+    <div class="card">
+      <div class="section-title">② 基本情報</div>
+      <label for="pf-name">氏名</label>
+      <input type="text" id="pf-name" autocomplete="off">
+      <label for="pf-furigana" style="margin-top:10px">フリガナ</label>
+      <input type="text" id="pf-furigana" autocomplete="off">
+      <label for="pf-birth" style="margin-top:10px">生年月日</label>
+      <input type="date" id="pf-birth">
+      <label for="pf-phone" style="margin-top:10px">電話番号</label>
+      <input type="tel" id="pf-phone" inputmode="tel" autocomplete="off">
+      <label for="pf-address" style="margin-top:10px">住所</label>
+      <input type="text" id="pf-address" autocomplete="off">
+      <label for="pf-blood" style="margin-top:10px">血液型<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="pf-blood" placeholder="例: A" autocomplete="off">
+      <label for="pf-ec-name" style="margin-top:10px">緊急連絡先 氏名<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="pf-ec-name" autocomplete="off">
+      <label for="pf-ec-rel" style="margin-top:10px">緊急連絡先 続柄<span style="color:#e23b3b">（必須）</span></label>
+      <input type="text" id="pf-ec-rel" autocomplete="off" placeholder="例: 妻・父・兄 など">
+      <label for="pf-ec-phone" style="margin-top:10px">緊急連絡先 電話<span style="color:#e23b3b">（必須）</span></label>
+      <input type="tel" id="pf-ec-phone" inputmode="tel" autocomplete="off">
+      <div class="hint" id="pf-required-notice" style="display:none;color:#e23b3b;margin-top:8px;">未入力の必須項目があります。血液型・緊急連絡先(氏名・続柄・電話)をすべて入力してください。</div>
+    </div>
+    <div class="card">
+      <div class="section-title">③ 所属外注会社</div>
+      <div id="pf-company-locked" style="display:none">
+        <div class="readonly-value" id="pf-company-name">-</div>
+        <div class="hint">所属会社は会社側で設定されています。変更が必要な場合は担当者へご連絡ください。</div>
+      </div>
+      <div id="pf-company-select-wrap" style="display:none">
+        <label for="pf-company-select">所属している外注会社を選んでください</label>
+        <select id="pf-company-select"></select>
+        <div class="hint">一度選ぶと、以後はご自身では変更できません(会社担当者のみ変更可)。</div>
+      </div>
+    </div>
+      <div class="error" id="profile-error"></div>
+      <button id="profile-save-btn">基本情報を保存する</button>
+    </div>
+    <div class="card">
+      <div class="section-title">④ 資格・免許（複数登録できます）</div>
+      <div class="hint" style="margin-top:0;">持っている資格を一覧から選ぶだけです。番号や期限の入力は不要です。</div>
+      <div id="pf-qual-list" class="recent-item-list"></div>
+      <div class="hint" id="pf-qual-empty" style="display:none">まだ登録がありません。下から選んで追加してください。</div>
+      <label for="pf-qual-select" style="margin-top:10px">持っている資格を選ぶ</label>
+      <select id="pf-qual-select"></select>
+      <div id="pf-qual-other-wrap" style="display:none;margin-top:8px;">
+        <label for="pf-qual-other">資格・免許名を入力（例: 高所作業車、職長教育、酸欠危険作業 など）</label>
+        <input type="text" id="pf-qual-other" placeholder="マスターに無い資格名" autocomplete="off">
+      </div>
+      <div class="error" id="qual-error"></div>
+      <button id="qual-add-btn" class="secondary">選んだ資格を追加</button>
+    </div>
+    <div class="card">
+      <div class="section-title">⑤ 健康診断</div>
+      <div id="pf-health-list" class="recent-item-list"></div>
+      <div class="hint" id="pf-health-empty" style="display:none">まだ登録がありません。下から追加してください。</div>
+      <label for="pf-health-date" style="margin-top:10px">健康診断の実施日</label>
+      <input type="date" id="pf-health-date">
+      <label for="pf-health-next" style="margin-top:8px">次回受診の期限(任意)</label>
+      <input type="date" id="pf-health-next">
+      <div class="error" id="health-error"></div>
+      <button id="health-add-btn" class="secondary">健康診断を追加</button>
+    </div>
+  </section>
+
+  <!-- ⑤⑥⑦⑧⑨ 本日の日報 -->
+  <section id="screen-attendance" class="screen">
+    <button class="back-btn" data-back="home">← もどる</button>
+    <div class="card">
+      <div class="section-title">本日の日報</div>
+      <div class="attendance-date" id="att-date">-</div>
+      <div class="hint" style="margin-bottom:6px;">1日に最大2現場まで登録できます。合計人工は自動で計算されます。</div>
+
+      <div id="att-blocks"></div>
+
+      <button type="button" id="att-add-site-btn" class="secondary" style="margin-top:8px;">＋ もう1現場を追加</button>
+      <div class="hint" id="att-total" style="margin-top:8px;font-weight:700;">合計人工 1.0</div>
+
+      <div class="error" id="att-error"></div>
+      <button id="att-submit-btn">⑨ 登録する</button>
+    </div>
+
+    <template id="att-block-template">
+      <div class="att-site-block" style="border-top:1px solid var(--line,#eee);padding-top:10px;margin-top:10px;">
+        <div class="att-block-head" style="display:flex;justify-content:space-between;align-items:center;">
+          <label class="att-block-title" style="font-weight:700;">現場1</label>
+          <button type="button" class="ab-remove-btn secondary" style="display:none;padding:2px 10px;">削除</button>
+        </div>
+        <label>⑤ 現場</label>
+        <select class="ab-site"></select>
+        <div class="ab-newsite-wrap" style="display:none;margin-top:8px">
+          <input type="text" class="ab-newsite" placeholder="現場名を入力(一覧に無い場合)" autocomplete="off">
+        </div>
+        <label style="margin-top:14px">⑥ 勤務区分</label>
+        <select class="ab-worktype">
+          <option value="終日">終日</option>
+          <option value="午前">午前</option>
+          <option value="午後">午後</option>
+        </select>
+        <label style="margin-top:14px">⑦ 人工</label>
+        <select class="ab-headcount">
+          <option value="1.0">1.0</option>
+          <option value="0.5">0.5</option>
+        </select>
+        <div class="hint">区分を選ぶと自動でセットされます。2現場の場合は 現場A 0.5 + 現場B 0.5 = 1.0 のように分けられます。</div>
+        <label style="margin-top:14px">⑧ 残業時間</label>
+        <input type="number" class="ab-overtime" inputmode="decimal" step="0.5" min="0" value="0">
+        <label style="margin-top:14px" class="checkbox-row"><input type="checkbox" class="ab-night"> 夜勤</label>
+        <label style="margin-top:10px" class="checkbox-row"><input type="checkbox" class="ab-trip"> 出張（この現場は出張扱い）</label>
+        <label style="margin-top:10px">備考(任意)</label>
+        <input type="text" class="ab-notes" autocomplete="off">
+      </div>
+    </template>
+    <div class="card" id="att-existing-wrap" style="display:none">
+      <div class="section-title">本日 登録済みの内容</div>
+      <div id="att-existing-list"></div>
+    </div>
+  </section>
+
+  <!-- 登録完了。登録できたことをはっきり伝え、自分の作業員IDを一度見せる。
+       これが無いと、登録は成功しているのに「登録できなかった」と受け取られる(2026-09-05)。 -->
+  <section id="screen-registered" class="screen">
+    <div class="card done-card">
+      <div class="done-check">✓</div>
+      <div class="done-title">登録が完了しました</div>
+      <div class="done-sub" id="registered-name"></div>
+      <div style="margin-top:16px;background:#f4f7fc;border:1px solid #dbe4f2;border-radius:10px;padding:14px;">
+        <div style="font-size:.82rem;color:#5b6b8a;">あなたの作業員ID</div>
+        <div id="registered-login-code" style="font-size:1.5rem;font-weight:800;letter-spacing:.06em;color:#12213f;margin-top:4px;">-</div>
+        <div class="hint" style="margin-top:8px;">この端末が覚えているので、次回からIDの入力は不要です。念のため控えておくと安心です。</div>
+      </div>
+      <div class="hint" style="margin-top:12px;text-align:left;">もしこの端末のログイン情報が消えてしまっても、最初の画面の「登録済みの方（暗証番号でログイン）」から、会社・氏名・暗証番号だけで戻れます。</div>
+      <button id="registered-continue-btn" style="margin-top:16px;">つづける（出勤報告へ）</button>
+      <button class="menu-btn secondary" id="registered-profile-btn" style="margin-top:10px;">個人情報・資格・健康診断を登録する</button>
+    </div>
+  </section>
+
+  <!-- 完了 -->
+  <section id="screen-done" class="screen">
+    <div class="card done-card">
+      <div class="done-check">✓</div>
+      <div class="done-title" id="done-title">登録しました</div>
+      <div class="done-sub" id="done-sub"></div>
+      <button id="done-home-btn">ホームへ</button>
+    </div>
+  </section>
+
+</main>
+<script src="client-error-reporter.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

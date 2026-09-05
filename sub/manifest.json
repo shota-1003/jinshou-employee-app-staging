@@ -1,0 +1,16 @@
+{
+  "name": "迅翔興業 外注ポータル",
+  "short_name": "外注ポータル",
+  "description": "迅翔興業の外注作業員向け 日報・個人情報ポータル",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#12213f",
+  "theme_color": "#12213f",
+  "lang": "ja",
+  "icons": [
+    { "src": "icons/icon-192-v2.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512-v2.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/icon-512-maskable-v2.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
