@@ -454,23 +454,66 @@
     <div class="hint" id="lucky-preview-note" style="margin-bottom:10px;"></div>
     <div class="lucky-preview-grid">
       <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:1000">1,000円(青)</button>
-      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:2000">2,000円(金)</button>
-      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:3000">3,000円(緑)</button>
-      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:5000">5,000円(赤)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:2000">2,000円(緑)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:3000">3,000円(赤)</button>
+      <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:5000">5,000円(金)</button>
       <button type="button" class="menu-btn lucky-preview-btn" data-prize="cash:10000">10,000円(虹)</button>
       <button type="button" class="menu-btn lucky-preview-btn" data-prize="hotel:0" style="background:#111;color:#f5d76e;border-color:#c9a227;">高級ホテル(黒×金)</button>
     </div>
   </section>
 
-  <!-- 当選演出 全画面オーバーレイ -->
+  <!-- 当選演出 全画面オーバーレイ(r11移植 2026-09-05: 鼓動→上から落ちる稲妻→結果、
+       結果確定後もサイド稲妻/星/紙吹雪を継続。移植元: jinshou-employee-app-staging/lucky-preview/index.html) -->
   <div id="lucky-overlay" class="lucky-overlay" style="display:none;">
-    <div class="lucky-confetti" id="lucky-confetti"></div>
-    <div class="lucky-stage" id="lucky-stage">
-      <div class="lucky-badge" id="lucky-badge">LUCKY</div>
-      <div class="lucky-amount" id="lucky-amount"></div>
-      <div class="lucky-winner" id="lucky-winner"></div>
-      <div class="lucky-sub" id="lucky-sub"></div>
+    <div class="lucky-beat-flash" id="lucky-beat-flash"></div>
+    <div class="lucky-rays" id="lucky-rays"></div>
+    <div class="lucky-door-wrap" id="lucky-doors"><div class="lucky-door-panel l"></div><div class="lucky-door-panel r"></div><div class="lucky-door-gap"></div></div>
+    <div class="lucky-inner" id="lucky-inner">
+      <div class="lucky-shock" id="lucky-shock"></div>
+      <div class="lucky-core" id="lucky-core"></div>
+      <div class="lucky-star-flare" id="lucky-star-flare"></div>
+      <div class="lucky-tame-dots" id="lucky-tame-dots">…</div>
+      <div class="lucky-prompt-line" id="lucky-prompt-line">抽選開始…</div>
+      <div class="lucky-beat-dots" id="lucky-beat-dots"><i></i><i></i><i></i><i></i></div>
+      <div class="lucky-stage" id="lucky-stage">
+        <div class="lucky-badge" id="lucky-badge">LUCKY</div>
+        <div class="lucky-amount" id="lucky-amount"></div>
+        <div class="lucky-winner" id="lucky-winner"></div>
+        <div class="lucky-sub" id="lucky-sub"></div>
+      </div>
     </div>
+    <div class="lucky-bolt-head" id="lucky-bolt-head"></div>
+    <svg class="lucky-bolt" id="lucky-bolt" viewBox="0 0 100 300" preserveAspectRatio="none">
+      <defs><linearGradient id="lucky-rbg" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#3a86ff"/><stop offset="0.16" stop-color="#8b5cf6"/><stop offset="0.33" stop-color="#ff3b30"/>
+        <stop offset="0.5" stop-color="#ff9500"/><stop offset="0.66" stop-color="#ffd60a"/><stop offset="0.82" stop-color="#34c759"/><stop offset="1" stop-color="#5ac8fa"/>
+      </linearGradient></defs>
+      <path class="bmain" d="M54 -4 L44 56 L60 92 L41 150 L62 196 L47 244 L57 304"/>
+      <path class="bbr" d="M60 92 L79 118 L70 140"/>
+      <path class="bbr" d="M41 150 L21 178 L33 200"/>
+      <path class="bbr" d="M62 196 L83 220"/>
+      <path class="bbr" d="M47 244 L29 266"/>
+    </svg>
+    <svg class="lucky-bolt-side" id="lucky-bolt-l" viewBox="0 0 100 300" preserveAspectRatio="none">
+      <path class="bmain" d="M62 -4 L38 60 L58 120 L34 182 L54 240 L40 304"/>
+      <path class="bbr" d="M58 120 L82 150"/>
+      <path class="bbr" d="M34 182 L12 210"/>
+      <path class="bbr" d="M54 240 L80 268"/>
+      <path class="bbr" d="M38 60 L16 88"/>
+      <path class="bbr" d="M58 120 L44 96"/>
+    </svg>
+    <svg class="lucky-bolt-side" id="lucky-bolt-r" viewBox="0 0 100 300" preserveAspectRatio="none">
+      <path class="bmain" d="M38 -4 L62 60 L42 120 L66 182 L46 240 L60 304"/>
+      <path class="bbr" d="M42 120 L18 150"/>
+      <path class="bbr" d="M66 182 L88 210"/>
+      <path class="bbr" d="M46 240 L20 268"/>
+      <path class="bbr" d="M62 60 L84 88"/>
+      <path class="bbr" d="M42 120 L56 96"/>
+    </svg>
+    <div class="lucky-cut-fill" id="lucky-cut-fill"></div>
+    <div class="lucky-cut-label" id="lucky-cut-label"></div>
+    <div class="lucky-cut-white" id="lucky-cut-white"></div>
+    <div class="lucky-confetti" id="lucky-confetti"></div>
     <button type="button" class="lucky-close" id="lucky-close">閉じる</button>
   </div>
 

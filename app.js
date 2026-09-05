@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v149-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T06:35:38.199Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v150-staging';
+const BUILD_DEPLOYED_AT = '2026-09-05T07:02:56.136Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8332,57 +8332,296 @@ function luckyConfetti(theme, count) {
     wrap.appendChild(p);
   }
 }
+// ---- 全画面演出エンジン(r11移植 2026-09-05) ----
+// 移植元: jinshou-employee-app-staging/lucky-preview/index.html(LP-2026-09-04-r11、
+// 演出プレビュー単独ページ・ログイン不要・DB非接続)。ユーザー要件(引継ぎ資料
+// docs/迅翔興業_社員ポータル_開発引継ぎ_20260905.md §4-1): 抽選前に鼓動で緊張感を作る
+// (即結果表示禁止)/稲妻は上から落ちる/漢字の色ラベルを出さない/10,000円は虹色の稲妻/
+// 結果確定後も稲妻を消さない(サイドで演出継続)/ホテル演出の順番(プシュン→暗転→金の点→
+// 扉→開放→星型キラーン→JACKPOT)を維持する。
+// r11プレビューの「ホテル紙吹雪に金貨の円が混ざる」問題(要件は金の紙吹雪、進捗記録
+// docs/lucky-prize-staging-progress-20260905.md §5-2)は、コイン型グラフィックを
+// 移植せず既存の矩形紙吹雪(luckyConfetti)へ統一することで解消した。
+// RPC呼び出し・IS_STAGINGゲート・OPTIONAL_MISSING_RPCSはこのエンジンでは一切変更しない
+// (loadHomeLucky/loadLuckyMonth/loadLuckyAdmin/loadLuckyPreviewは既存のまま)。
+const LUCKY_RANK_COLOR = { blue: '#3a86ff', green: '#22d07a', red: '#ff3b30', gold: '#ffc531', rainbow: '#ffffff' };
+const LUCKY_RANK_LEVEL = { blue: 0, green: 1, red: 2, gold: 3, rainbow: 4 };
+const LUCKY_RANK_VIB = { blue: [0, 50], green: [0, 70], red: [0, 95], gold: [0, 120, 40, 70], rainbow: [0, 170, 60, 140] };
+const LUCKY_BEATS = [500, 1350, 2200, 3050], LUCKY_SIL_MARK = 3450, LUCKY_SIL = 5500, LUCKY_STEP = 1050;
+let _luckyElCache = null;
+function luckyEls() {
+  if (_luckyElCache) return _luckyElCache;
+  const id = (x) => document.getElementById(x);
+  _luckyElCache = {
+    ov: id('lucky-overlay'), inner: id('lucky-inner'), beatFlash: id('lucky-beat-flash'),
+    shock: id('lucky-shock'), core: id('lucky-core'), promptLine: id('lucky-prompt-line'),
+    beatDots: id('lucky-beat-dots'), tameDots: id('lucky-tame-dots'),
+    badge: id('lucky-badge'), amount: id('lucky-amount'), winner: id('lucky-winner'), sub: id('lucky-sub'),
+    confetti: id('lucky-confetti'), doors: id('lucky-doors'), rays: id('lucky-rays'), starFlare: id('lucky-star-flare'),
+    boltHead: id('lucky-bolt-head'), cutFill: id('lucky-cut-fill'), cutWhite: id('lucky-cut-white'),
+    bolt: id('lucky-bolt'), cutLabel: id('lucky-cut-label'), boltL: id('lucky-bolt-l'), boltR: id('lucky-bolt-r'),
+  };
+  return _luckyElCache;
+}
+function luckyVibe(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+function luckyVibeStop() { try { if (navigator.vibrate) navigator.vibrate(0); } catch (e) {} }
 let luckyAnimTimers = [];
 function luckyClearTimers() { luckyAnimTimers.forEach((t) => clearTimeout(t)); luckyAnimTimers = []; }
 function luckyAfter(ms, fn) { luckyAnimTimers.push(setTimeout(fn, ms)); }
-// 演出本体: 金額(テーマ)ごとに明確に演出レベルを変える。
-function playLuckyAnimation(opts) {
-  // opts: { theme, prizeLabel, winnerName, isSpecial(hotel), sub }
-  wireLucky(); // 閉じるボタン等を必ず配線(ホーム自動表示でも動くように)
-  const ov = document.getElementById('lucky-overlay');
-  const stage = document.getElementById('lucky-stage');
-  const confetti = document.getElementById('lucky-confetti');
+function luckyReset() {
   luckyClearTimers();
-  confetti.innerHTML = '';
-  ov.className = 'lucky-overlay theme-' + opts.theme;
-  ov.style.display = 'flex';
-  document.getElementById('lucky-badge').textContent = opts.theme === 'hotel' ? 'SPECIAL JACKPOT' : 'LUCKY';
-  document.getElementById('lucky-amount').textContent = opts.prizeLabel;
-  document.getElementById('lucky-winner').textContent = opts.winnerName ? (opts.winnerName + ' さん') : '';
-  document.getElementById('lucky-sub').textContent = opts.sub || '';
-  // 補助要素(リング/フラッシュ/扉)を用意
-  let ring = ov.querySelector('.lucky-ring'); if (!ring) { ring = document.createElement('div'); ring.className = 'lucky-ring'; ov.appendChild(ring); }
-  let flash = ov.querySelector('.lucky-flash'); if (!flash) { flash = document.createElement('div'); flash.className = 'lucky-flash'; ov.appendChild(flash); }
-  flash.className = 'lucky-flash';
-  const doors = ov.querySelector('.lucky-doors'); if (doors) doors.remove();
-  stage.style.visibility = 'visible';
-
-  const doFlash = () => { flash.className = 'lucky-flash go'; };
-  if (opts.theme === 'blue') {
-    luckyConfetti('blue', 40);
-  } else if (opts.theme === 'gold') {
-    luckyConfetti('gold', 70);
-  } else if (opts.theme === 'green') {
-    luckyConfetti('green', 80);
-  } else if (opts.theme === 'red') {
-    // 一度暗転 → 赤い閃光 → 強めの紙吹雪 + 大きな金額
-    stage.style.visibility = 'hidden'; ov.classList.add('dim');
-    luckyAfter(500, () => { ov.classList.remove('dim'); ov.className = 'lucky-overlay theme-red'; doFlash(); stage.style.visibility = 'visible'; luckyConfetti('red', 120); });
-  } else if (opts.theme === 'rainbow') {
-    // 最初は結果を見せない → 一瞬暗転 → 虹色の光 → 大量の紙吹雪 → 大型表示
-    document.getElementById('lucky-amount').textContent = '？';
-    document.getElementById('lucky-winner').textContent = '';
-    luckyAfter(900, () => { ov.classList.add('dim'); stage.style.visibility = 'hidden'; });
-    luckyAfter(1500, () => { ov.classList.remove('dim'); ov.className = 'lucky-overlay theme-rainbow'; doFlash(); stage.style.visibility = 'visible'; document.getElementById('lucky-amount').textContent = opts.prizeLabel; document.getElementById('lucky-winner').textContent = opts.winnerName ? (opts.winnerName + ' さん') : ''; luckyConfetti('rainbow', 180); });
-  } else if (opts.theme === 'hotel') {
-    // 暗転 → 金色の光 → 扉が開く → SPECIAL JACKPOT → ホテル券 → 当選者
-    stage.style.visibility = 'hidden';
-    const dd = document.createElement('div'); dd.className = 'lucky-doors'; dd.innerHTML = '<div class="lucky-door l"></div><div class="lucky-door r"></div>'; ov.appendChild(dd);
-    luckyAfter(600, () => { dd.classList.add('open'); });
-    luckyAfter(1500, () => { dd.remove(); doFlash(); stage.style.visibility = 'visible'; luckyConfetti('hotel', 120); });
+  const el = luckyEls();
+  el.ov.className = 'lucky-overlay'; el.ov.style.background = ''; el.ov.style.setProperty('--rankc', '#ffffff');
+  el.promptLine.style.display = ''; el.promptLine.textContent = '抽選開始…'; el.tameDots.style.display = '';
+  el.confetti.innerHTML = ''; el.amount.className = 'lucky-amount';
+  el.cutFill.className = 'lucky-cut-fill'; el.cutWhite.className = 'lucky-cut-white';
+  el.bolt.setAttribute('class', 'lucky-bolt'); el.bolt.style.opacity = 0; el.boltHead.className = 'lucky-bolt-head'; el.cutLabel.className = 'lucky-cut-label';
+  el.boltL.setAttribute('class', 'lucky-bolt-side'); el.boltL.style.opacity = 0; el.boltR.setAttribute('class', 'lucky-bolt-side'); el.boltR.style.opacity = 0;
+  el.rays.className = 'lucky-rays'; el.starFlare.className = 'lucky-star-flare'; el.doors.className = 'lucky-door-wrap';
+  Array.prototype.forEach.call(el.beatDots.children, (d) => { d.className = ''; });
+  Array.prototype.forEach.call(document.querySelectorAll('.lucky-spark,.lucky-starspk'), (s) => s.remove());
+}
+function luckyFireBeat(i) {
+  const el = luckyEls();
+  el.shock.style.borderColor = ['#c23a2f', '#e0392f', '#ff5a4c', '#ff7a4c'][i] || '#ff7a4c';
+  try { el.shock.animate([{ transform: 'translate(-50%,-50%) scale(.15)', opacity: 0 }, { transform: 'translate(-50%,-50%) scale(.9)', opacity: .9 }, { transform: 'translate(-50%,-50%) scale(' + (2.6 + i * 1.1) + ')', opacity: 0 }], { duration: 520, easing: 'cubic-bezier(.15,.6,.3,1)' }); } catch (e) {}
+  try { el.core.animate([{ transform: 'translate(-50%,-50%) scale(.3)', opacity: 0 }, { transform: 'translate(-50%,-50%) scale(' + (1 + i * .4) + ')', opacity: 1 }, { transform: 'translate(-50%,-50%) scale(.3)', opacity: 0 }], { duration: 380, easing: 'ease-out' }); } catch (e) {}
+  try { el.beatFlash.animate([{ opacity: 0, transform: 'scale(1)' }, { opacity: (.35 + i * .17), transform: 'scale(' + (1.06 + i * .04) + ')' }, { opacity: 0, transform: 'scale(1)' }], { duration: 440, easing: 'ease-out' }); } catch (e) {}
+  if (el.beatDots.children[i]) el.beatDots.children[i].className = 'lit';
+  luckyVibe(28 + i * 18);
+}
+function luckyStartHeart() {
+  const el = luckyEls();
+  el.promptLine.textContent = '抽選開始…';
+  LUCKY_BEATS.forEach((t, i) => luckyAfter(t, () => luckyFireBeat(i)));
+  luckyAfter(LUCKY_SIL_MARK, () => { el.ov.classList.add('lucky-tame'); el.promptLine.textContent = ''; });
+}
+function luckyFireBolt(colorKey) {
+  const el = luckyEls();
+  const level = LUCKY_RANK_LEVEL[colorKey] != null ? LUCKY_RANK_LEVEL[colorKey] : 4;
+  const w = 3 + level * 1.7;
+  el.ov.style.setProperty('--rankc', LUCKY_RANK_COLOR[colorKey] || '#fff');
+  el.bolt.setAttribute('class', 'lucky-bolt' + (colorKey === 'rainbow' ? ' lucky-rainbow' : ''));
+  el.bolt.style.opacity = 1;
+  const paths = el.bolt.querySelectorAll('path'); const branches = 1 + level;
+  el.boltHead.className = 'lucky-bolt-head'; el.boltHead.style.opacity = 0;
+  try { el.boltHead.animate([{ top: '2%', opacity: 0, transform: 'translate(-50%,-50%) scale(.4)' }, { top: '8%', opacity: 1, transform: 'translate(-50%,-50%) scale(1)' }, { top: '92%', opacity: 1, transform: 'translate(-50%,-50%) scale(1.2)' }, { top: '98%', opacity: 0, transform: 'translate(-50%,-50%) scale(.4)' }], { duration: 240, easing: 'linear' }); } catch (e) {}
+  paths.forEach((p, idx) => {
+    const isMain = idx === 0;
+    if (!isMain && idx > branches) { p.style.opacity = 0; return; }
+    p.style.opacity = 1; p.style.strokeWidth = (isMain ? w : Math.max(2, w - 1.6));
+    let len; try { len = p.getTotalLength(); } catch (e) { len = 380; }
+    p.style.strokeDasharray = len; p.style.strokeDashoffset = len;
+    const delay = isMain ? 0 : 70 + idx * 45, dur = isMain ? 210 : 110;
+    try { p.animate([{ strokeDashoffset: len, opacity: 1 }, { strokeDashoffset: 0, opacity: 1 }], { duration: dur, delay, fill: 'forwards', easing: 'linear' }); } catch (e) { p.style.strokeDashoffset = 0; }
+  });
+  try { el.bolt.animate([{ opacity: 1 }, { opacity: 1 }, { opacity: .7 }, { opacity: 0 }], { duration: 560, easing: 'ease-out' }); } catch (e) {}
+}
+// r11: 結果確定後も左右サイドで走らせ続ける稲妻(中央=金額には重ねない、稲妻を消さない要件)。
+function luckyDrawSideBolt(node, colorKey) {
+  const level = LUCKY_RANK_LEVEL[colorKey] != null ? LUCKY_RANK_LEVEL[colorKey] : 4;
+  const w = 2.4 + level * 1.2;
+  node.style.setProperty('--rankc', LUCKY_RANK_COLOR[colorKey] || '#fff');
+  node.setAttribute('class', 'lucky-bolt-side' + (colorKey === 'rainbow' ? ' lucky-rainbow' : ''));
+  node.style.opacity = 1;
+  const paths = node.querySelectorAll('path'); const branches = 2 + level;
+  paths.forEach((p, idx) => {
+    const isMain = idx === 0;
+    if (!isMain && idx > branches) { p.style.opacity = 0; return; }
+    p.style.opacity = 1; p.style.strokeWidth = (isMain ? w : Math.max(1.4, w - 1.2));
+    let len; try { len = p.getTotalLength(); } catch (e) { len = 380; }
+    p.style.strokeDasharray = len; p.style.strokeDashoffset = len;
+    const delay = isMain ? 0 : 45 + idx * 30, dur = isMain ? 170 : 85;
+    try { p.animate([{ strokeDashoffset: len, opacity: 1 }, { strokeDashoffset: 0, opacity: 1 }], { duration: dur, delay, fill: 'forwards', easing: 'linear' }); } catch (e) { p.style.strokeDashoffset = 0; }
+  });
+  try { node.animate([{ opacity: 1 }, { opacity: 1 }, { opacity: .5 }, { opacity: 0 }], { duration: 500, easing: 'ease-out' }); } catch (e) {}
+  setTimeout(() => { node.style.opacity = 0; }, 500);
+}
+function luckySpawnSideSparks(colorKey, n, side) {
+  const el = luckyEls();
+  let col = LUCKY_RANK_COLOR[colorKey] || '#fff'; if (colorKey === 'rainbow') col = '#ffd23b';
+  const ox = side * 34;
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('span'); s.className = 'lucky-spark'; s.style.background = col; s.style.boxShadow = '0 0 12px ' + col;
+    s.style.transform = 'translate(calc(-50% + ' + ox + 'vw),-50%)'; el.inner.appendChild(s);
+    const ang = Math.random() * Math.PI * 2, dist = 50 + Math.random() * 150;
+    try { s.animate([{ transform: 'translate(calc(-50% + ' + ox + 'vw),-50%) scale(1)', opacity: 1 }, { transform: 'translate(calc(-50% + ' + ox + 'vw + ' + Math.cos(ang) * dist + 'px),calc(-50% + ' + Math.sin(ang) * dist + 'px)) scale(0)', opacity: 0 }], { duration: 520 + Math.random() * 260, easing: 'cubic-bezier(.2,.7,.3,1)' }); } catch (e) {}
+    setTimeout(() => s.remove(), 820);
   }
 }
-function closeLuckyOverlay() { luckyClearTimers(); const ov = document.getElementById('lucky-overlay'); ov.style.display = 'none'; ov.className = 'lucky-overlay'; document.getElementById('lucky-confetti').innerHTML = ''; }
+function luckySpawnStarsSide(n, side) {
+  const el = luckyEls();
+  const chars = ['✦', '✧', '⋆']; const ox = side * 30;
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      const s = document.createElement('span'); s.className = 'lucky-starspk'; s.textContent = chars[i % chars.length];
+      s.style.fontSize = (13 + Math.random() * 18) + 'px'; s.style.transform = 'translate(calc(-50% + ' + ox + 'vw),-50%)'; el.inner.appendChild(s);
+      const ang = Math.random() * Math.PI * 2, dist = 60 + Math.random() * 160;
+      try { s.animate([{ transform: 'translate(calc(-50% + ' + ox + 'vw),-50%) scale(.3) rotate(0)', opacity: 0 }, { transform: 'translate(calc(-50% + ' + ox + 'vw + ' + Math.cos(ang) * dist + 'px),calc(-50% + ' + Math.sin(ang) * dist + 'px)) scale(1.1) rotate(120deg)', opacity: 1 }, { transform: 'translate(calc(-50% + ' + ox + 'vw + ' + Math.cos(ang) * dist * 1.3 + 'px),calc(-50% + ' + Math.sin(ang) * dist * 1.3 + 'px)) scale(.4) rotate(220deg)', opacity: 0 }], { duration: 1100 + Math.random() * 500, easing: 'cubic-bezier(.2,.7,.3,1)' }); } catch (e) {}
+      setTimeout(() => s.remove(), 1750);
+    }, i * 40);
+  }
+}
+// r11: 結果確定後もサイドで演出を継続(最低3〜4秒)。中央の金額には重ねない。
+function luckyCelebrate(colorKey, dur) {
+  const el = luckyEls();
+  const volleys = [0, 300, 560, 900, 1250, 1650, 2050, 2500, 2950, 3350];
+  volleys.forEach((t, i) => { if (t > dur) return; const side = (i % 2 === 0) ? -1 : 1; const node = side < 0 ? el.boltL : el.boltR;
+    luckyAfter(t, () => { luckyDrawSideBolt(node, colorKey); luckySpawnSideSparks(colorKey, 6, side); }); });
+  const stars = [200, 700, 1300, 1900, 2500, 3100];
+  stars.forEach((t, i) => { if (t > dur) return; luckyAfter(t, () => luckySpawnStarsSide(4, (i % 2 === 0) ? -1 : 1)); });
+}
+function luckySpawnSparks(colorKey, n) {
+  const el = luckyEls();
+  let col = LUCKY_RANK_COLOR[colorKey] || '#fff'; if (colorKey === 'rainbow') col = '#ffd23b';
+  for (let i = 0; i < n; i++) {
+    const s = document.createElement('span'); s.className = 'lucky-spark'; s.style.background = col; s.style.boxShadow = '0 0 12px ' + col; el.inner.appendChild(s);
+    const ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 220;
+    try { s.animate([{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: 'translate(calc(-50% + ' + Math.cos(ang) * dist + 'px),calc(-50% + ' + Math.sin(ang) * dist + 'px)) scale(0)', opacity: 0 }], { duration: 520 + Math.random() * 260, easing: 'cubic-bezier(.2,.7,.3,1)' }); } catch (e) {}
+    setTimeout(() => s.remove(), 820);
+  }
+}
+// バシャーン(1段) = 上から走る稲妻 → 着弾で閃光+色フィル+シェイク。
+function luckyBashaanCut(colorKey, big) {
+  const el = luckyEls();
+  const isR = colorKey === 'rainbow';
+  el.ov.style.setProperty('--rankc', LUCKY_RANK_COLOR[colorKey] || '#fff');
+  el.ov.classList.remove('lucky-tame'); el.ov.classList.add('lucky-cutting'); el.ov.style.background = '#04060c';
+  luckyFireBolt(colorKey); luckyVibe(LUCKY_RANK_VIB[colorKey] || [0, 60]);
+  luckyAfter(200, () => {
+    el.cutWhite.className = 'lucky-cut-white'; try { el.cutWhite.animate([{ opacity: 0 }, { opacity: isR ? .24 : .6 }, { opacity: 0 }], { duration: isR ? 260 : 320, easing: 'ease' }); } catch (e) {}
+    el.cutFill.className = 'lucky-cut-fill' + (isR ? ' lucky-rainbow' : ''); try { el.cutFill.animate([{ opacity: 0 }, { opacity: isR ? .4 : .7 }, { opacity: 0 }], { duration: isR ? 620 : 560, easing: 'ease' }); } catch (e) {}
+    el.ov.classList.remove('lucky-shake'); void el.ov.offsetWidth; el.ov.classList.add('lucky-shake'); luckySpawnSparks(colorKey, big ? 24 : 14);
+  });
+}
+function luckyBlackout() { const el = luckyEls(); el.ov.className = 'lucky-overlay lucky-cutting'; el.ov.style.background = '#000'; }
+function luckyShowStage(bd, amt, win, sb, small) {
+  const el = luckyEls();
+  el.badge.textContent = bd || ''; el.amount.textContent = amt || ''; if (small) el.amount.classList.add('small');
+  el.winner.textContent = win ? (win + ' さん') : ''; el.winner.style.display = win ? '' : 'none'; el.sub.textContent = sb || '';
+}
+// r11: 読みやすさのために演出を消さない/画面を暗くしない。中央の主稲妻だけ止めて
+// サイドで演出を継続(luckyCelebrate)。金額ステージは全演出より前面+局所暗がり+
+// アウトラインで常に読める(CSS .lucky-stage参照)。
+function luckyReveal(theme, amt, bd, sb, winnerName, small, big, rankKey) {
+  const el = luckyEls();
+  el.ov.className = 'lucky-overlay lucky-reveal theme-' + theme; el.ov.style.background = '';
+  el.bolt.style.opacity = 0; el.bolt.setAttribute('class', 'lucky-bolt'); el.cutWhite.className = 'lucky-cut-white';
+  Array.prototype.forEach.call(document.querySelectorAll('.lucky-spark,.lucky-starspk'), (s) => s.remove());
+  luckyShowStage(bd, amt, winnerName, sb, small);
+  luckyConfetti(theme, small ? 150 : 110);
+  if (rankKey) luckyCelebrate(rankKey, 3800);
+}
+function luckySeqCuts(colors, theme, amt, bd, winnerName, sub) {
+  luckyStartHeart();
+  colors.forEach((c, i) => { const last = i === colors.length - 1; luckyAfter(LUCKY_SIL + i * LUCKY_STEP, () => luckyBashaanCut(c, last)); });
+  const rev = LUCKY_SIL + (colors.length - 1) * LUCKY_STEP + 780;
+  luckyAfter(rev - 170, luckyBlackout);
+  luckyAfter(rev, () => { luckyReveal(theme, amt, bd, sub, winnerName, false, theme === 'gold', theme); luckyVibe(theme === 'gold' ? [0, 90, 40, 90] : [0, 50]); });
+}
+function luckySeqRainbow(amt, winnerName, sub) {
+  luckyStartHeart();
+  ['blue', 'green', 'red', 'gold'].forEach((c, i) => luckyAfter(LUCKY_SIL + i * LUCKY_STEP, () => luckyBashaanCut(c, false)));
+  const hold = LUCKY_SIL + 4 * LUCKY_STEP;
+  luckyAfter(hold, () => { const el = luckyEls(); el.ov.classList.add('lucky-tame'); el.promptLine.style.display = ''; el.promptLine.textContent = '…まだ上がる…？'; });
+  const fifth = hold + 900;
+  luckyAfter(fifth, () => { luckyEls().promptLine.style.display = 'none'; luckyBashaanCut('rainbow', true); });
+  luckyAfter(fifth + 920 - 170, luckyBlackout);
+  luckyAfter(fifth + 920, () => luckyReveal('rainbow', amt, 'SPECIAL LUCKY', sub, winnerName, false, true, 'rainbow'));
+}
+function luckyGoldPoint(xvw, yvh) {
+  const el = luckyEls();
+  const s = document.createElement('span'); s.className = 'lucky-spark'; s.style.background = '#ffe9a8'; s.style.boxShadow = '0 0 16px #ffcf5c'; s.style.width = '9px'; s.style.height = '9px';
+  s.style.transform = 'translate(calc(-50% + ' + xvw + 'vw),calc(-50% + ' + yvh + 'vh)) scale(0)'; el.inner.appendChild(s);
+  try { s.animate([{ opacity: 0, transform: s.style.transform }, { opacity: 1, transform: 'translate(calc(-50% + ' + xvw + 'vw),calc(-50% + ' + yvh + 'vh)) scale(1.2)' }, { opacity: .85, transform: 'translate(calc(-50% + ' + xvw + 'vw),calc(-50% + ' + yvh + 'vh)) scale(1)' }], { duration: 700, fill: 'forwards' }); } catch (e) {}
+  setTimeout(() => { try { s.animate([{ opacity: .85 }, { opacity: 0 }], { duration: 1200, fill: 'forwards' }); } catch (e) {} setTimeout(() => s.remove(), 1300); }, 1600);
+}
+function luckySpawnStars(n) {
+  const el = luckyEls();
+  const chars = ['✦', '✧', '⋆', '✦', '✧'];
+  for (let i = 0; i < n; i++) {
+    setTimeout(() => {
+      const s = document.createElement('span'); s.className = 'lucky-starspk'; s.textContent = chars[i % chars.length];
+      s.style.fontSize = (14 + Math.random() * 22) + 'px'; el.inner.appendChild(s);
+      const ang = Math.random() * Math.PI * 2, dist = 120 + Math.random() * 240;
+      try { s.animate([{ transform: 'translate(-50%,-50%) scale(.3) rotate(0)', opacity: 0 }, { transform: 'translate(calc(-50% + ' + Math.cos(ang) * dist + 'px),calc(-50% + ' + Math.sin(ang) * dist + 'px)) scale(1.15) rotate(90deg)', opacity: 1 }, { transform: 'translate(calc(-50% + ' + Math.cos(ang) * dist * 1.3 + 'px),calc(-50% + ' + Math.sin(ang) * dist * 1.3 + 'px)) scale(.5) rotate(200deg)', opacity: 0 }], { duration: 1200 + Math.random() * 600, easing: 'cubic-bezier(.2,.7,.3,1)' }); } catch (e) {}
+      setTimeout(() => s.remove(), 1900);
+    }, i * 35);
+  }
+}
+// 扉開放後の祝福: 星型フレア + 光線 + 星型キラキラ飛散(金貨の円は使わず、既存の矩形紙吹雪へ統一)。
+function luckyGoldBlessing() {
+  const el = luckyEls();
+  el.ov.className = 'lucky-overlay lucky-hotelstage'; el.ov.style.background = 'radial-gradient(circle at 50% 45%,#42320f,#05070d 76%)';
+  luckyVibe([0, 240]);
+  el.rays.className = 'lucky-rays'; void el.rays.offsetWidth; el.rays.className = 'lucky-rays on';
+  el.starFlare.className = 'lucky-star-flare'; void el.starFlare.offsetWidth; el.starFlare.className = 'lucky-star-flare on';
+  el.cutWhite.className = 'lucky-cut-white'; void el.cutWhite.offsetWidth; el.cutWhite.className = 'lucky-cut-white on';
+  luckySpawnStars(20); luckyConfetti('hotel', 90);
+}
+// ===== ホテル(r6構成維持、r11踏襲): 稲妻→プシュン→暗転→金の点→扉→開放→★星型キラーン→JACKPOT =====
+function luckySeqHotel(winnerName, sub) {
+  const el = luckyEls();
+  luckyStartHeart();
+  ['blue', 'green', 'red', 'gold', 'rainbow'].forEach((c, i) => { const big = c === 'rainbow'; luckyAfter(LUCKY_SIL + i * LUCKY_STEP, () => luckyBashaanCut(c, big)); });
+  const rainbowT = LUCKY_SIL + 4 * LUCKY_STEP;
+  const die = rainbowT + 1500;
+  luckyAfter(die, () => {
+    luckyVibeStop();
+    el.ov.className = 'lucky-overlay lucky-hotelstage'; el.ov.style.background = '#000'; el.promptLine.style.display = 'none';
+    el.cutFill.className = 'lucky-cut-fill'; el.cutWhite.className = 'lucky-cut-white'; el.bolt.setAttribute('class', 'lucky-bolt'); el.bolt.style.opacity = 0; el.cutLabel.className = 'lucky-cut-label';
+    Array.prototype.forEach.call(document.querySelectorAll('.lucky-spark'), (s) => s.remove());
+  });
+  const p1 = die + 1800, p2 = p1 + 900, p3 = p2 + 800;
+  luckyAfter(p1, () => luckyGoldPoint(-30, -10));
+  luckyAfter(p2, () => luckyGoldPoint(24, 14));
+  luckyAfter(p3, () => luckyGoldPoint(-14, 26));
+  const gather = p3 + 700;
+  luckyAfter(gather, () => { for (let i = 0; i < 10; i++) { const k = i; luckyAfter(k * 140, () => luckyGoldPoint((Math.random() * 2 - 1) * 40, (Math.random() * 2 - 1) * 36)); } });
+  const doorAppear = gather + 1700;
+  luckyAfter(doorAppear, () => { el.ov.className = 'lucky-overlay lucky-hotelstage lucky-doors'; el.ov.style.background = '#000'; el.doors.className = 'lucky-door-wrap'; void el.doors.offsetWidth; el.doors.className = 'lucky-door-wrap lucky-appear'; });
+  const doorOpen = doorAppear + 1900;
+  luckyAfter(doorOpen, () => { el.doors.className = 'lucky-door-wrap lucky-appear lucky-open'; });
+  const burst = doorOpen + 2500;
+  luckyAfter(burst, () => { luckyGoldBlessing(); luckyVibe([0, 240, 80, 180]); });
+  luckyAfter(burst + 1000, () => {
+    el.ov.className = 'lucky-overlay lucky-reveal theme-hotel'; el.ov.style.background = '';
+    el.bolt.style.opacity = 0; el.starFlare.className = 'lucky-star-flare'; el.rays.className = 'lucky-rays';
+    Array.prototype.forEach.call(document.querySelectorAll('.lucky-spark,.lucky-starspk'), (s) => s.remove());
+    luckyShowStage('SPECIAL JACKPOT', '高級ホテル宿泊券', winnerName, sub || '当選！ おめでとうございます 🎉', true);
+    luckyConfetti('hotel', 90); luckyCelebrate('gold', 3800);
+  });
+}
+// 演出本体: opts = { theme, prizeLabel, winnerName, sub }(呼び出し側は変更しない)。
+// blue/green/red/gold は段階的な稲妻の積み上げ、rainbow は10,000円専用の「まだ上がる」タメを挟んだ
+// 5段目、hotel は上記の扉演出。
+function playLuckyAnimation(opts) {
+  wireLucky(); // 閉じるボタン等を必ず配線(ホーム自動表示でも動くように)
+  const el = luckyEls();
+  luckyReset();
+  el.ov.style.display = 'flex';
+  const winnerName = opts.winnerName || null;
+  const sub = opts.sub || '';
+  if (opts.theme === 'hotel') {
+    luckySeqHotel(winnerName, sub);
+  } else if (opts.theme === 'rainbow') {
+    luckySeqRainbow(opts.prizeLabel, winnerName, sub);
+  } else {
+    const order = ['blue', 'green', 'red', 'gold'];
+    const idx = order.indexOf(opts.theme);
+    const colors = idx >= 0 ? order.slice(0, idx + 1) : ['blue'];
+    const badge = opts.theme === 'gold' ? 'BIG LUCKY!' : 'LUCKY!';
+    luckySeqCuts(colors, opts.theme, opts.prizeLabel, badge, winnerName, sub);
+  }
+}
+function closeLuckyOverlay() {
+  luckyClearTimers(); luckyVibeStop();
+  const el = luckyEls();
+  el.ov.style.display = 'none'; el.ov.className = 'lucky-overlay'; el.ov.style.background = '';
+  el.confetti.innerHTML = ''; el.doors.className = 'lucky-door-wrap'; el.rays.className = 'lucky-rays'; el.starFlare.className = 'lucky-star-flare';
+  el.boltL.setAttribute('class', 'lucky-bolt-side'); el.boltL.style.opacity = 0; el.boltR.setAttribute('class', 'lucky-bolt-side'); el.boltR.style.opacity = 0;
+  Array.prototype.forEach.call(document.querySelectorAll('.lucky-spark,.lucky-starspk'), (s) => s.remove());
+}
 
 async function loadHomeLucky() {
   const session = getSession();
@@ -8494,7 +8733,9 @@ function wireLucky() {
   document.querySelectorAll('.lucky-preview-btn').forEach((btn) => btn.addEventListener('click', () => {
     const [type, amt] = btn.dataset.prize.split(':');
     const amount = Number(amt);
-    const theme = type === 'hotel' ? 'hotel' : (amount >= 10000 ? 'rainbow' : amount >= 5000 ? 'red' : amount >= 3000 ? 'green' : amount >= 2000 ? 'gold' : 'blue');
+    // 色↔金額対応(2026-09-05確定・database/supabase/202609051521_lucky-prize.sqlのlucky_theme_forと同じ):
+    // 2000=緑/3000=赤/5000=金/10000=虹。
+    const theme = type === 'hotel' ? 'hotel' : (amount >= 10000 ? 'rainbow' : amount >= 5000 ? 'gold' : amount >= 3000 ? 'red' : amount >= 2000 ? 'green' : 'blue');
     const label = type === 'hotel' ? '高級ホテル宿泊券' : amount.toLocaleString('ja-JP') + '円';
     playLuckyAnimation({ theme, prizeLabel: label, winnerName: 'テスト 太郎', sub: '演出プレビュー' });
   }));
