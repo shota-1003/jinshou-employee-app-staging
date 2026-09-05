@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v151-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T17:37:17.452Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v152-staging';
+const BUILD_DEPLOYED_AT = '2026-09-05T18:51:19.686Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -155,6 +155,17 @@ function todayJST() {
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+// ダッシュボードの「(30日)」カードが数えている決裁日の窓。件数側(get_admin_dashboard)は
+// JSTの当日を基準に (当日-30日) 〜 当日 で数えるので、一覧へ渡す窓もここ1か所で作る。
+// 「カード側とフロント側で別々に30日を計算して1日ずれる」を構造的に起こさないための共通関数。
+function decidedWindow30() {
+  const today = todayJST();
+  const from = new Date(`${today}T00:00:00`);
+  from.setDate(from.getDate() - 30);
+  const f = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, '0')}-${String(from.getDate()).padStart(2, '0')}`;
+  return { decidedFrom: f, decidedTo: today };
 }
 
 // ---------- 画面遷移で渡す状態(日付・絞り込み・遷移元)の単一の正 ----------
@@ -3333,6 +3344,10 @@ async function doSubmitExpenseBulk() {
 
 let bulkExpenseAdminFilter = '';
 
+// ダッシュボードのカード「精算予定日を過ぎた未精算」から渡される絞り込み(nav.filter)。
+// 'payment_overdue' のときだけ、カードとまったく同じ述語(精算予定日 < 当日 かつ 未精算)で絞る。
+let bulkExpensePaymentFilter = '';
+
 async function loadBulkExpenseAdminList() {
   const session = getSession();
   const listEl = document.getElementById('bea-list');
@@ -3342,14 +3357,26 @@ async function loadBulkExpenseAdminList() {
     waiting_approval: '承認待ち', ready_for_review: '確認中', needs_review: '確認中',
     approved: '承認済み', waiting_payment: '支払待ち', paid: '支払済み', rejected: '却下',
   };
+  renderBeaActiveFilterChip();
+  const countEl = document.getElementById('bea-count');
   try {
-    const rows = await rpc('admin_get_bulk_expense_requests', { p_admin_employee_code: session.employeeCode, p_status_group: bulkExpenseAdminFilter || null });
+    const rows = await rpc('admin_get_bulk_expense_requests', {
+      p_admin_employee_code: session.employeeCode,
+      p_status_group: bulkExpenseAdminFilter || null,
+      // 画面側の絞り込みID('payment_overdue')とRPCの引数値('overdue')は別物。
+      // ここで明示的に変換する(素通しで渡すと、RPC側の条件に一致せず絞り込みが効かないのに
+      // チップだけ出て「カード2件 → 一覧0件」になる。実際にそれを実測で検出した)。
+      p_payment_filter: bulkExpensePaymentFilter === 'payment_overdue' ? 'overdue' : null,
+    });
+    if (countEl) countEl.textContent = `${(rows || []).length}件`;
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当するまとめ精算申請はありません。</div>'; return; }
     listEl.innerHTML = rows.map((r) => `
       <div class="admin-result-item bea-row" data-id="${r.employee_request_id}">
         <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span class="status-badge">${STATUS_BADGE[r.status] || r.status}</span></div>
         <div class="row2">${r.target_month ? new Date(r.target_month).toLocaleDateString('ja-JP', { year: 'numeric', month: 'long' }) : ''} ${r.batch_title || ''}・領収書${r.item_count}件・合計${yen(r.total_amount)}</div>
         <div class="row2">承認${yen(r.approved_amount)}・却下${yen(r.rejected_amount)}・未処理${yen(r.pending_amount)}</div>
+        ${r.scheduled_payment_date ? `<div class="row2">精算予定日: ${new Date(r.scheduled_payment_date).toLocaleDateString('ja-JP')}${r.payment_status === 'paid' ? '(精算済み)' : ''}</div>` : ''}
+        ${r.scheduled_payment_date && r.payment_status !== 'paid' && String(r.scheduled_payment_date).slice(0, 10) < todayJST() ? `<div class="mini-tag warn">${icon('alert-triangle')}精算予定日を過ぎた未精算</div>` : ''}
         ${r.reconciliation_status === 'mismatch' ? `<div class="mini-tag warn">${icon('alert-triangle')}経費精算書と金額不一致</div>` : ''}
         ${r.duplicate_warning_count > 0 ? `<div class="mini-tag warn">${icon('alert-triangle')}重複の疑いあり(${r.duplicate_warning_count}件)</div>` : ''}
       </div>
@@ -3359,8 +3386,21 @@ async function loadBulkExpenseAdminList() {
       el.addEventListener('click', () => openBulkExpenseDetail(el.dataset.id));
     });
   } catch (e) {
+    // 「0件」と「取得失敗」を混同させない。失敗時は件数表示を消す(0件と読ませない)。
+    if (countEl) countEl.textContent = '';
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
+}
+
+// 「精算予定日を過ぎた未精算」で絞り込み中であることと、その解除ボタンを出す。
+function renderBeaActiveFilterChip() {
+  const el = document.getElementById('bea-active-filter');
+  if (!el) return;
+  if (bulkExpensePaymentFilter !== 'payment_overdue') { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = '<span class="mini-tag warn">精算予定日を過ぎた未精算のみ</span> <button type="button" class="link" id="bea-clear-payment-filter">絞り込みを解除</button>';
+  const btn = document.getElementById('bea-clear-payment-filter');
+  if (btn) btn.addEventListener('click', () => { bulkExpensePaymentFilter = ''; loadBulkExpenseAdminList(); });
 }
 
 let bulkExpenseDetailRequestId = null;
@@ -4961,13 +5001,15 @@ const DASH_CARDS = [
   // areqWindow: カードのラベルが期間を含むとき、遷移先の一覧へ渡す申請日(requested_at)の窓。
   // 件数側と一覧側が同じ日付列で絞れるカードにだけ付ける(下の30日カード参照)。
   { key: 'today_submissions_count', filter: null, label: '本日の申請', icon: 'clock', nav: 'admin-all-requests', areqFilter: { type: '', status: '' }, areqWindow: () => ({ dateFrom: todayJST(), dateTo: todayJST() }), status: 'neutral' },
-  // 「(30日)」の2枚は件数側が approved_at(決裁日)基準、一覧側 admin_search_requests は
-  // requested_at(申請日)基準で、絞る列自体が違う。requested_at で30日窓を渡すと
-  // 「40日前に申請 → 昨日承認」が一覧から消え、かえって件数がずれるため窓は渡さない。
-  // 恒久対応には admin_search_requests に決裁日での絞り込み(p_decided_from/p_decided_to)が必要。
-  // docs/dashboard-semantic-integrity-20260905.md の残課題 R-1 参照。
-  { key: 'approved_recent_count', filter: null, label: '承認済み(30日)', icon: 'check-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'approved' }, status: 'good' },
-  { key: 'rejected_recent_count', filter: null, label: '却下(30日)', icon: 'x-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'rejected' }, status: 'warn' },
+  // 「(30日)」の2枚は件数側が approved_at(決裁日)基準。2026-09-06(残課題 R-1 解消)までは
+  // 一覧 admin_search_requests が requested_at(申請日)でしか絞れず、絞る列自体が違うため
+  // 件数が構造的に一致しなかった。現在は一覧に決裁日の窓(p_decided_from/p_decided_to)があり、
+  // カード側 get_admin_dashboard も一覧と同じ定義(admin_requests_unified_v)を読むので、
+  // 同じ30日窓を渡せば「カード件数 = 一覧件数」になる。窓の起点は必ず件数側と同じ
+  // 「JST当日 - 30日 〜 JST当日」にする(ここがずれると1日ぶんだけ食い違う)。
+  // docs/dashboard-semantic-integrity-20260905.md の R-1 参照。
+  { key: 'approved_recent_count', filter: null, label: '承認済み(30日)', icon: 'check-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'approved' }, areqWindow: () => decidedWindow30(), status: 'good' },
+  { key: 'rejected_recent_count', filter: null, label: '却下(30日)', icon: 'x-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'rejected' }, areqWindow: () => decidedWindow30(), status: 'warn' },
   { key: 'entertainment_special_review_count', filter: null, label: '接待: 後日申請(特別承認待ち)', icon: 'alert-triangle', nav: 'admin-all-requests', areqFilter: { type: 'entertainment_preapproval', status: 'special_review' }, status: 'pending' },
   { key: 'entertainment_override_count', filter: null, label: '接待: 事前申請なし(例外承認累計)', icon: 'users-round', nav: 'entertainment-admin', status: 'neutral' },
   { key: 'daily_report_exception_count', filter: null, label: '日報: 特殊ケース未対応', icon: 'clipboard-list', nav: 'daily-report-admin', status: 'pending' },
@@ -5004,6 +5046,13 @@ async function renderAdminTodayTasks(session) {
     }).join('');
     // 日報系: 未提出/配置未確認は対象者一覧へ。要確認(§3)は処理できる要確認一覧(確定/修正依頼/取消)へ。
     const TASK_TO_PEOPLE = { daily_report_missing: 'missing', assignment_unconfirmed: 'unconfirmed' };
+    // 「今日やること」のカード → 遷移先で適用する絞り込みID(nav.filter)。
+    // 遷移先の一覧はこのIDのときカードとまったく同じ述語で絞り、件数を一致させる(残課題 R-2)。
+    const TASK_TO_DEST_FILTER = {
+      expense_payment_overdue: 'payment_overdue',   // bulk-expense-admin
+      supply_delivery_overdue: 'delivery_overdue',  // supply-request-admin
+      qualification_expiry: 'expiring',             // qual-admin(admin_list_qualifications の p_filter と同じ値)
+    };
     el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => {
       // 2026-09-05: 「今日やること」の件数は admin_home_today_tasks が v_today(JST)で数えている。
       // 遷移先にも必ず同じ日付を明示的に渡す(受け側のグローバル変数任せにしない)。渡さなかったため
@@ -5027,6 +5076,11 @@ async function renderAdminTodayTasks(session) {
       if (btn.dataset.taskKey === 'health_checkup') { setHealthAdminFilter(''); showScreen('health-admin'); return; }
       const b = TASK_TO_PEOPLE[btn.dataset.taskKey];
       if (b) { openDailyReportPeople(b, nav); return; }
+      // 精算予定超過・支給予定超過・資格期限: 遷移先に「カードと同じ述語」の絞り込みを渡す。
+      // 渡さないと、件数だけ見て画面へ行っても、どれが該当かわからない(残課題 R-2)。
+      // 絞り込みは共通Navigationの nav.filter に載せる(画面ごとの一時変数を増やさない)。
+      const destFilter = TASK_TO_DEST_FILTER[btn.dataset.taskKey];
+      if (destFilter) { showScreen(btn.dataset.nav, { nav: { ...nav, filter: destFilter } }); return; }
       // 外注 出勤報告不足など、日報管理画面そのものへ行くカードも当日で開く
       // (前回見ていた過去日が残っていると、カード件数と画面の数字がずれる)。
       if (btn.dataset.nav === 'daily-report-management') drmSelectedDate = navDate;
@@ -5049,7 +5103,9 @@ async function loadAdminDashboard() {
     grid.innerHTML = DASH_CARDS.map((c, i) => {
       const count = d ? d[c.key] : 0;
       return `
-        <button type="button" class="dash-card" data-idx="${i}">
+        <!-- data-card-key: どのカードかを配列の並び順に依存せず特定できるようにする
+             (意味整合パトロールがカードを名指しでタップし、件数を遷移先と突き合わせるため)。 -->
+        <button type="button" class="dash-card" data-idx="${i}" data-card-key="${c.key}">
           <span class="dash-card-top">${icon(c.icon)}<span class="dash-card-count ${dashCardColorClass(c.status, count)}">${count}</span></span>
           <span class="dash-card-label">${c.label}</span>
         </button>
@@ -5090,12 +5146,14 @@ function openAdminRequestList(filter) {
 // 2026-09-05: 遷移元ごとに areqFilters を直接組み立て、チップだけ手で塗り直していたため、
 // (1)日付窓を渡し忘れる(「本日の申請」カードなのに全期間が出る)、(2)日付入力欄と
 // 実際の絞り込みがずれる、という不整合が起きていた。state と画面表示は必ずここで同時に合わせる。
-// nav = { type, category, status, dateFrom, dateTo, name, site, partner }
+// nav = { type, category, status, dateFrom, dateTo, decidedFrom, decidedTo, name, site, partner }
 function setAreqFilters(nav) {
   const n = nav || {};
   areqFilters = {
     type: n.type || '', category: n.category || '', status: n.status || '', name: n.name || '',
-    dateFrom: n.dateFrom || '', dateTo: n.dateTo || '', site: n.site || '', partner: n.partner || '',
+    dateFrom: n.dateFrom || '', dateTo: n.dateTo || '',
+    decidedFrom: n.decidedFrom || '', decidedTo: n.decidedTo || '',
+    site: n.site || '', partner: n.partner || '',
   };
   // チップ: カテゴリ指定時は種類チップを「すべて」にする(カテゴリ側で絞るため)。
   const activeType = areqFilters.category ? '' : areqFilters.type;
@@ -5104,8 +5162,32 @@ function setAreqFilters(nav) {
   // 入力欄も必ず同期する(画面に出ている条件＝実際に問い合わせている条件、を保証する)。
   const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
   set('areq-date-from', areqFilters.dateFrom); set('areq-date-to', areqFilters.dateTo);
+  set('areq-decided-from', areqFilters.decidedFrom); set('areq-decided-to', areqFilters.decidedTo);
   set('areq-site', areqFilters.site); set('areq-partner', areqFilters.partner);
   set('areq-search-name', areqFilters.name);
+  // 日付の窓が入っているのに「詳細検索」が畳まれていると、一覧が絞られている理由が画面から
+  // 読み取れない(件数だけ減って見える)。窓が入っているときは必ず開いて条件を見せる。
+  const adv = document.getElementById('areq-advanced');
+  if (adv && (areqFilters.dateFrom || areqFilters.dateTo || areqFilters.decidedFrom || areqFilters.decidedTo || areqFilters.site || areqFilters.partner)) adv.style.display = 'block';
+  renderAreqActiveFilterChip();
+}
+
+// 一覧の上に「いま何で絞っているか」と、その解除ボタンを出す。ダッシュボードのカードから
+// 来たとき(決裁日30日窓など)に、件数が減っている理由が画面から分かるようにするため。
+function renderAreqActiveFilterChip() {
+  const el = document.getElementById('areq-active-filter');
+  if (!el) return;
+  const parts = [];
+  if (areqFilters.decidedFrom || areqFilters.decidedTo) parts.push(`決裁日 ${areqFilters.decidedFrom || ''}〜${areqFilters.decidedTo || ''}`);
+  if (areqFilters.dateFrom || areqFilters.dateTo) parts.push(`申請日 ${areqFilters.dateFrom || ''}〜${areqFilters.dateTo || ''}`);
+  if (!parts.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `<span class="mini-tag info">${parts.join(' / ')}で絞り込み中</span> <button type="button" class="link" id="areq-clear-window">絞り込みを解除</button>`;
+  const btn = document.getElementById('areq-clear-window');
+  if (btn) btn.addEventListener('click', () => {
+    setAreqFilters({ ...areqFilters, dateFrom: '', dateTo: '', decidedFrom: '', decidedTo: '' });
+    loadAdminAllRequests();
+  });
 }
 
 // 有給P0: 申請管理を「種類×状態」で絞り込んで開く(HOME件数と一覧を同一データソース admin_search_requests で一致させる)。
@@ -5490,6 +5572,26 @@ async function loadMyQualifications() {
 // ---------- 資格管理(管理者) ----------
 
 let qualAdminCategoryFilter = '';
+
+// 「期限間近(60日以内)」などで絞り込み中であることと、その解除ボタンを出す。
+// 資格・免許管理は絞り込みが <select> なので、ダッシュボードのカードから来たときに
+// 何で絞られているかが一覧の上から読み取れなかった。
+const QUAL_ADMIN_FILTER_LABEL = { pending: '確認待ちのみ', expiring: '期限切れ/期限間近(60日以内)のみ', expired: '期限切れのみ' };
+function renderQualAdminActiveFilterChip() {
+  const el = document.getElementById('qual-admin-active-filter');
+  if (!el) return;
+  const sel = document.getElementById('qual-admin-filter');
+  const v = sel ? (sel.value || '') : '';
+  if (!v) { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = `<span class="mini-tag warn">${QUAL_ADMIN_FILTER_LABEL[v] || v}</span> <button type="button" class="link" id="qual-admin-clear-filter">絞り込みを解除</button>`;
+  const btn = document.getElementById('qual-admin-clear-filter');
+  if (btn) btn.addEventListener('click', () => {
+    if (sel) sel.value = '';
+    renderQualAdminActiveFilterChip();
+    loadQualAdminList();
+  });
+}
 
 async function loadQualAdminList() {
   const session = getSession();
@@ -7621,17 +7723,34 @@ async function loadSupplyRequestAdminList() {
 }
 
 // 受渡待ち(承認済み・未受渡)の一覧。受渡完了で初めて本人の保有へ加算される。
+// ダッシュボードのカード「支給予定日を過ぎた未受渡」から渡される絞り込み(nav.filter)。
+// 'delivery_overdue' のときだけ、カードとまったく同じ述語で絞る。
+// RPC admin_list_supply_pending_delivery は既に「承認済み かつ 未受渡」だけを返すので、
+// 残りの条件(支給予定日あり かつ 予定日 < 当日)をここで適用すればカードと同じ集合になる。
+let supplyDeliveryFilter = '';
+
+function isSupplyDeliveryOverdue(r) {
+  return !!r.scheduled_issue_date && String(r.scheduled_issue_date).slice(0, 10) < todayJST();
+}
+
 async function loadSupplyDeliveryQueue() {
   const session = getSession();
   const el = document.getElementById('supply-delivery-queue-list');
   if (!el) return;
   el.innerHTML = '<div class="hint">読み込み中...</div>';
+  renderSdqActiveFilterChip();
+  const countEl = document.getElementById('sdq-count');
   try {
-    const rows = await rpc('admin_list_supply_pending_delivery', { p_admin_employee_code: session.employeeCode });
-    if (!rows || rows.length === 0) { el.innerHTML = '<div class="hint">受渡待ちの支給品はありません。</div>'; return; }
+    const all = await rpc('admin_list_supply_pending_delivery', { p_admin_employee_code: session.employeeCode });
+    const rows = supplyDeliveryFilter === 'delivery_overdue' ? (all || []).filter(isSupplyDeliveryOverdue) : (all || []);
+    if (countEl) countEl.textContent = `${rows.length}件`;
+    if (!rows || rows.length === 0) {
+      el.innerHTML = `<div class="hint">${supplyDeliveryFilter === 'delivery_overdue' ? '支給予定日を過ぎた未受渡はありません。' : '受渡待ちの支給品はありません。'}</div>`;
+      return;
+    }
     el.innerHTML = rows.map((r) => `
       <div class="card supply-delivery-row" data-item-request-id="${r.item_request_id}">
-        <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span class="mini-tag info">承認済み</span></div>
+        <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span class="mini-tag ${isSupplyDeliveryOverdue(r) ? 'warn' : 'info'}">${isSupplyDeliveryOverdue(r) ? '支給予定日を過ぎた未受渡' : '承認済み'}</span></div>
         <div class="row2">${r.item_name}${r.size ? `・${r.size}` : ''}　数量${r.quantity}</div>
         <div class="row2" style="display:flex; gap:6px; align-items:center;">
           支給予定日 <input type="date" class="dq-schedule-input" style="width:150px;" value="${r.scheduled_issue_date ? String(r.scheduled_issue_date).slice(0, 10) : ''}">
@@ -7661,8 +7780,21 @@ async function loadSupplyDeliveryQueue() {
       });
     });
   } catch (e) {
+    // 「0件」と「取得失敗」を混同させない。
+    if (countEl) countEl.textContent = '';
     el.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
+}
+
+// 「支給予定日を過ぎた未受渡」で絞り込み中であることと、その解除ボタンを出す。
+function renderSdqActiveFilterChip() {
+  const el = document.getElementById('sdq-active-filter');
+  if (!el) return;
+  if (supplyDeliveryFilter !== 'delivery_overdue') { el.style.display = 'none'; el.innerHTML = ''; return; }
+  el.style.display = '';
+  el.innerHTML = '<span class="mini-tag warn">支給予定日を過ぎた未受渡のみ</span> <button type="button" class="link" id="sdq-clear-filter">絞り込みを解除</button>';
+  const btn = document.getElementById('sdq-clear-filter');
+  if (btn) btn.addEventListener('click', () => { supplyDeliveryFilter = ''; loadSupplyDeliveryQueue(); });
 }
 
 // ---------- 健康診断(社員本人) ----------
@@ -11045,7 +11177,10 @@ async function loadDailyReportEditRequestsAdmin() {
 
 // ---------- 申請管理(管理者、全申請横断検索) ----------
 
-let areqFilters = { type: '', category: '', status: '', name: '', dateFrom: '', dateTo: '', site: '', partner: '' };
+// decidedFrom/decidedTo = 決裁日(承認・却下が確定した日)の窓。申請日(dateFrom/dateTo)とは
+// 別の列で絞る。ダッシュボードの「承認済み(30日)」「却下(30日)」はこの列で数えているため、
+// この2つが無いとカード件数と一覧件数が構造的に一致しない(残課題 R-1)。
+let areqFilters = { type: '', category: '', status: '', name: '', dateFrom: '', dateTo: '', decidedFrom: '', decidedTo: '', site: '', partner: '' };
 let areqRows = [];
 let areqSort = { col: 'requested_at', dir: 'desc' };
 
@@ -11064,6 +11199,8 @@ async function loadAdminAllRequests() {
       p_status_group: areqFilters.status || null,
       p_date_from: areqFilters.dateFrom || null,
       p_date_to: areqFilters.dateTo || null,
+      p_decided_from: areqFilters.decidedFrom || null,
+      p_decided_to: areqFilters.decidedTo || null,
       p_site_name: areqFilters.site || null,
       p_partner_name: areqFilters.partner || null,
       p_keyword: null,
@@ -13835,7 +13972,7 @@ function init() {
   document.getElementById('qual-submit').addEventListener('click', doSubmitQualification);
   document.getElementById('qual-photo-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'photo'));
   document.getElementById('qual-pdf-input').addEventListener('change', (e) => handleQualFile(e.target.files[0], 'pdf'));
-  document.getElementById('qual-admin-filter').addEventListener('change', loadQualAdminList);
+  document.getElementById('qual-admin-filter').addEventListener('change', () => { renderQualAdminActiveFilterChip(); loadQualAdminList(); });
   let qualSearchTimer = null;
   document.getElementById('qual-admin-search').addEventListener('input', () => {
     clearTimeout(qualSearchTimer);
@@ -14060,12 +14197,15 @@ function init() {
     const el = document.getElementById('areq-advanced');
     el.style.display = el.style.display === 'none' ? 'block' : 'none';
   });
-  ['areq-date-from', 'areq-date-to', 'areq-site', 'areq-partner'].forEach((id) => {
+  ['areq-date-from', 'areq-date-to', 'areq-decided-from', 'areq-decided-to', 'areq-site', 'areq-partner'].forEach((id) => {
     document.getElementById(id).addEventListener('change', () => {
       areqFilters.dateFrom = document.getElementById('areq-date-from').value;
       areqFilters.dateTo = document.getElementById('areq-date-to').value;
+      areqFilters.decidedFrom = document.getElementById('areq-decided-from').value;
+      areqFilters.decidedTo = document.getElementById('areq-decided-to').value;
       areqFilters.site = document.getElementById('areq-site').value.trim();
       areqFilters.partner = document.getElementById('areq-partner').value.trim();
+      renderAreqActiveFilterChip();
       loadAdminAllRequests();
     });
   });
@@ -14278,6 +14418,10 @@ function init() {
   SCREEN_ENTER_HOOKS['supply-initial-holding'] = () => { hideError('supply-ih-error'); resetSupplyInitialHoldingScreen(); };
   SCREEN_ENTER_HOOKS['supply-request-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    // 遷移元(ダッシュボードのカード)が nav.filter で渡した絞り込みを反映する。
+    // filter を持たない経路で入ったときは前回の絞り込みを必ず解除する。
+    const navf = navCurrent() && navCurrent().screen === 'supply-request-admin' ? (navCurrent().filter || '') : '';
+    supplyDeliveryFilter = navf === 'delivery_overdue' ? 'delivery_overdue' : '';
     loadSupplyRequestAdminList();
     loadSupplyDeliveryQueue();
   };
@@ -14320,6 +14464,21 @@ function init() {
   SCREEN_ENTER_HOOKS['my-qual'] = loadMyQualifications;
   SCREEN_ENTER_HOOKS['qual-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    // 遷移元(ダッシュボードのカード「資格・免許の期限切れ/期限接近」)が nav.filter で渡した
+    // 絞り込みを反映する。'expiring' は admin_list_qualifications の p_filter と同じ値で、
+    // カードとまったく同じ述語(status='active' かつ 期限 <= 当日+60日)になる。
+    // filter を持たない経路で入ったときは、前回の絞り込みを必ず「すべて」へ戻す。
+    const navf = navCurrent() && navCurrent().screen === 'qual-admin' ? (navCurrent().filter || '') : '';
+    const sel = document.getElementById('qual-admin-filter');
+    if (sel) sel.value = navf === 'expiring' ? 'expiring' : '';
+    if (navf === 'expiring') {
+      // カードは種類(資格/免許)・検索語で絞っていないため、遷移先も揃える。
+      qualAdminCategoryFilter = '';
+      document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((c) => c.classList.toggle('active', (c.dataset.cat || '') === ''));
+      const search = document.getElementById('qual-admin-search');
+      if (search) search.value = '';
+    }
+    renderQualAdminActiveFilterChip();
     loadQualAdminList();
   };
   SCREEN_ENTER_HOOKS['category-review'] = () => {
@@ -14412,6 +14571,16 @@ function init() {
   };
   SCREEN_ENTER_HOOKS['bulk-expense-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    // 遷移元(ダッシュボードのカード)が nav.filter で渡した絞り込みを反映する。
+    // 前回の絞り込みが残っていると「カード件数 ≠ 表示件数」になるため、
+    // filter を持たない経路で入ったときは必ず解除する。
+    const navf = navCurrent() && navCurrent().screen === 'bulk-expense-admin' ? (navCurrent().filter || '') : '';
+    bulkExpensePaymentFilter = navf === 'payment_overdue' ? 'payment_overdue' : '';
+    if (bulkExpensePaymentFilter) {
+      // 状態チップ(承認待ち/承認済み/却下)が残っているとカードの母集団と食い違うため「すべて」へ戻す。
+      bulkExpenseAdminFilter = '';
+      document.querySelectorAll('#bea-status-filter .filter-chip').forEach((c) => c.classList.toggle('active', (c.dataset.status || '') === ''));
+    }
     loadBulkExpenseAdminList();
   };
   document.getElementById('la-search').addEventListener('input', () => {
@@ -14469,6 +14638,9 @@ function init() {
       document.querySelectorAll('#bea-status-filter .filter-chip').forEach((c) => c.classList.remove('active'));
       chip.classList.add('active');
       bulkExpenseAdminFilter = chip.dataset.status || '';
+      // 状態チップを押したら、カードから来た「精算予定日超過」の絞り込みは解除する
+      // (単一stateから再queryする。areq-type-filter と同じ扱い)。
+      bulkExpensePaymentFilter = '';
       loadBulkExpenseAdminList();
     });
   });

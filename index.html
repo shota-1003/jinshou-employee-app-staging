@@ -1268,6 +1268,8 @@
       <option value="expiring">期限間近(60日以内)</option>
       <option value="expired">期限切れ</option>
     </select>
+    <!-- ダッシュボードのカード「資格・免許の期限切れ/期限接近」から来たときの絞り込み表示と解除。 -->
+    <div id="qual-admin-active-filter" style="display:none;margin:8px 0;"></div>
     <div class="hint" id="qual-admin-count" style="margin:8px 0;"></div>
     <div id="qual-admin-list"></div>
   </section>
@@ -2314,11 +2316,18 @@
       <input type="date" id="areq-date-from">
       <label for="areq-date-to">申請日(終了)</label>
       <input type="date" id="areq-date-to">
+      <!-- 決裁日 = 承認・却下が確定した日。ダッシュボードの「承認済み(30日)」「却下(30日)」は
+           申請日ではなくこの日付で数えているため、同じ列で絞れないと件数が一致しない。 -->
+      <label for="areq-decided-from">決裁日(開始)</label>
+      <input type="date" id="areq-decided-from">
+      <label for="areq-decided-to">決裁日(終了)</label>
+      <input type="date" id="areq-decided-to">
       <label for="areq-site">現場</label>
       <input type="text" id="areq-site" placeholder="現場名で検索...">
       <label for="areq-partner">取引先</label>
       <input type="text" id="areq-partner" placeholder="取引先名で検索...">
     </div>
+    <div id="areq-active-filter" style="display:none;margin:8px 0;"></div>
     <div class="hint" id="areq-count" style="margin:10px 0;"></div>
     <div id="areq-list" class="areq-cards"></div>
     <div id="areq-table-wrap" class="areq-table-wrap">
@@ -2422,6 +2431,9 @@
     <div id="supply-request-admin-list"><div class="hint">読み込み中...</div></div>
     <div class="form-title" style="margin-top:22px;">受渡待ち(承認済み・未受渡)</div>
     <div class="hint" style="margin-bottom:10px;">承認済みでまだ渡していない支給品です。実際に本人へ渡したら「受渡完了」を押してください。押した時点で本人の保有数に加算されます。</div>
+    <!-- ダッシュボードのカード「支給予定日を過ぎた未受渡」から来たときの絞り込み表示と解除。 -->
+    <div id="sdq-active-filter" style="display:none;margin:8px 0;"></div>
+    <div class="hint" id="sdq-count" style="margin:8px 0;"></div>
     <div id="supply-delivery-queue-list"><div class="hint">読み込み中...</div></div>
   </section>
 
@@ -2924,6 +2936,9 @@
       <button type="button" class="filter-chip" data-status="approved">承認済み</button>
       <button type="button" class="filter-chip" data-status="rejected">却下</button>
     </div>
+    <!-- ダッシュボードのカード「精算予定日を過ぎた未精算」から来たときの絞り込み表示と解除。 -->
+    <div id="bea-active-filter" style="display:none;margin:8px 0;"></div>
+    <div class="hint" id="bea-count" style="margin:8px 0;"></div>
     <div id="bea-list"></div>
   </section>
 
