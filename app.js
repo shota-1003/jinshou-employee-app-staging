@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v148-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T03:41:56.813Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v149-staging';
+const BUILD_DEPLOYED_AT = '2026-09-05T06:23:11.566Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -923,27 +923,61 @@ const LOGIN_RETURN_KEY = 'jinshou_login_return';
 
 // 戻り先はアプリ内の決まった場所だけを許可する。外部URLを受け取って
 // そこへ飛ばす作り(オープンリダイレクト)にはしない。
-const LOGIN_RETURN_TARGETS = { calendar: 'calendar/' };
+// 飛び先はアプリ内の決まった場所だけを許可する(外部URLへは飛ばさない)。
+//   page   … 別ページへ移動する(配置カレンダーは /calendar/ という別ページのため)
+//   screen … このページの中の画面を開く(日報はこのページの中の1画面のため)
+// 2026-09-05: ホームウィジェットから「その日の配置」「その日の日報」を開けるようにした。
+// それまでは calendar しか許可しておらず、しかも日付を捨てていたため、
+// ウィジェットを押しても今日のカレンダーしか開かなかった(実機で判明)。
+const LOGIN_RETURN_TARGETS = {
+  calendar: { kind: 'page', path: 'calendar/' },
+  'daily-report': { kind: 'screen', screen: 'daily-report' },
+};
+const LOGIN_RETURN_DATE_KEY = 'jinshou_login_return_date';
+
+// 日付は「実在する日」だけを通す。2028-13-99 のような形だけ整った文字列を弾く。
+function validReturnDate(d) {
+  if (!d || !/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const t = new Date(`${d}T00:00:00Z`);
+  return Number.isNaN(t.getTime()) || t.toISOString().slice(0, 10) !== d ? null : d;
+}
 
 // 起動時に ?next=... が付いていたら覚えておく。A(通常版)・B(更新先行版)とも
 // 相対パスで戻すので、開いていた側のカレンダーへそのまま帰る。
 function rememberLoginReturn() {
   try {
-    const next = new URLSearchParams(location.search).get('next');
-    if (next && LOGIN_RETURN_TARGETS[next]) sessionStorage.setItem(LOGIN_RETURN_KEY, next);
+    const q = new URLSearchParams(location.search);
+    const next = q.get('next');
+    if (next && LOGIN_RETURN_TARGETS[next]) {
+      sessionStorage.setItem(LOGIN_RETURN_KEY, next);
+      const d = validReturnDate(q.get('date'));
+      if (d) sessionStorage.setItem(LOGIN_RETURN_DATE_KEY, d);
+      else sessionStorage.removeItem(LOGIN_RETURN_DATE_KEY);
+    }
   } catch (e) { /* sessionStorageが使えない環境では戻り先を覚えないだけ */ }
 }
 
 function consumeLoginRedirect() {
   let next = null;
+  let date = null;
   try {
-    next = sessionStorage.getItem(LOGIN_RETURN_KEY)
-      || new URLSearchParams(location.search).get('next');
+    const q = new URLSearchParams(location.search);
+    next = sessionStorage.getItem(LOGIN_RETURN_KEY) || q.get('next');
+    date = validReturnDate(sessionStorage.getItem(LOGIN_RETURN_DATE_KEY) || q.get('date'));
   } catch (e) { return false; }
   const target = next && LOGIN_RETURN_TARGETS[next];
   if (!target) return false;
-  try { sessionStorage.removeItem(LOGIN_RETURN_KEY); } catch (e) { /* 消せなくても遷移はする */ }
-  location.replace(target);
+  try {
+    sessionStorage.removeItem(LOGIN_RETURN_KEY);
+    sessionStorage.removeItem(LOGIN_RETURN_DATE_KEY);
+  } catch (e) { /* 消せなくても遷移はする */ }
+  if (target.kind === 'page') {
+    location.replace(target.path + (date ? `?date=${date}` : ''));
+    return true;
+  }
+  // 画面内の移動。日報はその日を開いた状態にする(既存の前指定の仕組みを使う)。
+  if (date) dailyReportPrefillDate = date;
+  showScreen(target.screen);
   return true;
 }
 
