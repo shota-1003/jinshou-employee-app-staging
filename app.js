@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v150-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T12:43:07.008Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T13:13:50.758Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8011,11 +8011,28 @@ async function loadStatusSubmitScreen() {
   } catch (e) { /* 一覧取得に失敗してもフォーム自体は使えるようにする */ }
 }
 
-// 外出/遅刻の予定時刻は「当日の時刻」だけを入力させる(年月日の入力は不要、常に本日扱い)。
-// <input type="time">の値("HH:MM")へtodayJST()の日付を合成してISO文字列化する。
-function todayTimeToISOJST(timeStr) {
-  if (!timeStr) return null;
-  return new Date(`${todayJST()}T${timeStr}:00+09:00`).toISOString();
+// 外出の予定帰着時刻・遅刻の到着予定時刻をISO文字列(UTC)へ変換する。
+// 入力欄は<input type="datetime-local">("YYYY-MM-DDTHH:MM")だが、過去に<input type="time">
+// ("HH:MM")だった経緯があり、時刻だけの値も届きうる。時刻だけの場合は当日(JST)の日付を
+// 補う。どちらの形式もJSTとして解釈する(端末のタイムゾーンに依存させない)。
+// 2026-09-05: datetime-localの値を"HH:MM"前提で連結していたため
+// new Date("2026-09-05T2026-09-05T09:30:00+09:00")=Invalid Dateとなり、
+// .toISOString()がRangeErrorを投げて「遅刻を報告」が必ず送信失敗していた(導線10の不具合)。
+function todayTimeToISOJST(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  let local = null;
+  const timeOnly = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  const dateTime = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(s);
+  if (timeOnly) {
+    local = `${todayJST()}T${timeOnly[1].padStart(2, '0')}:${timeOnly[2]}:${timeOnly[3] || '00'}`;
+  } else if (dateTime) {
+    local = `${dateTime[1]}T${dateTime[2]}:${dateTime[3]}:${dateTime[4] || '00'}`;
+  } else {
+    return null;
+  }
+  const d = new Date(`${local}+09:00`);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString();
 }
 
 async function doSubmitStatusOuting() {
@@ -8061,6 +8078,8 @@ async function doSubmitStatusLate() {
   hideError('status-late-error');
   if (!expectedArrival) { showError('status-late-error', '到着予定時刻を入力してください。'); return; }
   if (!reason) { showError('status-late-error', '理由を入力してください。'); return; }
+  const expectedArrivalIso = todayTimeToISOJST(expectedArrival);
+  if (!expectedArrivalIso) { showError('status-late-error', '到着予定時刻の形式が正しくありません。入力し直してください。'); return; }
 
   const btn = document.getElementById('status-late-submit');
   btn.disabled = true;
@@ -8068,7 +8087,7 @@ async function doSubmitStatusLate() {
     await rpc('submit_status_report_late_arrival', {
       p_employee_code: session.employeeCode,
       p_scheduled_start_at: null,
-      p_expected_arrival_at: todayTimeToISOJST(expectedArrival),
+      p_expected_arrival_at: expectedArrivalIso,
       p_reason: reason,
       p_note: note,
     });

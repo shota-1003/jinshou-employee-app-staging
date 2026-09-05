@@ -346,9 +346,13 @@ button.link {
 .success-icon .icon { width: 32px; height: 32px; }
 
 .center { text-align: center; }
+/* 共通Navigationの「戻る」ボタン部品。スマホでの誤タップを防ぐため、文字サイズは変えずに
+   タップ領域だけを24px以上確保する(2026-09-05、iPhone 375px検証で20pxだったため)。
+   左右のpaddingは負のmarginで打ち消し、見た目の文字位置は従来どおりにする。 */
 .back-link {
   color: var(--text-muted); font-size: 13.5px; margin-bottom: 16px; display: inline-flex; align-items: center; gap: 4px;
-  background: none; border: none; padding: 0; width: auto; font-weight: 600;
+  background: none; border: none; padding: 2px 8px; margin-left: -8px; width: auto; font-weight: 600;
+  min-height: 24px; min-width: 24px; box-sizing: border-box; justify-content: flex-start;
 }
 .back-link .icon { width: 16px; height: 16px; }
 .balance-note { font-size: 12px; color: var(--text-muted); margin-top: 4px; }
@@ -652,7 +656,8 @@ button.link {
 .home-announce-block { margin-bottom: 6px; }
 .home-announce-header { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 10px 2px; }
 .home-announce-header .section-title { margin: 0; }
-.home-announce-header .see-all { font-size: 12px; font-weight: 700; color: var(--primary); background: none; border: none; width: auto; margin: 0; padding: 0; display: flex; align-items: center; gap: 2px; }
+/* 「すべて見る」も同じ理由でタップ領域を24px以上にする(文字サイズは12pxのまま)。 */
+.home-announce-header .see-all { font-size: 12px; font-weight: 700; color: var(--primary); background: none; border: none; width: auto; margin: 0 -8px 0 0; padding: 2px 8px; display: flex; align-items: center; gap: 2px; min-height: 24px; min-width: 24px; box-sizing: border-box; }
 .home-announce-header .see-all .icon { width: 14px; height: 14px; }
 .home-announce-item {
   display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-radius: var(--radius-md);
