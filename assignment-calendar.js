@@ -811,38 +811,6 @@
             };
         }
 
-        // その週にいくつ予定が並ぶかを見て、週ごとの高さを決める。
-        // 全週を同じ高さにすると、空いている週が場所を取り、忙しい週だけ「+N」で切れる。
-        // 実データ(2029年11月)では、空き週4つが高いまま、予定のある週だけ +2〜+5 になっていた。
-        function weekHeights(cells, byDate, holidays, layout) {
-            const weeks = Math.ceil(cells.length / 7);
-            const out = [];
-            const needs = [];
-            for (let w = 0; w < weeks; w += 1) {
-                let need = 0;
-                for (let d = 0; d < 7; d += 1) {
-                    const date = cells[w * 7 + d];
-                    if (!date) continue;
-                    const n = (byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0);
-                    if (n > need) need = n;
-                }
-                needs.push(need);
-                const want = layout.num + (need * layout.row) + 4;
-                out.push(Math.max(layout.min, Math.min(layout.max, want)));
-            }
-            // 全部足しても画面が余るときは、週の比率を保ったまま全体を引き伸ばす。
-            // 余りを均等に足すと空いている週まで同じだけ伸び、
-            // 予定の多い週へ寄せて足すとその週だけ間延びする。倍率で伸ばすと両方を避けられる。
-            // 伸ばしすぎないよう1.6倍までにする(それ以上は下に余白が残ってよい)。
-            const total = out.reduce((a, b) => a + b, 0);
-            const avail = layout.available || 0;
-            if (total > 0 && avail > total) {
-                const f = Math.min(1.6, avail / total);
-                for (let i = 0; i < out.length; i += 1) out[i] = Math.round(out[i] * f);
-            }
-            return out;
-        }
-
         // グリッドを描いたあとに実際の開始位置を測り、想定とずれていたら1度だけ組み直す。
         // (初回描画時点ではグリッドがまだDOMに無く、開始位置が分からないため)
         let lastGridTop = null;
@@ -854,6 +822,19 @@
             if (lastGridTop !== null && Math.abs(top - lastGridTop) < 4) return;
             lastGridTop = top;
             render();
+        }
+
+        // 月表示の行の高さ。**全週そろえる**。
+        //
+        // 2026-09-05、いちど「その週の予定量に応じて高さを変える」方式にしたが、
+        // 実機で使ったユーザーから差し戻された。予定の多い週が縦に伸びると、
+        // その週は全部見える代わりに**月の他の週が画面外へ押し出されて何も見えなくなる**。
+        // 「月を見る」目的では、全部の週が同時に見えることのほうが大事。
+        // LifeBear も月の行は同じ高さで、入りきらない日は「+N」で示している。
+        // 入りきらない日があること自体は許容し、押せばその日の一覧で全部見られる。
+        function weekHeights(cells, layout) {
+            const weeks = Math.ceil(cells.length / 7);
+            return new Array(weeks).fill(layout.cell);
         }
 
         function renderMonth(container) {
@@ -884,7 +865,7 @@
             // 週ごとの高さ。件数の指定があるときは、その件数で全週そろえる。
             const rowH = state.maxChipsOverride
                 ? new Array(Math.ceil(cells.length / 7)).fill(layout.num + chipLimit * layout.row + 4)
-                : weekHeights(cells, byDate, holidays, layout);
+                : weekHeights(cells, layout);
             const limitOfWeek = (w) => (state.maxChipsOverride
                 ? chipLimit
                 : Math.max(2, Math.floor((rowH[w] - layout.num) / layout.row)));

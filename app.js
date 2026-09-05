@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v150-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T07:02:56.136Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T12:12:06.422Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -122,6 +122,41 @@ function todayJST() {
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const d = String(now.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+}
+
+// ---------- 画面遷移で渡す状態(日付・絞り込み・遷移元)の単一の正 ----------
+// 2026-09-05 実機不具合の根本対策。管理者HOME「今日やること」の「本日の配置ありで日報が
+// 未提出の社員 19」をタップすると、遷移先が「NaN月NaN日の未提出 / 0名 / 対象者はいません。」
+// になった。原因は、遷移先の画面が日付をグローバル変数 drmSelectedDate に暗黙依存しており、
+// その変数は日報管理画面を一度開かないと初期化されない(=HOMEから直行すると null のまま)ため。
+//   null → drmDayPrefix(): new Date('nullT00:00:00') = Invalid Date → 「NaN月NaN日」
+//   null → RPC p_date=NULL → schedule_date = NULL は常に偽 → 0件
+// 以後、画面間の日付・絞り込みは必ず navState(明示的なオブジェクト)で渡し、
+// 受け側はグローバル変数ではなく渡された state を読む。日付は必ず normalizeNavDate を通す。
+
+// 'YYYY-MM-DD' として妥当な文字列だけを通し、それ以外(null/undefined/Invalid Date/NaN)は
+// 本日(JST)へフォールバックする。ここが「日付が undefined/NaN のまま下流へ流れる」唯一の関門。
+function normalizeNavDate(value) {
+  const m = value == null ? null : String(value).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return todayJST();
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  // 2026-02-31 のような存在しない日付を弾く(Date は繰り上げてしまうため往復で検証する)。
+  if (d.getFullYear() !== Number(m[1]) || d.getMonth() !== Number(m[2]) - 1 || d.getDate() !== Number(m[3])) return todayJST();
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+// 遷移時に渡す状態を1つの形にそろえる。C.Navigation担当の共通Navigation
+// (entryRoute / returnTo / selectedDate / filter / origin)へそのまま寄せられるよう、
+// キー名を合わせてある。date は必ず正規化済みの 'YYYY-MM-DD'。
+function buildNavState(state) {
+  const s = state || {};
+  return {
+    date: normalizeNavDate(s.date),
+    filter: s.filter == null ? null : s.filter,
+    origin: s.origin || (typeof currentScreenId === 'function' ? currentScreenId() : null),
+    returnTo: s.returnTo || null,
+    entryRoute: s.entryRoute || null,
+  };
 }
 
 // 2026-08-28: 管理者お知らせ管理画面で、DB側の列欠落(list_announcements_admin、
@@ -4517,7 +4552,14 @@ const DASH_CARDS = [
   { key: 'health_checkup_overdue_count', filter: null, label: '健診 期限超過', icon: 'check-circle', nav: 'health-admin', healthFilter: 'overdue', status: 'pending' },
   { key: 'health_checkup_due_soon_count', filter: null, label: '健診 期限間近', icon: 'clock', nav: 'health-admin', healthFilter: 'due_soon', status: 'pending' },
   { key: 'health_checkup_retest_pending_count', filter: null, label: '再検査確認待ち', icon: 'alert-triangle', nav: 'health-admin', healthFilter: 'retest', status: 'pending' },
-  { key: 'today_submissions_count', filter: null, label: '本日の申請', icon: 'clock', nav: 'admin-all-requests', areqFilter: { type: '', status: '' }, status: 'neutral' },
+  // areqWindow: カードのラベルが期間を含むとき、遷移先の一覧へ渡す申請日(requested_at)の窓。
+  // 件数側と一覧側が同じ日付列で絞れるカードにだけ付ける(下の30日カード参照)。
+  { key: 'today_submissions_count', filter: null, label: '本日の申請', icon: 'clock', nav: 'admin-all-requests', areqFilter: { type: '', status: '' }, areqWindow: () => ({ dateFrom: todayJST(), dateTo: todayJST() }), status: 'neutral' },
+  // 「(30日)」の2枚は件数側が approved_at(決裁日)基準、一覧側 admin_search_requests は
+  // requested_at(申請日)基準で、絞る列自体が違う。requested_at で30日窓を渡すと
+  // 「40日前に申請 → 昨日承認」が一覧から消え、かえって件数がずれるため窓は渡さない。
+  // 恒久対応には admin_search_requests に決裁日での絞り込み(p_decided_from/p_decided_to)が必要。
+  // docs/dashboard-semantic-integrity-20260905.md の残課題 R-1 参照。
   { key: 'approved_recent_count', filter: null, label: '承認済み(30日)', icon: 'check-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'approved' }, status: 'good' },
   { key: 'rejected_recent_count', filter: null, label: '却下(30日)', icon: 'x-circle', nav: 'admin-all-requests', areqFilter: { type: '', status: 'rejected' }, status: 'warn' },
   { key: 'entertainment_special_review_count', filter: null, label: '接待: 後日申請(特別承認待ち)', icon: 'alert-triangle', nav: 'admin-all-requests', areqFilter: { type: 'entertainment_preapproval', status: 'special_review' }, status: 'pending' },
@@ -4557,7 +4599,13 @@ async function renderAdminTodayTasks(session) {
     // 日報系: 未提出/配置未確認は対象者一覧へ。要確認(§3)は処理できる要確認一覧(確定/修正依頼/取消)へ。
     const TASK_TO_PEOPLE = { daily_report_missing: 'missing', assignment_unconfirmed: 'unconfirmed' };
     el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => {
-      if (btn.dataset.taskKey === 'daily_report_anomaly') { showScreen('daily-report-needs-review-admin'); return; }
+      // 2026-09-05: 「今日やること」の件数は admin_home_today_tasks が v_today(JST)で数えている。
+      // 遷移先にも必ず同じ日付を明示的に渡す(受け側のグローバル変数任せにしない)。渡さなかったため
+      // 「未提出19 → タップ → NaN月NaN日 / 0名」になっていた。
+      const navDate = todayJST();
+      const nav = { date: navDate, origin: 'admin-home', returnTo: 'admin-home' };
+      // 要確認日報: 件数は「直近7日」で数えているので、一覧も同じ7日窓で開く(全期間にしない)。
+      if (btn.dataset.taskKey === 'daily_report_anomaly') { openDailyReportNeedsReview({ ...nav, days: 7 }); return; }
       // 承認カテゴリを一元定義(HOME件数RPCと同じ分類)。カテゴリ毎に絞り込んで申請管理へ。
       // count(admin_home_today_tasks) と list(admin_search_requests p_category) を同一定義に固定する。
       const APPROVAL_TASK_CATEGORY = {
@@ -4568,8 +4616,15 @@ async function renderAdminTodayTasks(session) {
       if (cat) { openAdminRequestsByCategory(cat, 'pending'); return; }
       // 支給品は専用画面(支給品の記録・検索)で処理する。
       if (btn.dataset.taskKey === 'approval_supply') { showScreen('supply-request-admin'); return; }
+      // 健診カードは「未登録 or 期限超過」の合算。健診管理側に残っている前回の絞り込み(期限間近/
+      // 再検査など)をそのまま引き継ぐと件数が合わないため、明示的に「すべて」へ戻す。
+      if (btn.dataset.taskKey === 'health_checkup') { setHealthAdminFilter(''); showScreen('health-admin'); return; }
       const b = TASK_TO_PEOPLE[btn.dataset.taskKey];
-      if (b) openDailyReportPeople(b); else showScreen(btn.dataset.nav);
+      if (b) { openDailyReportPeople(b, nav); return; }
+      // 外注 出勤報告不足など、日報管理画面そのものへ行くカードも当日で開く
+      // (前回見ていた過去日が残っていると、カード件数と画面の数字がずれる)。
+      if (btn.dataset.nav === 'daily-report-management') drmSelectedDate = navDate;
+      showScreen(btn.dataset.nav);
     }));
   } catch (e) {
     // 集約が取れなくても下のカードは別途表示されるため、静かに隠す
@@ -4597,19 +4652,17 @@ async function loadAdminDashboard() {
     grid.querySelectorAll('.dash-card').forEach((el) => {
       el.addEventListener('click', () => {
         const c = DASH_CARDS[Number(el.dataset.idx)];
-        if (c.healthFilter) {
-          healthAdminFilter = c.healthFilter;
-          document.querySelectorAll('#screen-health-admin .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.healthFilter === c.healthFilter));
-        }
-        if (c.areqFilter) {
-          areqFilters = { type: c.areqFilter.type || '', status: c.areqFilter.status || '', name: '', dateFrom: '', dateTo: '', site: '', partner: '' };
-        }
+        // 健診カードは絞り込みを持つ。持たないカードから来たときに前回の絞り込みが
+        // 残らないよう、health-admin へ行くカードは必ず絞り込みを明示指定する。
+        if (c.nav === 'health-admin') setHealthAdminFilter(c.healthFilter || '');
         if (c.nav) {
-          showScreen(c.nav);
+          // 絞り込みは必ず setAreqFilters(単一の入口)を通し、showScreen より先に確定させる。
+          // カードのラベルが期間を含む場合はその期間も渡す(「本日の申請」なのに全期間が出る、を防ぐ)。
           if (c.areqFilter) {
-            document.querySelectorAll('#areq-type-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.type === areqFilters.type));
-            document.querySelectorAll('#areq-status-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.status === areqFilters.status));
+            const win = typeof c.areqWindow === 'function' ? c.areqWindow() : {};
+            setAreqFilters({ type: c.areqFilter.type || '', status: c.areqFilter.status || '', ...win });
           }
+          showScreen(c.nav);
           return;
         }
         openAdminRequestList(c.filter);
@@ -4627,24 +4680,41 @@ function openAdminRequestList(filter) {
   showScreen('admin-request-list');
 }
 
+// 申請管理(admin-all-requests)の絞り込みを設定する唯一の入口。
+// 2026-09-05: 遷移元ごとに areqFilters を直接組み立て、チップだけ手で塗り直していたため、
+// (1)日付窓を渡し忘れる(「本日の申請」カードなのに全期間が出る)、(2)日付入力欄と
+// 実際の絞り込みがずれる、という不整合が起きていた。state と画面表示は必ずここで同時に合わせる。
+// nav = { type, category, status, dateFrom, dateTo, name, site, partner }
+function setAreqFilters(nav) {
+  const n = nav || {};
+  areqFilters = {
+    type: n.type || '', category: n.category || '', status: n.status || '', name: n.name || '',
+    dateFrom: n.dateFrom || '', dateTo: n.dateTo || '', site: n.site || '', partner: n.partner || '',
+  };
+  // チップ: カテゴリ指定時は種類チップを「すべて」にする(カテゴリ側で絞るため)。
+  const activeType = areqFilters.category ? '' : areqFilters.type;
+  document.querySelectorAll('#areq-type-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', (chip.dataset.type || '') === activeType));
+  document.querySelectorAll('#areq-status-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', (chip.dataset.status || '') === areqFilters.status));
+  // 入力欄も必ず同期する(画面に出ている条件＝実際に問い合わせている条件、を保証する)。
+  const set = (id, v) => { const el = document.getElementById(id); if (el) el.value = v || ''; };
+  set('areq-date-from', areqFilters.dateFrom); set('areq-date-to', areqFilters.dateTo);
+  set('areq-site', areqFilters.site); set('areq-partner', areqFilters.partner);
+  set('areq-search-name', areqFilters.name);
+}
+
 // 有給P0: 申請管理を「種類×状態」で絞り込んで開く(HOME件数と一覧を同一データソース admin_search_requests で一致させる)。
-function openAdminRequestsFiltered(type, status) {
-  areqFilters = { type: type || '', category: '', status: status || '', name: '', dateFrom: '', dateTo: '', site: '', partner: '' };
+function openAdminRequestsFiltered(type, status, nav) {
+  // 絞り込みは showScreen より先に確定させる(画面入場フックが古い条件で先に問い合わせてしまい、
+  // 後から来た正しい結果を上書きする競合を防ぐ)。
+  setAreqFilters({ ...(nav || {}), type: type || '', category: '', status: status || '' });
   showScreen('admin-all-requests');
-  document.querySelectorAll('#areq-type-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.type === areqFilters.type));
-  document.querySelectorAll('#areq-status-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.status === areqFilters.status));
-  if (typeof loadAdminAllRequests === 'function') loadAdminAllRequests();
 }
 // 承認カテゴリ(複数source_typeを束ねる)で申請管理を開く。HOME件数と一覧を admin_search_requests の
 // p_category で完全一致させる(「その他→経費」誤遷移・支給品の"その他"混入を防ぐ)。
 const APPROVAL_CATEGORY_LABEL = { paid_leave: '有給', expense: '経費', supply: '支給品', meeting: '接待・会議費', other: 'その他(現場・個人情報)' };
-function openAdminRequestsByCategory(category, status) {
-  areqFilters = { type: '', category: category || '', status: status || '', name: '', dateFrom: '', dateTo: '', site: '', partner: '' };
+function openAdminRequestsByCategory(category, status, nav) {
+  setAreqFilters({ ...(nav || {}), type: '', category: category || '', status: status || '' });
   showScreen('admin-all-requests');
-  // カテゴリ指定時は種類チップは「すべて」を選択状態に(カテゴリで絞るため)。
-  document.querySelectorAll('#areq-type-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.type === ''));
-  document.querySelectorAll('#areq-status-filter .filter-chip').forEach((chip) => chip.classList.toggle('active', chip.dataset.status === areqFilters.status));
-  if (typeof loadAdminAllRequests === 'function') loadAdminAllRequests();
 }
 
 async function loadAdminRequestList() {
@@ -9086,6 +9156,16 @@ async function doSaveVehicle() {
 
 let healthAdminFilter = '';
 
+// 2026-09-05: 健診の絞り込みは「変数」と「チップの見た目」がバラバラに更新されていて、
+// 別画面から来たときに前回の絞り込みが残る(=カード件数と一覧件数がずれる)ことがあった。
+// 遷移元がどこであれ、絞り込みの設定はこの1関数を通す(state と表示を必ず同時に合わせる)。
+function setHealthAdminFilter(filter) {
+  healthAdminFilter = filter || '';
+  document.querySelectorAll('#screen-health-admin .filter-chip').forEach((chip) => {
+    chip.classList.toggle('active', (chip.dataset.healthFilter || '') === healthAdminFilter);
+  });
+}
+
 async function loadHealthAdminList() {
   const session = getSession();
   const listEl = document.getElementById('health-admin-warning-list');
@@ -10369,12 +10449,39 @@ async function loadDailyReportAdminList() {
 
 // ---------- 日報の要確認一覧(管理者、同日同現場の整合性チェック結果) ----------
 
+// 遷移時に渡された対象期間。HOME「要確認の日報」カードの件数は
+// admin_home_today_tasks が daily_report_review_ids(v_today-6, v_today) = 直近7日で数えているため、
+// 一覧も同じ窓で開かないと「カード N件 → 一覧 M件」がずれる。null は全期間。
+let dailyReportNeedsReviewState = null;
+// nav = { date, days, origin, returnTo }。days を渡すと date を末日とする直近 days 日で絞る。
+function openDailyReportNeedsReview(nav) {
+  const o = nav || {};
+  const state = buildNavState(o);
+  let from = null;
+  if (Number(o.days) > 0) {
+    const m = state.date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    d.setDate(d.getDate() - (Number(o.days) - 1));
+    from = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  dailyReportNeedsReviewState = { dateFrom: from, dateTo: from ? state.date : null, origin: state.origin, returnTo: state.returnTo };
+  showScreen('daily-report-needs-review-admin');
+}
+
 async function loadDailyReportNeedsReviewAdmin() {
   const session = getSession();
   const list = document.getElementById('daily-report-needs-review-list');
   list.innerHTML = '<div class="hint">読み込み中...</div>';
+  const range = dailyReportNeedsReviewState || { dateFrom: null, dateTo: null };
+  // 「どの期間を見ているのか」を必ず画面に出す(HOMEカードの件数と一覧の件数が一致する根拠になる)。
+  const rangeEl = document.getElementById('drnr-range');
+  if (rangeEl) {
+    rangeEl.textContent = range.dateFrom
+      ? `対象期間: ${formatJpDateWithDow(range.dateFrom)} 〜 ${formatJpDateWithDow(range.dateTo)}`
+      : '対象期間: すべて';
+  }
   try {
-    const rows = await rpc('admin_list_needs_review_daily_reports', { p_admin_employee_code: session.employeeCode, p_date_from: null, p_date_to: null });
+    const rows = await rpc('admin_list_needs_review_daily_reports', { p_admin_employee_code: session.employeeCode, p_date_from: range.dateFrom, p_date_to: range.dateTo });
     if (!rows || rows.length === 0) { list.innerHTML = '<div class="empty-state">要確認の日報はありません</div>'; return; }
     // 比較しやすいよう、日付+現場でグループ化して表示する。
     const groups = new Map();
@@ -10989,10 +11096,15 @@ function renderDrmDateNav() {
 
 // 選択日が今日なら「本日」、過去/未来日なら「9月1日」のように表示する接頭辞。
 // 過去日を見ているのに「本日の社員/本日の未提出」と表示される矛盾をなくす。
-function drmDayPrefix() {
-  if (drmSelectedDate === todayJST()) return '本日';
-  const d = new Date(drmSelectedDate + 'T00:00:00');
-  return `${d.getMonth() + 1}月${d.getDate()}日`;
+// 2026-09-05: 引数で日付を受け取れるようにした(未指定時のみ drmSelectedDate を見る)。
+// 以前は drmSelectedDate だけを見ていたため、日報管理画面を経由せずHOMEから直接
+// 対象者一覧へ来ると null → new Date('nullT00:00:00') = Invalid Date → 「NaN月NaN日」になった。
+// normalizeNavDate を通すので、以後どの経路から来ても NaN にはならない。
+function drmDayPrefix(dateStr) {
+  const date = normalizeNavDate(dateStr != null ? dateStr : drmSelectedDate);
+  if (date === todayJST()) return '本日';
+  const m = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  return `${Number(m[2])}月${Number(m[3])}日`;
 }
 
 // 未提出バナー(選択日)。日付切替でも選択日で再取得する。
@@ -11163,8 +11275,8 @@ function drmLateTagHtml(rows) {
 async function loadDailyReportManagement() {
   const session = getSession();
   // 日報管理は「日付」を主軸に。既定は本日の1日だけを表示(過去・未来日は日付ナビで移動)。
-  const today = todayJST();
-  drmSelectedDate = drmSelectedDate || today;
+  // 未初期化(null)・壊れた値は必ず本日へ落とす(normalizeNavDate が唯一の関門)。
+  drmSelectedDate = normalizeNavDate(drmSelectedDate);
   drmFilters = { name: '', workerType: '', status: '', dateFrom: drmSelectedDate, dateTo: drmSelectedDate, site: null, companyId: '' };
   drmSelected.clear();
   document.getElementById('drm-search-name').value = '';
@@ -11223,7 +11335,8 @@ async function loadDrmBreakdown() {
         <div class="drm-bd-row drm-bd-sub"><span>　└ その他対象外</span>${num('other_exempt', b.exempt_other + '名')}</div>
       </div>`;
     el.querySelectorAll('.drm-bd-num').forEach((btn) => {
-      btn.addEventListener('click', () => openDailyReportPeople(btn.dataset.bucket));
+      // 内訳の件数は選択日(drmSelectedDate)で数えているので、一覧にも同じ日を明示的に渡す。
+      btn.addEventListener('click', () => openDailyReportPeople(btn.dataset.bucket, { date: drmSelectedDate, origin: 'daily-report-management' }));
     });
     return b;
   } catch (e) {
@@ -11277,16 +11390,26 @@ const DRP_TITLES = {
   anomaly: '要確認の日報', unconfirmed: '配置を未確認の社員',
 };
 let dailyReportPeopleState = null;
-function openDailyReportPeople(bucket, title) {
-  // 対象者一覧も選択日で取得する(本日固定にしない)。過去日なら見出しも「9月1日の…」にする。
-  const t = (title || DRP_TITLES[bucket] || '対象者一覧').replace('本日', drmDayPrefix());
-  dailyReportPeopleState = { bucket, title: t, date: drmSelectedDate };
+// bucket と「遷移時に渡す状態」を受け取って対象者一覧を開く。
+// opts = { date, title, origin, returnTo }(省略時は日報管理の選択日 → さらに省略時は本日)。
+// 2026-09-05: 第2引数の title 文字列だけを受ける旧シグネチャも維持する(呼び出し側の互換)。
+function openDailyReportPeople(bucket, opts) {
+  const o = (typeof opts === 'string') ? { title: opts } : (opts || {});
+  // 日付は必ず navState 経由で明示的に決める(グローバル変数の未初期化 null を下流へ流さない)。
+  const nav = buildNavState({ date: o.date != null ? o.date : drmSelectedDate, origin: o.origin, returnTo: o.returnTo, filter: bucket });
+  // 過去日なら見出しも「9月1日の…」にする(本日なら「本日の…」)。
+  const t = (o.title || DRP_TITLES[bucket] || '対象者一覧').replace('本日', drmDayPrefix(nav.date));
+  dailyReportPeopleState = { bucket, title: t, date: nav.date, origin: nav.origin, returnTo: nav.returnTo };
+  // 「日報管理に戻る」で開く画面が別の日を表示しないよう、選択日も同じ日に揃える。
+  drmSelectedDate = nav.date;
   showScreen('daily-report-people');
 }
 async function loadDailyReportPeople() {
   if (!dailyReportPeopleState) return;
   const session = getSession();
-  const { bucket, title, date } = dailyReportPeopleState;
+  const { bucket, title } = dailyReportPeopleState;
+  // 表示直前にも正規化する(state が古い/壊れていても NaN・NULL日付でRPCを呼ばない)。
+  const date = normalizeNavDate(dailyReportPeopleState.date);
   document.getElementById('drp-title').textContent = title;
   const listEl = document.getElementById('drp-list');
   const subEl = document.getElementById('drp-sub');
@@ -11295,7 +11418,8 @@ async function loadDailyReportPeople() {
   try {
     const rows = await rpc('admin_list_daily_report_people', { p_admin_employee_code: session.employeeCode, p_date: date, p_bucket: bucket });
     // §4: 取得成功して初めて件数を出す。0件は「対象者はいません」と明示(取得失敗と混同しない)。
-    subEl.textContent = `${(rows || []).length}名`;
+    // 対象日を必ず画面に出す(HOMEから直行したとき「どの日の一覧か」が画面上に無かった)。
+    subEl.textContent = `${formatJpDateWithDow(date)}・${(rows || []).length}名`;
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">対象者はいません。</div>'; return; }
     listEl.innerHTML = rows.map((r) => `
       <div class="history-item">
@@ -11323,9 +11447,11 @@ const DRM_CARD_TO_STATUS = {
 };
 function applyDrmCardFilter(cardKey) {
   // 未提出/対象外は選択日の対象者一覧へ。要確認は例外一覧へ。いずれも selectedDate 連動。
-  if (cardKey === 'employee_missing') { openDailyReportPeople('missing'); return; }
-  if (cardKey === 'employee_excluded') { openDailyReportPeople('exempt'); return; }
-  if (cardKey === 'needs_review_count') { showScreen('daily-report-needs-review-admin'); return; }
+  if (cardKey === 'employee_missing') { openDailyReportPeople('missing', { date: drmSelectedDate, origin: 'daily-report-management' }); return; }
+  if (cardKey === 'employee_excluded') { openDailyReportPeople('exempt', { date: drmSelectedDate, origin: 'daily-report-management' }); return; }
+  // 要確認カードの件数は admin_daily_report_day_summary が選択日1日で数えている。
+  // 一覧も同じ1日窓で開く(以前は期間指定なし=全期間で開いていて件数がずれた)。
+  if (cardKey === 'needs_review_count') { openDailyReportNeedsReview({ date: drmSelectedDate, days: 1, origin: 'daily-report-management' }); return; }
   // 提出済み: 選択日の提出済み日報一覧へ(status='submitted' は提出済み+確定を含む単一state再query)。
   drmFilters.dateFrom = drmSelectedDate; drmFilters.dateTo = drmSelectedDate;
   document.getElementById('drm-date-from').value = drmSelectedDate;
@@ -13304,9 +13430,7 @@ function init() {
   });
   document.querySelectorAll('#screen-health-admin .filter-chip').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#screen-health-admin .filter-chip').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      healthAdminFilter = btn.dataset.healthFilter;
+      setHealthAdminFilter(btn.dataset.healthFilter || '');
       loadHealthAdminList();
     });
   });
@@ -13690,6 +13814,11 @@ function init() {
     el.addEventListener('click', () => {
       const target = el.getAttribute('data-nav');
       if (el.disabled) return;
+      // 2026-09-05: 件数カード経由(期間指定あり)で開いた後の絞り込みが、メニューの
+      // 「要確認一覧」ボタンから開き直したときに残らないようにする。メニューからの入口は
+      // 「すべての期間」が正しい意味。戻る操作では期間を保持する。
+      const isBackNav = el.classList.contains('back-link') || el.classList.contains('back-to-origin');
+      if (target === 'daily-report-needs-review-admin' && !isBackNav) dailyReportNeedsReviewState = null;
       // 完了画面(screen-done)からの遷移は、完了画面自体を履歴に残さず置き換える
       // (この後さらに「戻る」を押しても完了画面へ戻ってくる=無限ループに見える、を防ぐ)。
       const leavingDone = document.getElementById('screen-done').classList.contains('active');
