@@ -1610,8 +1610,8 @@
                 } else if (m.meeting_time) {
                     chip.append(el('span', 'ac-mt', m.meeting_time));
                 }
-                // 運搬のトラックは呼称だけ。ナンバーは名前を押した詳細で見せる。
-                if (m.truck_id) chip.append(el('span', 'ac-truck', '🚚' + truckShort(m)));
+                // 運搬の車両は呼称だけ。ナンバーは名前を押した詳細で見せる。
+                if (m.vehicle_id) chip.append(el('span', 'ac-vehicle', '🚚' + vehicleShort(m)));
                 // 2026-09-02: 一覧の社員チップから直接操作できるようにした。
                 // 「今日だけ役割を変える」「別現場へ移す」を現場詳細まで開かずに済ませたい、
                 // という実機の要望による。押せることが分かるよう記号を付ける。
@@ -1735,8 +1735,8 @@
                         chip.append(el('span', 'ac-haulmark', '🚚運搬'));
                         chip.append(document.createTextNode(m.name));
                         chip.append(el('span', 'ac-mt', m.time_label || '終日'));
-                        // トラックは呼称だけ。ナンバーは押したときの詳細で見せる。
-                        if (m.truck_id) chip.append(el('span', 'ac-truck', '🚚' + truckShort(m)));
+                        // 車両は呼称だけ。ナンバーは押したときの詳細で見せる。
+                        if (m.vehicle_id) chip.append(el('span', 'ac-vehicle', '🚚' + vehicleShort(m)));
                         // 運んでそのまま働く人は作業員。運搬だけの人が運搬要員。
                         chip.append(el('span', 'ac-role', m.is_haul_only ? '運搬要員' : '作業員'));
                         wrap3.append(chip);
@@ -2742,19 +2742,19 @@
         }
 
         // 画面が持っているメンバー表示用のデータを、保存RPCが受け取る形へ戻す。
-        // トラックマスター。運搬の入力とマスター管理の両方で使うので1か所で持つ。
-        let truckCache = null;
-        async function loadTrucks(includeInactive) {
-            if (!includeInactive && truckCache) return truckCache;
-            const rows = await rpc('assignment_list_trucks',
-                { p_employee_code: me, p_include_inactive: !!includeInactive }) || [];
-            if (!includeInactive) truckCache = rows;
-            return rows;
+        // 車両マスターは社員ポータルが持つ共通マスター(vehicles)。カレンダーは読むだけで、
+        // 独自の車両情報を持たない。登録・編集は社員ポータルの「車両マスター管理」で行う。
+        let vehicleCache = null;
+        async function loadVehicles() {
+            if (vehicleCache) return vehicleCache;
+            vehicleCache = await rpc('portal_list_vehicles',
+                { p_employee_code: me, p_include_inactive: false }) || [];
+            return vehicleCache;
         }
-        function truckShort(m) {
+        function vehicleShort(m) {
             // 一覧では詰め込まない。呼称だけ出し、ナンバーは詳細で見せる。
-            if (!m || !m.truck_id) return '';
-            return m.truck_name || 'トラック';
+            if (!m || !m.vehicle_id) return '';
+            return m.vehicle_name || '車両';
         }
 
         function memberToPayload(x, patch) {
@@ -2767,9 +2767,9 @@
                     assignment_kind: x.assignment_kind || 'work',
                     headcount_role: x.headcount_role || '',
                     headcount_role_label: x.headcount_role_label || '',
-                    // 運搬で使うトラック。人数には入らない情報。
-                    truck_id: x.truck_id || '',
-                    truck_plate: x.truck_plate || '',
+                    // 運搬で使う車両。人数には入らない情報。
+                    vehicle_id: x.vehicle_id || '',
+                    vehicle_plate: x.vehicle_plate || '',
                 };
             } else if (x.member_type === 'subcontractor_company') {
                 base = {
@@ -3835,42 +3835,43 @@
                     row.append(nm, r, del);
                     haulRows.append(row);
 
-                    // 使用トラック。担当者・時間帯のあとに置く(実際の決め方の順序に合わせる)。
-                    const trow = el('div', 'ac-mrow ac-truckrow');
+                    // 使用車両。担当者・時間帯のあとに置く(実際の決め方の順序に合わせる)。
+                    // 選択肢は社員ポータルの車両マスターそのもの。ここでは増やせない。
+                    const trow = el('div', 'ac-mrow ac-vehiclerow');
                     const sel = el('select', 'ac-input');
-                    sel.append(el('option', '', 'トラックを選ぶ'));
+                    sel.append(el('option', '', '車両を選ぶ'));
                     sel.firstChild.value = '';
-                    for (const t of (truckCache || [])) {
+                    for (const t of (vehicleCache || [])) {
                         const o = el('option', '', t.label + (t.ownership === 'lease' ? '（リース）' : ''));
                         o.value = String(t.id);
-                        if (String(m.truck_id || '') === String(t.id)) o.selected = true;
+                        if (String(m.vehicle_id || '') === String(t.id)) o.selected = true;
                         sel.append(o);
                     }
                     // リースはその日のナンバーを入れられるようにする(自社は固定なので出さない)
                     const plate = el('input', 'ac-input');
                     plate.type = 'text';
                     plate.placeholder = 'その日のナンバー（例: 徳島100 う 9999）';
-                    plate.value = m.truck_plate || '';
+                    plate.value = m.vehicle_plate || '';
                     const syncPlate = () => {
-                        const t = (truckCache || []).find((x) => String(x.id) === String(m.truck_id));
+                        const t = (vehicleCache || []).find((x) => String(x.id) === String(m.vehicle_id));
                         plate.style.display = (t && t.ownership === 'lease') ? '' : 'none';
-                        if (!(t && t.ownership === 'lease')) { m.truck_plate = ''; plate.value = ''; }
+                        if (!(t && t.ownership === 'lease')) { m.vehicle_plate = ''; plate.value = ''; }
                     };
                     sel.addEventListener('change', () => {
-                        m.truck_id = sel.value || '';
+                        m.vehicle_id = sel.value || '';
                         syncPlate();
                     });
-                    plate.addEventListener('change', () => { m.truck_plate = plate.value; });
+                    plate.addEventListener('change', () => { m.vehicle_plate = plate.value; });
                     syncPlate();
-                    trow.append(el('div', 'ac-mrowname', '使用トラック'), sel, plate);
+                    trow.append(el('div', 'ac-mrowname', '使用車両'), sel, plate);
                     haulRows.append(trow);
                 }
                 if (!hauls.length) haulRows.append(el('div', 'ac-schedmeta', '運搬がある場合だけ追加してください'));
             }
             haulField.append(haulRows, addHaulBtn);
 
-            // 運搬の行でトラックを選べるように、先に一覧を用意しておく
-            loadTrucks().then(() => { if (haulRows.isConnected) renderHaulRows(); }).catch(() => {});
+            // 運搬の行で車両を選べるように、先に一覧を用意しておく
+            loadVehicles().then(() => { if (haulRows.isConnected) renderHaulRows(); }).catch(() => {});
 
             renderDetailRows();
 
@@ -4573,118 +4574,34 @@
             });
         }
 
-        // 運搬で使うトラックのマスター。社員マスター・現場マスターと同じ考え方で、
-        // ここが唯一の登録場所。配置側はここから選ぶだけで、独自の車両情報を持たない。
-        const TRUCK_TYPES = ['4t', '8t', '10t', 'ユニック', '平ボディ', '4t平', '10tユニック', 'ダンプ'];
-        function openTruckMasterSheet() {
-            sheet('トラックマスター', async (box, api) => {
+        // 車両マスターは社員ポータルが持つ共通マスターへ移した(2026-09-05)。
+        // 配置・運搬だけでなく車両名簿・車検・保険・点検・リース管理などから共通利用するため、
+        // カレンダーが所有せず参照だけする。ここでは編集させず、置き場所だけ案内する。
+        function openVehicleMasterSheet() {
+            sheet('車両マスター', async (box) => {
                 box.append(el('div', 'ac-schedmeta',
-                    '運搬の配置で選べるトラックです。リースはナンバーを空にしておき、'
-                    + '使う日ごとに配置側でその日のナンバーを入力できます。'));
+                    '車両の登録・編集・使用停止は、社員ポータルの「管理 → 車両マスター管理」で行います。'
+                    + 'ここで見えているのは、そこに登録されている使用中の車両です。'));
                 const list = el('div', 'ac-list');
                 box.append(list);
-
-                const draw = async () => {
-                    list.innerHTML = '';
-                    let rows = [];
-                    try { rows = await loadTrucks(true); } catch (e) { /* 下の空表示で伝える */ }
-                    truckCache = null;   // 変更したので次回は取り直す
-                    if (!rows.length) {
-                        list.append(el('div', 'ac-schedmeta', 'まだ1台も登録されていません。'));
-                    }
-                    for (const t of rows) {
-                        const it = el('div', 'ac-listitem' + (t.is_active ? '' : ' ac-dim'));
-                        const title = el('div', 'ac-menutitle', t.name);
-                        if (!t.is_active) title.append(el('span', 'ac-role', '使用停止'));
-                        it.append(title);
-                        const parts = [];
-                        parts.push(t.ownership === 'lease' ? 'リース' : '自社');
-                        if (t.vehicle_type) parts.push(t.vehicle_type);
-                        parts.push(t.plate_number || 'ナンバー未登録（使う日に入力）');
-                        it.append(el('div', 'ac-sub2', parts.join(' / ')));
-                        it.addEventListener('click', () => openTruckEditSheet(t, draw));
-                        list.append(it);
-                    }
-                };
-
-                const add = el('button', 'ac-btn ac-primary', 'トラックを追加する');
-                add.addEventListener('click', () => openTruckEditSheet(null, draw));
-                box.append(add);
-                await draw();
-            });
-        }
-
-        function openTruckEditSheet(truck, onDone) {
-            sheet(truck ? truck.name : 'トラックを追加', (box, api) => {
-                const field = (label, node) => {
-                    const w = el('div', 'ac-field');
-                    w.append(el('div', 'ac-label', label), node);
-                    box.append(w);
-                    return node;
-                };
-                const name = field('呼称（例: 10tユニック）', el('input', 'ac-input'));
-                name.value = truck ? truck.name : '';
-                const plate = field('ナンバー（リースは空でも可）', el('input', 'ac-input'));
-                plate.value = (truck && truck.plate_number) || '';
-                plate.placeholder = '徳島100 あ 1234';
-
-                const ownWrap = el('div', 'ac-row');
-                let ownership = (truck && truck.ownership) || 'own';
-                const ownBtns = {};
-                for (const [v, lb] of [['own', '自社'], ['lease', 'リース']]) {
-                    const b = el('button', 'ac-tok' + (ownership === v ? ' ac-on' : ''), lb);
-                    b.addEventListener('click', () => {
-                        ownership = v;
-                        for (const k of Object.keys(ownBtns)) ownBtns[k].classList.toggle('ac-on', k === v);
-                    });
-                    ownBtns[v] = b;
-                    ownWrap.append(b);
+                let rows = [];
+                try { rows = await loadVehicles(); } catch (e) { /* 下の空表示で伝える */ }
+                if (!rows.length) {
+                    list.append(el('div', 'ac-schedmeta', 'まだ1台も登録されていません。'));
                 }
-                field('区分', ownWrap);
-
-                const type = field('車種・サイズ', el('input', 'ac-input'));
-                type.value = (truck && truck.vehicle_type) || '';
-                const typeRow = el('div', 'ac-row');
-                for (const t of TRUCK_TYPES) {
-                    const b = el('button', 'ac-tok', t);
-                    b.addEventListener('click', () => { type.value = t; });
-                    typeRow.append(b);
+                for (const t of rows) {
+                    const it = el('div', 'ac-listitem');
+                    it.append(el('div', 'ac-menutitle', t.name));
+                    const parts = [t.ownership === 'lease' ? 'リース' : '自社'];
+                    if (t.vehicle_type) parts.push(t.vehicle_type);
+                    if (t.size_class) parts.push(t.size_class);
+                    parts.push(t.plate_number || 'ナンバー未登録（使う日に入力）');
+                    it.append(el('div', 'ac-sub2', parts.join(' / ')));
+                    list.append(it);
                 }
-                box.append(typeRow);
-
-                let active = truck ? truck.is_active : true;
-                const actBtn = el('button', 'ac-tok' + (active ? ' ac-on' : ''), active ? '使用中' : '使用停止');
-                actBtn.addEventListener('click', () => {
-                    active = !active;
-                    actBtn.textContent = active ? '使用中' : '使用停止';
-                    actBtn.classList.toggle('ac-on', active);
-                });
-                field('状態', actBtn);
-
-                const note = field('備考', el('input', 'ac-input'));
-                note.value = (truck && truck.note) || '';
-
-                const save = el('button', 'ac-btn ac-primary', '保存する');
-                save.addEventListener('click', async () => {
-                    if (!String(name.value || '').trim()) { toast('呼称を入力してください'); return; }
-                    try {
-                        await rpc('assignment_upsert_truck', {
-                            p_employee_code: me,
-                            p_truck_id: truck ? truck.id : null,
-                            p_name: name.value,
-                            p_plate_number: plate.value,
-                            p_ownership: ownership,
-                            p_vehicle_type: type.value,
-                            p_is_active: active,
-                            p_note: note.value,
-                        });
-                        truckCache = null;
-                        toast('保存しました');
-                        api.close();
-                        if (onDone) onDone();
-                    } catch (e) { toast(e.message || '保存できませんでした'); }
-                });
-                box.append(save);
+                const a = el('a', 'ac-btn', '社員ポータルを開く');
+                a.href = '../';
+                box.append(a);
             });
         }
 
@@ -4694,7 +4611,7 @@
                 const items = [
                     ['社員の基本役割', '事務・土場・営業など、その社員がふだん何として数えられるか', () => { api.close(); openBaseRoleSheet(); }],
                     ['種別・カテゴリー管理', '色・並び順・人数集計の対象かどうか。新しい種別の追加もここ', () => { api.close(); openCategorySheet(); }],
-                    ['トラックマスター', '運搬で使うトラックの登録。自社・リース、ナンバー、使用停止', () => { api.close(); openTruckMasterSheet(); }],
+                    ['車両マスター', '運搬で選べる車両の確認。登録・編集は社員ポータルの車両マスター管理', () => { api.close(); openVehicleMasterSheet(); }],
                     ['外注会社の表示略称', '月表示で「人手3」のように短く出すための略称', () => { api.close(); openCompanyShortNameSheet(); }],
                     ['メールから抽出された予定候補', 'メール秘書AIが見つけた日付を候補として取り込む', () => { api.close(); openMailCandidateSheet(); }],
                 ];

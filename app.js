@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v146-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T01:04:55.569Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T02:14:46.584Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -285,6 +285,7 @@ const ADMIN_SCREENS = new Set([
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'lucky-admin', 'lucky-preview',
+  'vehicle-admin',
 ]);
 let inAdminMode = false;
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
@@ -8617,6 +8618,112 @@ async function doSaveLicenseType() {
   }
 }
 
+// ---------- 車両マスター管理(管理者) ----------
+// 会社共通の車両名簿。配置カレンダーはここを参照するだけで、独自の車両マスターを持たない。
+// 物理削除は用意しない。使わなくなった車両は使用停止にして残す(過去の配置が読めなくなるため)。
+
+// 車両名・ナンバー・備考は人が自由に入力する値なので、HTMLへ差し込む前に必ず無害化する。
+function vehEsc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+function resetVehicleForm() {
+  document.getElementById('vehicle-edit-id').value = '';
+  document.getElementById('vehicle-name').value = '';
+  document.getElementById('vehicle-plate').value = '';
+  document.getElementById('vehicle-ownership').value = 'own';
+  document.getElementById('vehicle-type').value = '';
+  document.getElementById('vehicle-size').value = '';
+  document.getElementById('vehicle-note').value = '';
+  document.getElementById('vehicle-submit').textContent = '保存する';
+  hideError('vehicle-error');
+}
+
+async function loadVehicleAdminList() {
+  const session = getSession();
+  const listEl = document.getElementById('vehicle-admin-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  resetVehicleForm();
+  try {
+    const rows = await rpc('portal_list_vehicles', { p_employee_code: session.employeeCode, p_include_inactive: true });
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="hint">まだ1台も登録されていません。</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map((v) => `
+      <div class="supply-item" data-id="${v.id}" style="${v.is_active ? '' : 'opacity:.5;'}">
+        <div class="row1"><span>${vehEsc(v.name)}</span><span>${v.is_active ? '使用中' : '使用停止'}</span></div>
+        <div class="row2">${v.ownership === 'lease' ? 'リース' : '自社'}${v.vehicle_type ? ' / ' + vehEsc(v.vehicle_type) : ''}${v.size_class ? ' / ' + vehEsc(v.size_class) : ''} / ${v.plate_number ? vehEsc(v.plate_number) : 'ナンバー未登録（使う日に入力）'}</div>
+        ${v.note ? `<div class="row2">${vehEsc(v.note)}</div>` : ''}
+        <div class="qual-verify-btns">
+          <button type="button" class="edit-vehicle-btn">編集</button>
+          <button type="button" class="reject-btn toggle-vehicle-btn" data-active="${v.is_active}">${v.is_active ? '使用停止にする' : '再開する'}</button>
+        </div>
+      </div>
+    `).join('');
+    const byId = {};
+    rows.forEach((v) => { byId[String(v.id)] = v; });
+    listEl.querySelectorAll('.edit-vehicle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = byId[btn.closest('.supply-item').dataset.id];
+        document.getElementById('vehicle-edit-id').value = v.id;
+        document.getElementById('vehicle-name').value = v.name || '';
+        document.getElementById('vehicle-plate').value = v.plate_number || '';
+        document.getElementById('vehicle-ownership').value = v.ownership === 'lease' ? 'lease' : 'own';
+        document.getElementById('vehicle-type').value = v.vehicle_type || '';
+        document.getElementById('vehicle-size').value = v.size_class || '';
+        document.getElementById('vehicle-note').value = v.note || '';
+        document.getElementById('vehicle-submit').textContent = 'この車両を更新する';
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    });
+    listEl.querySelectorAll('.toggle-vehicle-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const item = btn.closest('.supply-item');
+        try {
+          await rpc('portal_set_vehicle_active', {
+            p_employee_code: session.employeeCode,
+            p_vehicle_id: Number(item.dataset.id),
+            p_active: btn.dataset.active !== 'true',
+          });
+        } catch (e) { showError('vehicle-error', e.message || '変更できませんでした。'); }
+        loadVehicleAdminList();
+      });
+    });
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+async function doSaveVehicle() {
+  const session = getSession();
+  const id = document.getElementById('vehicle-edit-id').value;
+  const name = document.getElementById('vehicle-name').value.trim();
+  hideError('vehicle-error');
+  if (!name) { showError('vehicle-error', '車両名を入力してください。'); return; }
+  const btn = document.getElementById('vehicle-submit');
+  btn.disabled = true;
+  try {
+    await rpc('portal_upsert_vehicle', {
+      p_employee_code: session.employeeCode,
+      p_vehicle_id: id ? Number(id) : null,
+      p_name: name,
+      p_plate_number: document.getElementById('vehicle-plate').value.trim(),
+      p_ownership: document.getElementById('vehicle-ownership').value,
+      p_vehicle_type: document.getElementById('vehicle-type').value.trim(),
+      p_size_class: document.getElementById('vehicle-size').value.trim(),
+      p_is_active: true,
+      p_note: document.getElementById('vehicle-note').value.trim(),
+    });
+    await loadVehicleAdminList();
+  } catch (e) {
+    showError('vehicle-error', e.message || '保存に失敗しました。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---------- 健康診断管理(管理者) ----------
 
 let healthAdminFilter = '';
@@ -13647,6 +13754,11 @@ function init() {
   SCREEN_ENTER_HOOKS['license-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadLicenseTypeAdminList();
+  };
+  document.getElementById('vehicle-submit').addEventListener('click', doSaveVehicle);
+  SCREEN_ENTER_HOOKS['vehicle-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadVehicleAdminList();
   };
   SCREEN_ENTER_HOOKS['health-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }

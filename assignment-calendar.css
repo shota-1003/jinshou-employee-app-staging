@@ -1133,10 +1133,10 @@
 
 /* --- 運搬のトラック表示(2026-09-05) ------------------------------------ */
 /* 一覧では呼称だけ。ナンバーは名前を押した詳細で見せる(情報を詰め込みすぎない) */
-.ac-truck { margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--ac-muted);
+.ac-vehicle { margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--ac-muted);
   background: rgba(0,0,0,.05); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
-.ac-truckrow { align-items: center; gap: 6px; }
-.ac-truckrow .ac-input { flex: 1; min-width: 0; }
+.ac-vehiclerow { align-items: center; gap: 6px; }
+.ac-vehiclerow .ac-input { flex: 1; min-width: 0; }
 .ac-dim { opacity: .55; }
 
 /* --- 名前タップ → 連絡先(2026-09-05) ------------------------------------ */

@@ -2013,6 +2013,11 @@
         <div class="menu-item-body">使用目的マスター管理<span class="desc">経費の使用目的を追加・編集・無効化</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="vehicle-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">車両マスター管理<span class="desc">会社の車両名簿。自社・リース、ナンバー、使用停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="site-admin">
         <span class="icon-slot" data-icon="map-pin"></span>
         <div class="menu-item-body">新規現場の確認<span class="desc">社員が入力した新しい現場を承認</span></div>
@@ -2379,6 +2384,39 @@
     </div>
     <div class="section-title">登録済みの使用目的</div>
     <div id="purpose-admin-list"></div>
+  </section>
+
+  <!-- 車両マスター管理(管理者) -->
+  <!-- 会社の車両名簿。配置カレンダーの運搬はこの一覧を参照するだけで、独自の車両情報を持たない。
+       将来ここへ車検期限・自賠責/任意保険・点検・修理履歴・リース期限・必要免許を足していく。 -->
+  <section id="screen-vehicle-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">車両マスター管理</div>
+    <div class="hint" style="margin-bottom:12px;">会社の車両の名簿です。配置カレンダーの運搬で選べる車両は、ここに「使用中」で登録されているものです。使わなくなった車両は消さずに「使用停止」にしてください（過去の配置の記録が読めなくなるため）。</div>
+    <div class="card">
+      <div class="form-title" style="font-size:15px;">車両を追加</div>
+      <input type="hidden" id="vehicle-edit-id">
+      <label for="vehicle-name">車両名 / 呼称</label>
+      <input type="text" id="vehicle-name" placeholder="例: 10tユニック">
+      <label for="vehicle-plate">ナンバー</label>
+      <input type="text" id="vehicle-plate" placeholder="例: 徳島100 あ 1234">
+      <div class="hint-inline">リース車両でナンバーが決まっていない場合は空のままにしてください。使う日ごとに配置カレンダー側でその日のナンバーを入力できます。</div>
+      <label for="vehicle-ownership">所有区分</label>
+      <select id="vehicle-ownership">
+        <option value="own">自社</option>
+        <option value="lease">リース</option>
+      </select>
+      <label for="vehicle-type">車種</label>
+      <input type="text" id="vehicle-type" placeholder="例: ユニック / 平ボディ / ダンプ">
+      <label for="vehicle-size">サイズ / 積載区分</label>
+      <input type="text" id="vehicle-size" placeholder="例: 4t / 8t / 10t">
+      <label for="vehicle-note">備考</label>
+      <input type="text" id="vehicle-note" placeholder="例: 3月に車検">
+      <div class="error" id="vehicle-error"></div>
+      <button id="vehicle-submit">保存する</button>
+    </div>
+    <div class="section-title">登録済みの車両</div>
+    <div id="vehicle-admin-list"></div>
   </section>
 
   <!-- 新規現場の確認(管理者) -->
