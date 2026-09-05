@@ -177,7 +177,10 @@ function bindEvents() {
   $('pin-entry-switch').addEventListener('click', () => { showScreen('welcome'); });
 
   // ホーム
-  $('home-attendance-btn').addEventListener('click', openAttendance);
+  // 2026-09-06 根本原因: 関数をそのままハンドラに渡すと第1引数に click の Event が入り、
+  // openAttendance(targetDate) が Event を日付として送って全 RPC が 22007(invalid date)になっていた
+  // (本番ログ: invalid input syntax for type date: "{\"isTrusted\":true}")。必ず引数なしで呼ぶ。
+  $('home-attendance-btn').addEventListener('click', () => openAttendance());
   $('home-profile-btn').addEventListener('click', openProfile);
   $('home-logout-btn').addEventListener('click', doLogout);
 
@@ -702,6 +705,9 @@ function renumberAttBlocks() {
 let attTargetDate = null; // 訂正時は対象日を指定(nullなら当日)
 let attOrigin = 'home';   // 提出完了後の戻り先(home / history)
 async function openAttendance(targetDate, origin) {
+  // 防御: 文字列の YYYY-MM-DD 以外(Event オブジェクト等)が渡されても当日にする(2026-09-06 の 22007 事故の再発防止)。
+  if (typeof targetDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) targetDate = null;
+  if (typeof origin !== 'string') origin = null;
   attTargetDate = targetDate || todayJST();
   attOrigin = origin || 'home';
   showScreen('attendance');
