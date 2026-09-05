@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v150-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T12:22:00.256Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T12:27:33.480Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -431,12 +431,15 @@ const ADMIN_SCREENS = new Set([
 ]);
 let inAdminMode = false;
 
-// 管理者画面の論理的な親画面(PARENT_ROUTE、2026-09-05 ユーザー指示)。
-// 管理者画面の「戻る」はブラウザ履歴(どこから来たか)に任せず、この表で定めた親画面へ必ず戻る。
-// 同じ画面を複数の入口(ダッシュボード/日報管理/人員・台帳管理/HOMEの件数カード)から開いても
-// 「戻る先がバラバラ」にならないための単一の正。index.html の各管理者画面の戻るボタン(data-nav)も
-// この表と一致させる(scripts/audit-portal-nav.js の auditParentRoutes() が不一致を検出する)。
-// 個人側の画面(申請・履歴など)は従来どおり履歴ベース(goBackToOrigin)のまま。
+// 管理者画面の論理的な親画面(PARENT_ROUTE)。
+//
+// 【2026-09-05 改訂・重要】当初(同日午前)は「管理者画面の戻る先はこの表で固定する」という
+// 設計だったが、ユーザーから「原則は『入った場所へ戻る』。ダッシュボードのカードから開いた
+// 未提出/要確認一覧の戻るが『日報管理に戻る』になっているのは誤り」と再指摘された。
+// 固定表は入口が複数ある画面(要確認一覧・未提出一覧・申請詳細・外注管理など)で必ず
+// 入口と食い違うため、この表は **入口が分からないときの既定値(deep link・リロード・
+// ウィジェット起動)** へ格下げする。通常の戻り先は navStack(下記)の origin/returnTo が決める。
+// index.html の戻るボタンの data-nav は、そのさらに後ろの最終フォールバックとして残す。
 const PARENT_ROUTE = Object.freeze({
   'admin-dashboard': 'menu',
   // ダッシュボード直下(管理機能の一覧から開く画面)
@@ -476,6 +479,116 @@ function currentScreenId() {
 // 無い(リロード直後等)ことを示す。
 let appNavDepth = 0;
 
+// ============================================================
+// 共通ナビゲーション状態 (navStack、2026-09-05 ユーザー指示)
+//
+// 原則:「入った場所へ戻る」。画面ごとに「ホームに戻る」「日報管理に戻る」といった固定の
+// 戻り先を書くのをやめ、遷移のたびに 1 件のナビゲーション状態を積む。戻るボタンは常に
+// この状態から戻り先を決める。ブラウザ/iOS のスワイプバック(popstate)とも同じ状態を共有
+// するため、ボタンとスワイプで戻り先が食い違わない。
+//
+//   { screen, origin, returnTo, selectedDate, filter, params }
+//     screen       … その画面ID
+//     origin       … 実際にこの画面を開いた入口の画面ID(戻る先の第一候補)
+//     returnTo     … 呼び出し側が明示指定した戻り先(origin より優先。完了画面・申請詳細など)
+//     selectedDate … その画面が持つ選択日(日報管理→未提出一覧 などで引き継ぐ入れ物)
+//     filter       … その画面が持つ絞り込み条件(同上)
+//     params       … その他の任意の引き継ぎ値
+//
+// 日付・filter の中身をどう使うかは各画面の担当(B)に委ねる。ここは「運ぶ入れ物」と
+// 「戻り先の決定」だけを持つ。
+// ============================================================
+let navStack = [];
+
+function navTop() { return navStack.length ? navStack[navStack.length - 1] : null; }
+// 現在画面のナビゲーション状態(selectedDate / filter / params の受け渡し口)。
+function navCurrent() { return navTop() || null; }
+function screenExists(id) { return !!(id && document.getElementById(`screen-${id}`)); }
+
+function makeNavEntry(id, nav, defaultOrigin, inherit) {
+  const pick = (key, fallback) => (nav && nav[key] !== undefined ? nav[key] : fallback);
+  return {
+    screen: id,
+    origin: pick('origin', defaultOrigin || null),
+    returnTo: pick('returnTo', null),
+    selectedDate: pick('selectedDate', inherit ? (inherit.selectedDate || null) : null),
+    filter: pick('filter', inherit ? (inherit.filter || null) : null),
+    params: pick('params', inherit ? (inherit.params || null) : null),
+  };
+}
+
+// 「◯◯に戻る」のラベルは戻り先の画面名から動的に作る。画面名は index.html の .form-title を
+// 正とし(名前の表を二重管理しない)、form-title が無い・動詞的で戻り先の呼び名に向かない
+// 画面だけをここで上書きする。
+const BACK_LABEL_OVERRIDE = Object.freeze({
+  menu: 'ホーム', 'menu-apply': '申請一覧', myinfo: '自分の情報',
+  'admin-dashboard': 'ダッシュボード', 'expense-select': '経費',
+  'daily-report': '日報入力', 'employee-detail': '社員詳細',
+  'loan-request': '入力', 'my-daily-reports': '日報提出履歴',
+  'assignment-calendar': '配置カレンダー', events: '社内イベント',
+  'anon-thread': '相談', 'anon-admin-thread': '相談', 'anon-done': '匿名相談',
+  'joyo-denpyo-print': '常用伝票', 'event-detail': '社内イベント', done: '完了',
+});
+const screenLabelCache = {};
+function screenLabel(id) {
+  if (!id) return null;
+  if (BACK_LABEL_OVERRIDE[id]) return BACK_LABEL_OVERRIDE[id];
+  if (id in screenLabelCache) return screenLabelCache[id];
+  const sec = document.getElementById(`screen-${id}`);
+  const t = sec ? sec.querySelector('.form-title') : null;
+  const label = t ? t.textContent.replace(/\s+/g, ' ').trim() : '';
+  screenLabelCache[id] = label || null;
+  return screenLabelCache[id];
+}
+
+// 戻り先の決定(単一の正)。優先順位は次のとおり。
+//   1. returnTo   … 呼び出し側が明示した戻り先
+//   2. origin     … 実際に入ってきた入口(=「入った場所へ戻る」の本体)
+//   3. PARENT_ROUTE … 入口が分からないとき(deep link・リロード・ウィジェット起動)の既定
+//   4. data-nav   … index.html に書かれた最終フォールバック
+function resolveBackTarget(fallbackTarget) {
+  const cur = currentScreenId();
+  const top = navTop();
+  if (top && top.screen === cur) {
+    if (top.returnTo && screenExists(top.returnTo)) return { target: top.returnTo, source: 'returnTo' };
+    if (top.origin && top.origin !== cur && screenExists(top.origin)) return { target: top.origin, source: 'origin' };
+  }
+  if (cur && PARENT_ROUTE[cur] && screenExists(PARENT_ROUTE[cur])) return { target: PARENT_ROUTE[cur], source: 'parent-route' };
+  if (fallbackTarget && screenExists(fallbackTarget)) return { target: fallbackTarget, source: 'data-nav' };
+  return { target: 'menu', source: 'home' };
+}
+
+// 表示中の画面の戻るボタンのラベルを、実際の戻り先から作り直す。
+// (固定文言「日報管理に戻る」等が入口と食い違う不具合の再発防止。showScreen の最後に呼ぶ)
+function updateBackLabel(id) {
+  const sec = document.getElementById(`screen-${id}`);
+  if (!sec) return;
+  sec.querySelectorAll('.back-link, .back-to-origin').forEach((btn) => {
+    if (btn.dataset.staticLabel === undefined) btn.dataset.staticLabel = btn.textContent.replace(/\s+/g, ' ').trim();
+    const name = screenLabel(resolveBackTarget(btn.getAttribute('data-nav')).target);
+    btn.textContent = name ? `${name}に戻る` : btn.dataset.staticLabel;
+  });
+}
+
+// 「戻る」の実行。履歴の1つ前が戻り先と同じなら history.back() を使う(iOS のスワイプバックと
+// 完全に同じ経路になり、ボタンとスワイプで結果が食い違わない)。一致しない場合(deep link・
+// returnTo が履歴と違う場合)だけ、履歴を伸ばさない置き換え遷移で戻る。
+function goBack(fallbackTarget) {
+  navReturn(resolveBackTarget(fallbackTarget).target);
+}
+
+// 「保存しました」「承認しました」の直後に元の画面へ返すときは、必ずこれを使う(showScreen を
+// 直接呼ばない)。showScreen(親) は *前進* 扱いになるため、親画面の入口(origin)が保存フォーム側に
+// 書き換わり、その親から「戻る」を押すと送信済みフォームへ再入場してしまう(二重送信の誘発)。
+// 履歴の1つ前が戻り先ならブラウザの戻ると同じ経路(history.back)で返し、そうでなければ
+// 履歴を伸ばさない置き換えで返す。
+function navReturn(target) {
+  const prev = navStack.length >= 2 ? navStack[navStack.length - 2] : null;
+  if (appNavDepth > 0 && prev && prev.screen === target) { history.back(); return; }
+  if (target === 'menu') { enterMenu(true); return; }
+  showScreen(target, { replace: true, nav: { origin: null } });
+}
+
 function showScreen(id, opts) {
   opts = opts || {};
   document.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
@@ -511,26 +624,56 @@ function showScreen(id, opts) {
   document.querySelectorAll('.admin-bottom-nav-item').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-nav') === id);
   });
+  // 既存の一時変数(dailyReportPrefillDate)もナビゲーション状態(selectedDate)へ載せる。
+  // 個別画面の呼び出し側を書き換えずに、選択日をスタックで運べるようにするための橋渡し。
+  if (id === 'daily-report' && typeof dailyReportPrefillDate === 'string' && dailyReportPrefillDate
+      && !(opts.nav && opts.nav.selectedDate)) {
+    opts.nav = Object.assign({}, opts.nav, { selectedDate: dailyReportPrefillDate });
+  }
   if (!opts.fromPopstate && !preAuthScreens.includes(id)) {
+    // ナビゲーション状態(navStack)と history を必ず同じ操作で更新する。
+    // history.state に entry ごと載せることで、リロード・スワイプバック後も
+    // 「どこから入ったか」を失わない。
     if (opts.replace) {
       // 完了画面(screen-done)への遷移・そこからの離脱に使う。pushStateすると、
       // 送信フォーム→完了画面→次の画面、と積み上がった履歴を「戻る」で辿るたびに
       // 完了画面へ戻ってきてしまう(無限ループに見える)・フォーム画面へ戻って
       // 二重送信を誘発する、という2つの問題が起きるため、履歴を積まずに置き換える。
-      history.replaceState({ screen: id }, '', location.pathname + location.search);
+      const idx = Math.max(0, navStack.length - 1);
+      const replaced = navStack[idx] || null;
+      const entry = makeNavEntry(id, opts.nav, replaced ? replaced.origin : null, replaced);
+      navStack[idx] = entry;
+      navStack.length = idx + 1;
+      history.replaceState({ screen: id, navIndex: idx, nav: entry }, '', location.pathname + location.search);
     } else {
-      history.pushState({ screen: id }, '', location.pathname + location.search);
+      const prevEntry = navTop();
+      const entry = makeNavEntry(id, opts.nav, prevEntry ? prevEntry.screen : null, null);
+      navStack.push(entry);
+      history.pushState({ screen: id, navIndex: navStack.length - 1, nav: entry }, '', location.pathname + location.search);
       appNavDepth += 1;
     }
   }
   window.scrollTo(0, 0);
   if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
+  // 戻るボタンのラベルは入口から作る。enterフックが固定文言を書き込む画面(申請詳細など)も
+  // あるため、フックのあとに実行して必ずこちらを最終値にする。
+  updateBackLabel(id);
 }
 
 window.addEventListener('popstate', (e) => {
   if (!getSession()) return; // ログイン前はブラウザ標準の戻る動作に任せる
   if (appNavDepth > 0) appNavDepth -= 1;
   const id = (e.state && e.state.screen) || 'menu';
+  // ブラウザ/iOS スワイプの戻る・進むでも navStack を history と同じ位置へ揃える
+  // (ボタンの戻る先とスワイプの戻る先を必ず一致させるための同期点)。
+  const idx = e.state && typeof e.state.navIndex === 'number' ? e.state.navIndex : 0;
+  if (e.state && e.state.nav) {
+    navStack.length = idx;
+    navStack[idx] = e.state.nav;
+    navStack.length = idx + 1;
+  } else {
+    navStack.length = Math.min(navStack.length, idx + 1);
+  }
   if (document.getElementById(`screen-${id}`)) showScreen(id, { fromPopstate: true });
 });
 
@@ -539,10 +682,8 @@ window.addEventListener('popstate', (e) => {
 // 指示に対応する。history.pushStateは画面遷移のたびに既に積んでいるため、本当に前の画面が
 // あるとわかっている場合(appNavDepthで管理)だけhistory.back()を使い、直接この画面を開いた
 // (リロード等でアプリ内の遷移履歴が無い)場合はdata-navの固定先へ安全にフォールバックする。
-function goBackToOrigin(fallbackTarget) {
-  if (appNavDepth > 0) { history.back(); return; }
-  showScreen(fallbackTarget);
-}
+// 2026-09-05: 共通ナビゲーション(navStack)へ一本化した。旧名は既存の呼び出し互換のため残す。
+function goBackToOrigin(fallbackTarget) { goBack(fallbackTarget); }
 
 // 各種申請の完了画面(screen-done)は共通だが、「メニューに戻る」を常にホームへ
 // 固定すると申請のたびにホームへ戻されて不便なため、申請元の画面へ戻れるように
@@ -559,10 +700,15 @@ function revealReasonBox(boxEl) {
 
 function showDone(message, returnTo) {
   document.getElementById('done-message').textContent = message;
-  document.querySelector('#screen-done [data-nav]').setAttribute('data-nav', returnTo || 'menu');
+  const doneBtn = document.querySelector('#screen-done [data-nav]');
+  const doneTarget = returnTo || 'menu';
+  doneBtn.setAttribute('data-nav', doneTarget);
+  // 完了画面の遷移先も「◯◯に戻る」を戻り先から作る(固定文言「メニューに戻る」をやめる)。
+  const doneName = screenLabel(doneTarget);
+  doneBtn.textContent = doneName ? `${doneName}に戻る` : 'メニューに戻る';
   // 送信元のフォーム画面をそのまま履歴に残さず完了画面へ置き換える(戻るでフォームへ
   // 戻って二重送信、を防ぐ)。
-  showScreen('done', { replace: true });
+  showScreen('done', { replace: true, nav: { returnTo: doneTarget } });
 }
 
 function showError(elId, message) {
@@ -3553,7 +3699,7 @@ let currentMyRequestDetail = null;
 async function openMyRequestDetail(requestId, returnTo) {
   returnTo = MRD_RETURN_LABEL[returnTo] ? returnTo : 'history';
   currentMyRequestDetail = { requestId: Number(requestId), returnTo };
-  showScreen('my-request-detail');
+  showScreen('my-request-detail', { nav: { returnTo: returnTo === 'home' ? 'menu' : returnTo } });
 }
 
 // showScreen('my-request-detail')のたびにSCREEN_ENTER_HOOKSから呼ばれる(戻る/進むを含む)。
@@ -6834,7 +6980,7 @@ async function doSubmitExpensePayment() {
     // openEmployeeMonthlyDetail自身がshowScreen('employee-monthly-detail')を呼ぶため
     // 再度フックが発火して無限ループになるため使わない。
     if (emdContext) await openEmployeeMonthlyDetail(emdContext.code, emdContext.name, emdContext.year, emdContext.month);
-    else showScreen('employee-summary');
+    else navReturn('employee-summary');
   } catch (e) {
     showError('ep-error', e.message || '登録に失敗しました。');
   } finally {
@@ -7240,7 +7386,7 @@ async function doSaveEmployeeBasic() {
       // 空文字は「自動判定へ戻す」。RPC側がその意味で受け取る(nullは変更しない)。
       p_headcount_category: document.getElementById('employee-edit-headcount-category').value,
     });
-    showScreen('employee-detail');
+    navReturn('employee-detail');
     await loadEmployeeDetailBasic();
   } catch (e) {
     showError('employee-edit-error', e.message || '保存に失敗しました。');
@@ -9472,7 +9618,7 @@ async function doSaveAdminHealthRecord() {
       p_needs_retest: document.getElementById('health-admin-retest').checked,
       p_note: document.getElementById('health-admin-note').value.trim() || null,
     });
-    showScreen('employee-detail');
+    navReturn('employee-detail');
     await loadEmployeeDetailQual();
   } catch (e) {
     showError('health-admin-error', e.message || '保存に失敗しました。');
@@ -9949,7 +10095,8 @@ async function resetDailyReportForm() {
   // 日報履歴の詳細画面から「この日の内容を修正する」で来た場合は、今日ではなくその日を開く
   // (resetDailyReportFormは画面遷移のたびに自動で走るため、ここで両方が競合してentryが
   // 二重に読み込まれる不具合を避けるため、ここで一本化する)。
-  const target = dailyReportPrefillDate || todayJST();
+  const navSel = navCurrent() && navCurrent().screen === 'daily-report' ? navCurrent().selectedDate : null;
+  const target = dailyReportPrefillDate || navSel || todayJST();
   dailyReportPrefillDate = null;
   dateInput.value = target;
   loadDailyReportForDate(target);
@@ -11081,7 +11228,7 @@ function renderRequestDetailActions(sourceType, r) {
       const session = getSession();
       try {
         await rpc('admin_decide_supply_request', { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_rejection_reason: reason });
-        showScreen('admin-all-requests');
+        navReturn('admin-all-requests');
       } catch (e) { showError('rdetail-error', e.message || '処理に失敗しました。'); }
     });
   } else if (sourceType === 'entertainment_preapproval') {
@@ -11105,7 +11252,7 @@ function renderRequestDetailActions(sourceType, r) {
       const reasonEl = document.getElementById('rdetail-ent-reason');
       try {
         await rpc('admin_decide_entertainment_preapproval', { p_admin_employee_code: session.employeeCode, p_id: currentRequestDetail.sourceId, p_action: 'approved', p_exception_reason: reasonEl ? reasonEl.value.trim() : null });
-        showScreen('admin-all-requests');
+        navReturn('admin-all-requests');
       } catch (e) { showError('rdetail-error', e.message || '処理に失敗しました。'); }
     });
     document.getElementById('rdetail-ent-reject').addEventListener('click', () => {
@@ -11116,7 +11263,7 @@ function renderRequestDetailActions(sourceType, r) {
       const reason = document.getElementById('rdetail-ent-reject-reason').value.trim();
       try {
         await rpc('admin_decide_entertainment_preapproval', { p_admin_employee_code: session.employeeCode, p_id: currentRequestDetail.sourceId, p_action: 'rejected', p_exception_reason: reason || null });
-        showScreen('admin-all-requests');
+        navReturn('admin-all-requests');
       } catch (e) { showError('rdetail-error', e.message || '処理に失敗しました。'); }
     });
   } else if (sourceType === 'qualification') {
@@ -11139,7 +11286,7 @@ function renderRequestDetailActions(sourceType, r) {
       try {
         if (sourceType === 'site_proposal') await rpc(rejectRpc, { p_admin_employee_code: session.employeeCode, p_site_id: currentRequestDetail.sourceId, p_action: action });
         else await rpc(rejectRpc, { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_note: reason || null });
-        showScreen('admin-all-requests');
+        navReturn('admin-all-requests');
       } catch (e) { showError('rdetail-error', e.message || '処理に失敗しました。'); }
     };
     document.getElementById('rdetail-approve').addEventListener('click', () => decide('approved', null));
@@ -11159,7 +11306,7 @@ async function doRequestDetailDecide(action, reason) {
   hideError('rdetail-error');
   try {
     await rpc('admin_decide_request', { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_rejection_reason: reason });
-    showScreen('admin-all-requests');
+    navReturn('admin-all-requests');
   } catch (e) {
     showError('rdetail-error', e.message || '処理に失敗しました。');
   }
@@ -11662,7 +11809,8 @@ function openDailyReportPeople(bucket, opts) {
   dailyReportPeopleState = { bucket, title: t, date: nav.date, origin: nav.origin, returnTo: nav.returnTo };
   // 「日報管理に戻る」で開く画面が別の日を表示しないよう、選択日も同じ日に揃える。
   drmSelectedDate = nav.date;
-  showScreen('daily-report-people');
+  // 共通 Navigation(C): 日付・filter・戻り先を nav 状態として運ぶ(入った場所へ戻る)。
+  showScreen('daily-report-people', { nav: { selectedDate: nav.date, filter: bucket, returnTo: nav.returnTo } });
 }
 async function loadDailyReportPeople() {
   if (!dailyReportPeopleState) return;
@@ -14089,21 +14237,11 @@ function init() {
       // 完了画面(screen-done)からの遷移は、完了画面自体を履歴に残さず置き換える
       // (この後さらに「戻る」を押しても完了画面へ戻ってくる=無限ループに見える、を防ぐ)。
       const leavingDone = document.getElementById('screen-done').classList.contains('active');
-      // 管理者画面の「戻る」は論理的な親画面(PARENT_ROUTE)へ固定(2026-09-05)。履歴の遷移元やボタンの
-      // data-nav ではなく表を正とする(index.html 側の data-nav は表と一致させ、監査で検出する)。
+      // 「戻る」系のコントロール(back-link / back-to-origin)は、画面ごとの固定 data-nav ではなく
+      // 共通ナビゲーション状態(navStack)から戻り先を決める = 入った場所へ戻る(2026-09-05 改訂)。
+      // data-nav は入口が分からないときの最終フォールバックとしてだけ使う。
       const isBackControl = el.classList.contains('back-link') || el.classList.contains('back-to-origin');
-      if (isBackControl) {
-        const cur = currentScreenId();
-        if (cur && PARENT_ROUTE[cur]) {
-          // 「戻る」は履歴を積まない(replace)。push すると、戻るを押すたびに履歴が伸び、ブラウザの戻るで
-          // いま離れた画面へ再入場してしまう(レビュー指摘 2026-09-05)。従来の history.back() と同じく
-          // 履歴が伸びないことを nav-flow(history.length 前後比較)で検証する。
-          if (PARENT_ROUTE[cur] === 'menu') { enterMenu(true); return; }
-          showScreen(PARENT_ROUTE[cur], { replace: true });
-          return;
-        }
-      }
-      if (el.classList.contains('back-to-origin')) { goBackToOrigin(target); return; }
+      if (isBackControl) { goBack(target); return; }
       if (target === 'menu') { enterMenu(leavingDone); return; }
       if (target === 'expense') { showScreen('expense-select', { replace: leavingDone }); return; }
       if (target === 'expense-advance') { enterExpenseScreen('employee_advance'); return; }
@@ -14417,8 +14555,13 @@ function init() {
     jdsPartnerFilter = '';
     document.getElementById('jds-site-filter').value = '';
     document.getElementById('jds-company-filter').value = '';
-    document.getElementById('jds-partner-filter').value = '';
-    document.getElementById('jds-range-result').style.display = 'none';
+    // jds-partner-filter は index.html に存在しない(app.js 側にだけ残った参照)。
+    // 無条件に .value を書くと常用台帳集計を開くたびに TypeError で入場処理が途中終了し、
+    // 月表示と集計の読み込みが走らなくなる(2026-09-05、ナビ横断テスト中に検出)。
+    const jdsPartnerEl = document.getElementById('jds-partner-filter');
+    if (jdsPartnerEl) jdsPartnerEl.value = '';
+    const jdsRangeEl = document.getElementById('jds-range-result');
+    if (jdsRangeEl) jdsRangeEl.style.display = 'none';
     updateJdsMonthDisplay();
     loadJoyoDenpyoSummary();
   };

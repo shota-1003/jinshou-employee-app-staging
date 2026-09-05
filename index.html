@@ -2501,7 +2501,8 @@
   <!-- 2026-08-28: セキュリティ強化。新しい端末からの利用は管理者承認制にしたため、
        承認待ち一覧をここで確認・承認/却下する。 -->
   <section id="screen-device-approval-admin" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <!-- 入口は管理者ダッシュボードのみ。入口不明時(deep link/リロード)の既定もそこへ揃える。 -->
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">端末承認</div>
     <div class="hint" style="margin:0 0 10px;">新しい端末からポータルを開いた社員が一覧に表示されます。本人からの申請であることを確認してから承認してください。</div>
     <div id="device-approval-list"><div class="hint">読み込み中...</div></div>
