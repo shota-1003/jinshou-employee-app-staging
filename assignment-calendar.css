@@ -1169,3 +1169,13 @@
 .ac-nophone { margin-top: 10px; padding: 10px 12px; border-radius: 8px; text-align: center;
   background: rgba(0,0,0,.05); color: var(--ac-muted); font-size: 13px; font-weight: 700; }
 .ac-nophone-inline { color: var(--ac-muted); font-size: 13px; }
+
+/* 月を切り替えたときに、動いた向きへ短く滑らせる。
+   何の反応もなく中身だけ差し替わると、切り替わったことが分かりにくい(2026-09-05 実機指摘)。 */
+@keyframes ac-slide-next { from { opacity: .3; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+@keyframes ac-slide-prev { from { opacity: .3; transform: translateX(-16px); } to { opacity: 1; transform: none; } }
+.ac-grid.ac-slidenext { animation: ac-slide-next .18s ease-out; }
+.ac-grid.ac-slideprev { animation: ac-slide-prev .18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ac-grid.ac-slidenext, .ac-grid.ac-slideprev { animation: none; }
+}

@@ -338,11 +338,15 @@
             return b;
         }
 
+        // 月を切り替えたとき、どちら向きに動いたかを覚えておく。
+        // 何の動きもなく中身だけ差し替わると、切り替わったこと自体が分かりにくい。
+        let monthSlide = 0;
         function shiftMonth(delta) {
             let y = state.year, m = state.month + delta;
             if (m < 1) { m = 12; y -= 1; }
             if (m > 12) { m = 1; y += 1; }
             state.year = y; state.month = m;
+            monthSlide = delta;
             syncSelectedToMonth();
             // 月を切り替える操作なので、スマホでは月全体表示に戻して見せる。
             if (!isWide() && state.view !== 'me') state.mobileMode = 'month';
@@ -826,26 +830,37 @@
 
         // 月表示の行の高さ。**全週そろえる**。高さはその月の中身から決める。
         //
-        // ここは2回作り直している。実機で使った結果、両極端がどちらも駄目だった。
-        //   1回目「週ごとに高さを変える」→ 予定の多い週が伸び、他の週が画面外へ出て月が読めない
-        //   2回目「画面に6週を押し込む」  → 空いている週が場所を取り、仕事のある週が
-        //                                  「+8」「+10」で切れる(2026年8月の実データで確認)
+        // ここは3回作り直している。実機で使った結果、前の2つはどちらも駄目だった。
+        //   1回目「週ごとに高さを変える」  → 予定の多い週が伸び、他の週が画面外へ出て月が読めない
+        //   2回目「いちばん忙しい日に全週を合わせる」
+        //        → 18件の日が1つあるだけで全週が252pxになり、予定1件の週まで同じ高さの
+        //          白い箱になった。月ぜんぶが1.5画面ぶんに伸び、スクロールしても白ばかり
+        //          見える(2026年9月の実データで確認)。
         //
-        // そこで、高さは全週そろえたまま、**その月のいちばん忙しい週**に合わせて決める。
-        // 画面に収まらなければ縦にスクロールする。空いている月は画面いっぱいまで広げる。
-        // これなら「行の高さは揃っている」「仕事のある週が切れない」を両立できる。
-        // 1日だけ極端に多い月で無限に伸びないよう、上限は設ける(超えた日は「+N」)。
+        // 3回目の考え方: **基準は「月ぜんぶが1画面に収まる高さ」**。画面は余さず使い、
+        // 下に白を残さない。そのうえで「その月のふつうの日(中央値)」が入りきらないときだけ
+        // 少し伸ばす。伸ばしてよいのは1画面の1.4倍まで。
+        // これで「1日だけ極端に多い日」に月ぜんぶが引きずられなくなる。
+        // 入りきらない日は「+N」を出し、その日をタップすれば下の一覧で全部見られる。
         function weekHeights(cells, byDate, holidays, layout) {
             const weeks = Math.ceil(cells.length / 7);
-            let need = 0;
+            // 予定のある日だけを数える。0件の日を混ぜると中央値が0に張り付く。
+            const counts = [];
             for (const date of cells) {
                 if (!date) continue;
                 const n = (byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0);
-                if (n > need) need = n;
+                if (n > 0) counts.push(n);
             }
-            const want = layout.num + (need * layout.row) + 4;
-            // 下限は「画面に6週が収まる高さ」。空いている月で下半分が真っ白にならないようにする。
-            const h = Math.max(layout.cell, Math.min(layout.max, want));
+            counts.sort((a, b) => a - b);
+            const typical = counts.length ? counts[Math.floor((counts.length - 1) / 2)] : 0;
+            // 画面にちょうど収まる高さ。ここが基準で、下限でもある。
+            const fit = Math.floor(layout.available / weeks);
+            // ふつうの日が切れない高さ。
+            const want = layout.num + (typical * layout.row) + 4;
+            // 伸ばしてよい上限。スクロールは1画面の4割ぶんで終わる。
+            const grown = Math.floor((layout.available * 1.4) / weeks);
+            const h = Math.max(layout.min,
+                Math.min(layout.max, Math.max(fit, Math.min(want, grown))));
             return new Array(weeks).fill(h);
         }
 
@@ -883,6 +898,10 @@
                 : Math.max(2, Math.floor((rowH[w] - layout.num) / layout.row)));
 
             const grid = el('div', 'ac-grid');
+            if (monthSlide) {
+                grid.classList.add(monthSlide > 0 ? 'ac-slidenext' : 'ac-slideprev');
+                monthSlide = 0;
+            }
             grid.style.gridTemplateRows = rowH.map((h) => `${h}px`).join(' ');
             attachSwipe(grid);
             const t = todayJST();
