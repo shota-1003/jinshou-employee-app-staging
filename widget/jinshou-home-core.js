@@ -47,7 +47,7 @@ const FAMILY_DAYS = {
 // 画面に出す版番号。iPhoneへ届いたのが古い版かどうかを、実機を見ただけで判別するため。
 // 見た目を変えたら必ず1つ上げる(2026-09-05、届いていた版が古く「変わっていない」と
 // 見えた実例があったため)。
-const WIDGET_VERSION = 'v5';
+const WIDGET_VERSION = 'v6';
 
 function isLockScreen(family) {
     return String(family || '').startsWith('accessory');
@@ -77,14 +77,17 @@ function timeLine(item) {
 }
 
 /**
- * 誰と行くか。サーバが返す members(自分以外のその現場のメンバー)をそのまま出す。
+ * 誰と行くか。サーバが返す members をそのまま出す。
+ * members は **自分が先頭**で、運搬で入っている人には🚚が付く。
+ * 自分が運搬担当の日に「あなたがトラックに乗る」と分かるようにするため、
+ * 自分も必ず含める(2026-09-06 実機指摘)。
  * ロック画面用の minimal では members が返らないので、その場合は空になる。
- * 長すぎると行が潰れるので、文字数で切って「ほかN人」にはせず「…」で止める。
+ * 長すぎると行が潰れるので文字数で切るが、自分が先頭なので自分の名前は必ず残る。
  */
 function withLine(item) {
     const raw = (item && item.members) || '';
     if (!raw) return '';
-    const MAX = 28;
+    const MAX = 32;
     return raw.length > MAX ? raw.slice(0, MAX) + '…' : raw;
 }
 
