@@ -1130,3 +1130,25 @@
 .ac-subdetail .ac-label:first-child { margin-top: 0; }
 .ac-subtimes { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
 .ac-timeinput { flex: 0 0 auto; width: 116px; height: 34px; }
+
+/* --- 運搬のトラック表示(2026-09-05) ------------------------------------ */
+/* 一覧では呼称だけ。ナンバーは名前を押した詳細で見せる(情報を詰め込みすぎない) */
+.ac-truck { margin-left: 6px; font-size: 11px; font-weight: 700; color: var(--ac-muted);
+  background: rgba(0,0,0,.05); border-radius: 5px; padding: 0 5px; white-space: nowrap; }
+.ac-truckrow { align-items: center; gap: 6px; }
+.ac-truckrow .ac-input { flex: 1; min-width: 0; }
+.ac-dim { opacity: .55; }
+
+/* --- 名前タップ → 連絡先(2026-09-05) ------------------------------------ */
+.ac-contact { display: flex; flex-direction: column; gap: 6px; }
+.ac-contactrow { display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 0; border-bottom: 1px solid var(--ac-line); }
+.ac-contactkey { width: 5.5em; flex-shrink: 0; font-size: 12px; color: var(--ac-muted); font-weight: 700; }
+.ac-contactval { flex: 1; min-width: 0; font-size: 14px; word-break: break-all; }
+/* 電話ボタンは押し間違えないよう十分な高さを取る(スマホ前提) */
+.ac-callbtn { display: block; margin-top: 12px; text-align: center; text-decoration: none;
+  padding: 14px 16px; font-size: 16px; font-weight: 800; }
+.ac-calllink { color: var(--ac-accent, #1a73e8); font-weight: 700; text-decoration: none; }
+.ac-nophone { margin-top: 10px; padding: 10px 12px; border-radius: 8px; text-align: center;
+  background: rgba(0,0,0,.05); color: var(--ac-muted); font-size: 13px; font-weight: 700; }
+.ac-nophone-inline { color: var(--ac-muted); font-size: 13px; }
