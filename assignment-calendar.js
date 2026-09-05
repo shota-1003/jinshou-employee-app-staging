@@ -1812,7 +1812,9 @@
 
                 const emps = s.members.filter((m) => m.member_type === 'employee' && m.assignment_kind !== 'haul');
                 const hauls = s.members.filter((m) => m.assignment_kind === 'haul');
-                const subsCo = s.members.filter((m) => m.member_type === 'subcontractor_company');
+                // 外注の運搬は「運搬」の行にまとめて出す。ここにも出すと同じ会社が2回並ぶ。
+                const subsCo = s.members.filter((m) => m.member_type === 'subcontractor_company'
+                    && m.assignment_kind !== 'haul');
                 const subsNamed = s.members.filter((m) => m.member_type === 'subcontractor');
 
                 if (emps.length) {
@@ -1852,8 +1854,13 @@
                         chip.append(el('span', 'ac-mt', m.time_label || '終日'));
                         // 車両は呼称だけ。ナンバーは押したときの詳細で見せる。
                         if (m.vehicle_id) chip.append(el('span', 'ac-vehicle', '🚚' + vehicleShort(m)));
+                        // 協力会社の行は人数で持つので、社員向けの作業員/運搬要員の区別は付けない。
                         // 運んでそのまま働く人は作業員。運搬だけの人が運搬要員。
-                        chip.append(el('span', 'ac-role', m.is_haul_only ? '運搬要員' : '作業員'));
+                        if (m.member_type === 'subcontractor_company') {
+                            chip.append(el('span', 'ac-role', '外注'));
+                        } else {
+                            chip.append(el('span', 'ac-role', m.is_haul_only ? '運搬要員' : '作業員'));
+                        }
                         wrap3.append(chip);
                     }
                     const r = el('div', 'ac-drow');
@@ -2872,6 +2879,41 @@
             return m.vehicle_name || '車両';
         }
 
+        // 運搬で使う車両を選ぶ行。社員の運搬からも外注の運搬からも同じものを使う
+        // (同じUIを2か所に書かない)。選択肢は社員ポータルの車両マスターそのもので、
+        // ここでは増やせない。target は社員メンバーでも協力会社の行でもよい。
+        function vehicleRow(target, onChange) {
+            const trow = el('div', 'ac-mrow ac-vehiclerow');
+            const sel = el('select', 'ac-input');
+            sel.append(el('option', '', '車両を選ぶ'));
+            sel.firstChild.value = '';
+            for (const t of (vehicleCache || [])) {
+                const o = el('option', '', t.label + (t.ownership === 'lease' ? '（リース）' : ''));
+                o.value = String(t.id);
+                if (String(target.vehicle_id || '') === String(t.id)) o.selected = true;
+                sel.append(o);
+            }
+            // リースはその日のナンバーを入れられるようにする(自社は固定なので出さない)
+            const plate = el('input', 'ac-input');
+            plate.type = 'text';
+            plate.placeholder = 'その日のナンバー（例: 徳島100 う 9999）';
+            plate.value = target.vehicle_plate || '';
+            const syncPlate = () => {
+                const t = (vehicleCache || []).find((x) => String(x.id) === String(target.vehicle_id));
+                plate.style.display = (t && t.ownership === 'lease') ? '' : 'none';
+                if (!(t && t.ownership === 'lease')) { target.vehicle_plate = ''; plate.value = ''; }
+            };
+            sel.addEventListener('change', () => {
+                target.vehicle_id = sel.value || '';
+                syncPlate();
+                if (onChange) onChange();
+            });
+            plate.addEventListener('change', () => { target.vehicle_plate = plate.value; });
+            syncPlate();
+            trow.append(el('div', 'ac-mrowname', '使用車両'), sel, plate);
+            return trow;
+        }
+
         function memberToPayload(x, patch) {
             let base;
             if (x.member_type === 'employee') {
@@ -2898,6 +2940,9 @@
                     headcount_role: x.headcount_role || '',
                     start_time: x.start_time || '',
                     end_time: x.end_time || '',
+                    // 外注の運搬で使う車両(社員と同じ扱い)
+                    vehicle_id: x.vehicle_id || '',
+                    vehicle_plate: x.vehicle_plate || '',
                     workers: (x.workers || []).map((w) => ({
                         subcontractor_worker_id: w.subcontractor_worker_id || null,
                         name: w.name || '', phone: w.phone || '',
@@ -3300,6 +3345,11 @@
                         role: m.role || '', meeting_time: m.meeting_time || '',
                         start_time: m.start_time || '', end_time: m.end_time || '',
                         assignment_kind: m.assignment_kind || 'work',
+                        // 運搬で使う車両。ここで落とすと、編集して保存し直しただけで
+                        // 登録済みの車両が消える(2026-09-06 に判明)。
+                        vehicle_id: m.vehicle_id || '',
+                        vehicle_plate: m.vehicle_plate || '',
+                        vehicle_name: m.vehicle_name || '',
                     }))
                     : [],
                 // 外注は「会社 + 人数」が基本。作業員名(workers)は任意。
@@ -3316,6 +3366,11 @@
                         headcount_role: m.headcount_role || '',
                         start_time: m.start_time || '',
                         end_time: m.end_time || '',
+                        // 外注が運搬でトラックに乗る場合の車両。DBは以前から持っているが
+                        // 画面側が拾っていなかった(2026-09-06 に判明)。
+                        vehicle_id: m.vehicle_id || '',
+                        vehicle_plate: m.vehicle_plate || '',
+                        vehicle_name: m.vehicle_name || '',
                         workers: (m.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
@@ -3544,7 +3599,11 @@
                     });
                     const summary = el('div', 'ac-subsummary');
                     const syncSummary = () => {
-                        summary.textContent = `${subSlotLabel(sub, draft)} ／ ${subRoleLabel(sub)}`;
+                        // 運搬のときはどの車両かまで出す。詳細設定を開かないと分からない状態だと、
+                        // 一覧を見ただけでは「どのトラックに乗るのか」が読み取れない。
+                        const v = (vehicleCache || []).find((x) => String(x.id) === String(sub.vehicle_id || ''));
+                        summary.textContent = `${subSlotLabel(sub, draft)} ／ ${subRoleLabel(sub)}`
+                            + (v ? ` ／ 🚚${v.label}` : '');
                     };
                     syncSummary();
                     card.append(summary, moreBtn, detail);
@@ -3552,6 +3611,18 @@
                     // 役割
                     detail.append(el('div', 'ac-label', '役割'));
                     const roleRow = el('div', 'ac-tokens');
+                    // 役割を「運搬」にしたら、その場で車両を選べるようにする。
+                    // 以前は下の運搬欄まで行かないと選べず、しかもそこは社員しか選べなかったため、
+                    // 外注がトラックに乗る日にどの車両か指定できなかった(2026-09-06 実機指摘)。
+                    const subVehicle = el('div');
+                    function drawSubVehicle() {
+                        subVehicle.innerHTML = '';
+                        if ((sub.assignment_kind || 'work') !== 'haul') {
+                            sub.vehicle_id = ''; sub.vehicle_plate = '';
+                            return;
+                        }
+                        subVehicle.append(vehicleRow(sub, () => { syncSummary(); renderHaulRows(); }));
+                    }
                     for (const r of SUB_ROLES) {
                         const t = el('button', 'ac-token'
                             + ((sub.assignment_kind || 'work') === r.kind ? ' ac-on' : ''), r.label);
@@ -3561,10 +3632,13 @@
                             roleRow.querySelectorAll('.ac-token').forEach((x) => x.classList.remove('ac-on'));
                             t.classList.add('ac-on');
                             syncSummary();
+                            drawSubVehicle();
+                            renderHaulRows();
                         });
                         roleRow.append(t);
                     }
-                    detail.append(roleRow);
+                    detail.append(roleRow, subVehicle);
+                    drawSubVehicle();
 
                     // 時間帯
                     detail.append(el('div', 'ac-label', '時間帯'));
@@ -3900,39 +3974,82 @@
             const haulRows = el('div');
             const addHaulBtn = el('button', 'ac-btn', '＋ 運搬担当を追加');
             addHaulBtn.addEventListener('click', () => {
-                sheet('運搬担当を選ぶ', (box, api) => {
+                sheet('運搬担当を選ぶ', async (box, api) => {
                     box.append(el('div', 'ac-schedmeta',
-                        '運搬は時間帯で管理することが多いため、追加したあと時間を入れてください。'
+                        '運搬は時間帯で管理することが多いため、追加したあと時間と車両を入れてください。'
                         + '同じ人を現場作業にも入れて構いません（兼務できます）。'));
                     const filt = el('input', 'ac-input');
-                    filt.placeholder = '社員名で絞り込み';
+                    filt.placeholder = '社員名・協力会社名で絞り込み';
+                    // 協力会社は通信で取りに行く。取れるまで社員だけ先に出す。
+                    let companies = [];
+                    const empHead = el('div', 'ac-label', '社員');
                     const toks = el('div', 'ac-tokens');
+                    const coHead = el('div', 'ac-label', '外注（協力会社）');
+                    const coToks = el('div', 'ac-tokens');
                     function draw() {
                         toks.innerHTML = '';
-                        const q = filt.value.trim();
+                        coToks.innerHTML = '';
+                        const qs = filt.value.trim();
                         for (const e of state.employees) {
-                            if (q && !e.employee_name.includes(q) && !e.employee_code.includes(q)) continue;
+                            if (qs && !e.employee_name.includes(qs) && !e.employee_code.includes(qs)) continue;
                             if (draft.members.some((m) => m.assignment_kind === 'haul' && m.employee_code === e.employee_code)) continue;
                             const t = el('button', 'ac-token', e.employee_name);
                             t.addEventListener('click', () => {
                                 draft.members.push({
                                     member_type: 'employee', employee_code: e.employee_code, name: e.employee_name,
                                     role: '', meeting_time: '', start_time: '', end_time: '', assignment_kind: 'haul',
+                                    vehicle_id: '', vehicle_plate: '',
                                 });
                                 api.close(); renderDetailRows();
                             });
                             toks.append(t);
                         }
                         if (!toks.children.length) toks.append(el('div', 'ac-schedmeta', '選べる社員がいません'));
+                        // 同じ会社が作業と運搬の両方に入ることがあるので、すでに入っていても選べる。
+                        for (const co of companies) {
+                            if (qs && !co.company_name.includes(qs)) continue;
+                            const already = draft.subs.filter((x) => x.subcontractor_company_id === co.id
+                                && (x.assignment_kind || 'work') === 'haul').length;
+                            const t = el('button', 'ac-token',
+                                co.company_name + (already ? '（運搬' + already + '行）' : ''));
+                            t.addEventListener('click', () => {
+                                draft.subs.push({
+                                    member_type: 'subcontractor_company',
+                                    subcontractor_company_id: co.id,
+                                    company_name: co.company_name,
+                                    short_name: co.short_name,
+                                    headcount: 1,
+                                    assignment_kind: 'haul',
+                                    headcount_role: 'haul',
+                                    start_time: '', end_time: '',
+                                    vehicle_id: '', vehicle_plate: '',
+                                    workers: [],
+                                });
+                                api.close(); renderSubPicked(); renderDetailRows();
+                            });
+                            coToks.append(t);
+                        }
+                        if (!coToks.children.length) {
+                            coToks.append(el('div', 'ac-schedmeta', companies.length
+                                ? '該当する協力会社がありません' : '協力会社を読み込み中...'));
+                        }
                     }
                     filt.addEventListener('input', draw);
-                    box.append(filt, toks);
+                    box.append(filt, empHead, toks, coHead, coToks);
                     draw();
+                    try {
+                        companies = await rpc('assignment_list_subcontractor_companies', { p_employee_code: me }) || [];
+                    } catch (e) { companies = []; }
+                    if (coToks.isConnected) draw();
                 });
             });
             function renderHaulRows() {
                 haulRows.innerHTML = '';
+                // 運搬は社員だけの仕事ではない。協力会社の人がトラックに乗ることもあるので、
+                // ここには社員の運搬と外注の運搬を両方出す(2026-09-06 実機指摘)。
+                // 外注の行の実体は draft.subs 側と同じものなので、二重に持たない。
                 const hauls = draft.members.filter((m) => m.assignment_kind === 'haul');
+                const subHauls = draft.subs.filter((x) => (x.assignment_kind || 'work') === 'haul');
                 for (const m of hauls) {
                     const row = el('div', 'ac-mrow');
                     const nm = el('div', 'ac-mrowname');
@@ -3949,44 +4066,45 @@
                     });
                     row.append(nm, r, del);
                     haulRows.append(row);
-
                     // 使用車両。担当者・時間帯のあとに置く(実際の決め方の順序に合わせる)。
-                    // 選択肢は社員ポータルの車両マスターそのもの。ここでは増やせない。
-                    const trow = el('div', 'ac-mrow ac-vehiclerow');
-                    const sel = el('select', 'ac-input');
-                    sel.append(el('option', '', '車両を選ぶ'));
-                    sel.firstChild.value = '';
-                    for (const t of (vehicleCache || [])) {
-                        const o = el('option', '', t.label + (t.ownership === 'lease' ? '（リース）' : ''));
-                        o.value = String(t.id);
-                        if (String(m.vehicle_id || '') === String(t.id)) o.selected = true;
-                        sel.append(o);
-                    }
-                    // リースはその日のナンバーを入れられるようにする(自社は固定なので出さない)
-                    const plate = el('input', 'ac-input');
-                    plate.type = 'text';
-                    plate.placeholder = 'その日のナンバー（例: 徳島100 う 9999）';
-                    plate.value = m.vehicle_plate || '';
-                    const syncPlate = () => {
-                        const t = (vehicleCache || []).find((x) => String(x.id) === String(m.vehicle_id));
-                        plate.style.display = (t && t.ownership === 'lease') ? '' : 'none';
-                        if (!(t && t.ownership === 'lease')) { m.vehicle_plate = ''; plate.value = ''; }
-                    };
-                    sel.addEventListener('change', () => {
-                        m.vehicle_id = sel.value || '';
-                        syncPlate();
-                    });
-                    plate.addEventListener('change', () => { m.vehicle_plate = plate.value; });
-                    syncPlate();
-                    trow.append(el('div', 'ac-mrowname', '使用車両'), sel, plate);
-                    haulRows.append(trow);
+                    haulRows.append(vehicleRow(m));
                 }
-                if (!hauls.length) haulRows.append(el('div', 'ac-schedmeta', '運搬がある場合だけ追加してください'));
+                for (const sub of subHauls) {
+                    const row = el('div', 'ac-mrow');
+                    const nm = el('div', 'ac-mrowname');
+                    const cnt = (sub.headcount === null || sub.headcount === undefined)
+                        ? '未把握' : sub.headcount + '人';
+                    nm.append(el('span', 'ac-haulmark', '🚚'),
+                        document.createTextNode(sub.company_name + ' ' + cnt));
+                    nm.append(el('span', 'ac-role', '外注'));
+                    const r = el('div', 'ac-row');
+                    r.style.flex = '1';
+                    r.append(timeInput(sub.start_time, (v) => { sub.start_time = v; }),
+                             timeInput(sub.end_time, (v) => { sub.end_time = v; }));
+                    const del = el('button', 'ac-ord', '×');
+                    del.addEventListener('click', () => {
+                        const i = draft.subs.indexOf(sub);
+                        if (i >= 0) draft.subs.splice(i, 1);
+                        renderSubPicked();
+                        renderDetailRows();
+                    });
+                    row.append(nm, r, del);
+                    haulRows.append(row);
+                    // 外注の欄と同じものを見ているので、変えたら向こうの表示も直す
+                    haulRows.append(vehicleRow(sub, renderSubPicked));
+                }
+                if (!hauls.length && !subHauls.length) {
+                    haulRows.append(el('div', 'ac-schedmeta', '運搬がある場合だけ追加してください'));
+                }
             }
             haulField.append(haulRows, addHaulBtn);
 
             // 運搬の行で車両を選べるように、先に一覧を用意しておく
-            loadVehicles().then(() => { if (haulRows.isConnected) renderHaulRows(); }).catch(() => {});
+            // 車両一覧が届いたら、運搬欄と外注カードの両方を描き直す(どちらでも車両を選べるため)
+            loadVehicles().then(() => {
+                if (haulRows.isConnected) renderHaulRows();
+                if (subPicked.isConnected) renderSubPicked();
+            }).catch(() => {});
 
             renderDetailRows();
 
@@ -4035,6 +4153,8 @@
                         headcount_role: x.headcount_role || '',
                         start_time: x.start_time || '',
                         end_time: x.end_time || '',
+                        vehicle_id: x.vehicle_id || '',
+                        vehicle_plate: x.vehicle_plate || '',
                         workers: (x.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
