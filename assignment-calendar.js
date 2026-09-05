@@ -807,7 +807,7 @@
             return {
                 cell, chips, row, num, available,
                 min: wide ? 76 : 56,
-                max: wide ? 260 : 210,
+                max: wide ? 300 : 260,
             };
         }
 
@@ -824,17 +824,29 @@
             render();
         }
 
-        // 月表示の行の高さ。**全週そろえる**。
+        // 月表示の行の高さ。**全週そろえる**。高さはその月の中身から決める。
         //
-        // 2026-09-05、いちど「その週の予定量に応じて高さを変える」方式にしたが、
-        // 実機で使ったユーザーから差し戻された。予定の多い週が縦に伸びると、
-        // その週は全部見える代わりに**月の他の週が画面外へ押し出されて何も見えなくなる**。
-        // 「月を見る」目的では、全部の週が同時に見えることのほうが大事。
-        // LifeBear も月の行は同じ高さで、入りきらない日は「+N」で示している。
-        // 入りきらない日があること自体は許容し、押せばその日の一覧で全部見られる。
-        function weekHeights(cells, layout) {
+        // ここは2回作り直している。実機で使った結果、両極端がどちらも駄目だった。
+        //   1回目「週ごとに高さを変える」→ 予定の多い週が伸び、他の週が画面外へ出て月が読めない
+        //   2回目「画面に6週を押し込む」  → 空いている週が場所を取り、仕事のある週が
+        //                                  「+8」「+10」で切れる(2026年8月の実データで確認)
+        //
+        // そこで、高さは全週そろえたまま、**その月のいちばん忙しい週**に合わせて決める。
+        // 画面に収まらなければ縦にスクロールする。空いている月は画面いっぱいまで広げる。
+        // これなら「行の高さは揃っている」「仕事のある週が切れない」を両立できる。
+        // 1日だけ極端に多い月で無限に伸びないよう、上限は設ける(超えた日は「+N」)。
+        function weekHeights(cells, byDate, holidays, layout) {
             const weeks = Math.ceil(cells.length / 7);
-            return new Array(weeks).fill(layout.cell);
+            let need = 0;
+            for (const date of cells) {
+                if (!date) continue;
+                const n = (byDate.get(date) || []).length + (holidays.has(date) ? 1 : 0);
+                if (n > need) need = n;
+            }
+            const want = layout.num + (need * layout.row) + 4;
+            // 下限は「画面に6週が収まる高さ」。空いている月で下半分が真っ白にならないようにする。
+            const h = Math.max(layout.cell, Math.min(layout.max, want));
+            return new Array(weeks).fill(h);
         }
 
         function renderMonth(container) {
@@ -865,7 +877,7 @@
             // 週ごとの高さ。件数の指定があるときは、その件数で全週そろえる。
             const rowH = state.maxChipsOverride
                 ? new Array(Math.ceil(cells.length / 7)).fill(layout.num + chipLimit * layout.row + 4)
-                : weekHeights(cells, layout);
+                : weekHeights(cells, byDate, holidays, layout);
             const limitOfWeek = (w) => (state.maxChipsOverride
                 ? chipLimit
                 : Math.max(2, Math.floor((rowH[w] - layout.num) / layout.row)));

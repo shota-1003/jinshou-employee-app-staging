@@ -30,6 +30,18 @@
 </div>
 <main>
 
+  <!-- LINEのトーク画面から開いたとき(LINEアプリの中のブラウザ)に出す案内 (2026-09-05追加)。
+       LINEの中のブラウザは、SafariやPWA(ホーム画面のアイコン)とログイン情報の保存場所が
+       別々になる。ここで登録しても、あとでSafari/ホーム画面から開くと「登録していない端末」
+       として扱われ、暗証番号の入れ直し → 管理者の承認待ち、になってしまう
+       (本番の実データで、実際に最初の登録がLINEの中のブラウザで行われていた)。
+       JSがLINEを検知したときだけ表示する。 -->
+  <div id="line-browser-notice" class="line-browser-notice" style="display:none;">
+    <div class="line-browser-notice-title">Safariで開いてください</div>
+    <div class="line-browser-notice-body">いまLINEの中の画面で開いています。このまま登録すると、次に開いたときにまたログインが必要になります。下のボタンでSafariに切り替えてから登録してください。</div>
+    <a id="line-browser-open-safari" class="line-browser-notice-btn" href="#">Safariで開く</a>
+  </div>
+
   <!-- ログイン画面(社員番号入力、初回またはログイン先切り替え時のみ) -->
   <section id="screen-login" class="screen">
     <div class="login-wrap">
@@ -95,6 +107,9 @@
           <input type="text" id="pin-register-first-code" autocomplete="off" autocapitalize="characters" placeholder="例: QMSJCN8R2C">
           <div class="error" id="pin-register-error"></div>
           <button id="pin-register-identify">次へ</button>
+          <!-- 既に初回登録が済んでいる社員がこの画面に来てしまったときだけ表示する
+               (2026-09-05追加)。暗証番号の入力画面へ1タップで戻れるようにする。 -->
+          <button class="link" id="pin-register-use-pin" style="display:none;">暗証番号でログインする</button>
           <button class="link" id="pin-register-switch">別の社員番号でログイン</button>
         </div>
         <div id="pin-register-step2" style="display:none;">
@@ -157,6 +172,23 @@
         <div class="hint" style="margin-bottom:14px;">セキュリティのため、新しい端末からのご利用には管理者の承認が必要です。承認され次第ご利用いただけます。承認までしばらくお待ちください。</div>
         <button id="device-pending-retry">更新して確認する</button>
         <button class="link" id="device-pending-switch">別の社員番号でログイン</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 通信不良でログイン状態を確認できなかったときの画面 (2026-09-05追加)。
+       ここで暗証番号の再入力へ誘導すると、有効な端末があるのに新しい端末が作られ、
+       管理者の承認待ちで詰まる。まず「もう一度つなぐ」を試してもらう。 -->
+  <section id="screen-connection-retry" class="screen">
+    <div class="login-wrap">
+      <img src="brand/logo-gold.png" alt="迅翔興業" class="login-logo">
+      <div class="login-company">つながりませんでした</div>
+      <div class="card">
+        <div class="hint" style="margin-bottom:14px;">電波が届きにくい場所のようです。ログインしたままの状態は残っていますので、電波の良い場所で「もう一度つなぐ」を押してください。</div>
+        <button id="connection-retry-btn">もう一度つなぐ</button>
+        <div class="error" id="connection-retry-error"></div>
+        <div class="hint" style="margin-top:14px;">何度試してもつながらない場合のみ、下から暗証番号を入れ直してください。</div>
+        <button class="link" id="connection-retry-pin">暗証番号を入力してログインする</button>
       </div>
     </div>
   </section>

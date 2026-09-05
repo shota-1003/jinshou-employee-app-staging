@@ -1471,3 +1471,41 @@ body.assignment-calendar-open #screen-assignment-calendar .ac-root {
   35%  { box-shadow: 0 0 0 6px rgba(217, 154, 8, .28); }
   100% { box-shadow: 0 0 0 0 rgba(217, 154, 8, 0); }
 }
+
+/* ============================================================
+   LINEの中のブラウザで開いたときの案内 (2026-09-05追加)
+   LINEのトークからポータルのリンクを開くと、SafariやPWA(ホーム画面のアイコン)とは
+   別の保存領域で動くため、そこで登録しても次にSafariから開くと未登録扱いになる。
+   ログイン前の画面の一番上に、見落とされない大きさで出す。
+   ============================================================ */
+.line-browser-notice {
+  margin: 12px 16px 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: oklch(0.42 0.13 264);
+  border: 2px solid var(--gold);
+  color: var(--text);
+}
+.line-browser-notice-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--gold);
+  margin-bottom: 6px;
+}
+.line-browser-notice-body {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text);
+}
+.line-browser-notice-btn {
+  display: block;
+  margin-top: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--gold);
+  color: var(--gold-foreground);
+  font-weight: 700;
+  text-align: center;
+  text-decoration: none;
+}

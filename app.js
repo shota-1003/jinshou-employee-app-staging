@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v150-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T12:12:06.422Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T12:22:00.256Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -56,18 +56,37 @@ window.ClientErrorReporter.init({
 // 複製している。このSetを変更する際は必ずscripts/lib/optional-degrade-rpcs.jsも同時に更新すること
 // (2026-09-04: 更新漏れでQAが想定内の404を障害として誤検知した教訓、errors.id=1300)。
 const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule', 'admin_list_lucky_draws', 'admin_run_lucky_draw', 'admin_set_lucky_payout']);
-async function rpc(name, params) {
+// 2026-09-05(初回登録・ログイン担当): 第3引数optsを追加した。既存の呼び出しは
+// すべて2引数のままで挙動が変わらない。opts.noSessionReset=true のときだけ、
+// 「セッション失効エラーを受け取ったらその場でログイン画面へ強制的に戻す」処理を
+// 抑止する(端末トークンの生死を確かめる目的で意図的に古いトークンを試す場合に、
+// その確認そのものが保存済みトークンを消してしまうのを防ぐ)。
+// opts.deviceToken を渡すと、そのトークンだけをこの1回の呼び出しに使う。
+async function rpc(name, params, opts) {
+  opts = opts || {};
   const headers = {
     apikey: SUPABASE_ANON_KEY,
     Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
     'Content-Type': 'application/json',
   };
-  if (currentDeviceToken) headers['X-Device-Token'] = currentDeviceToken;
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify(params),
-  });
+  const tokenForCall = opts.deviceToken || currentDeviceToken;
+  if (tokenForCall) headers['X-Device-Token'] = tokenForCall;
+  let res;
+  try {
+    res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(params),
+    });
+  } catch (netErr) {
+    // 圏外・トンネル・電波の切り替わり等でfetch自体が失敗した場合。サーバーは
+    // 何も答えていないので「認証が無効になった」とは絶対に解釈してはならない
+    // (2026-09-05: この取り違えが端末トークンの消失＝再登録ループの原因だった)。
+    const e = new Error('通信できませんでした。電波の良い場所でもう一度お試しください。');
+    e.isNetworkError = true;
+    e.rpcName = name;
+    throw e;
+  }
   const text = await res.text();
   if (!res.ok) {
     // SupabaseのRPCエラー(RAISE EXCEPTIONのメッセージ)はJSONで返るため、
@@ -87,7 +106,12 @@ async function rpc(name, params) {
       message === 'このアカウントは現在ご利用いただけません' ||
       message === 'この端末はまだ管理者の承認待ちです。承認され次第ご利用いただけます'
     );
-    if (message === 'セッションが確認できませんでした。再度ログインしてください' || message === 'このアカウントは現在ご利用いただけません') {
+    // 呼び出し側が「サーバーが明示的に認証を否定したのか」「単に通信・サーバーの
+    // 不調なのか」を取り違えないよう、例外へ分類の印を付ける(2026-09-05)。
+    const isSessionInvalid = message === 'セッションが確認できませんでした。再度ログインしてください'
+      || message === 'このアカウントは現在ご利用いただけません';
+    const isPendingApproval = message === 'この端末はまだ管理者の承認待ちです。承認され次第ご利用いただけます';
+    if (isSessionInvalid && !opts.noSessionReset) {
       clearSession();
       clearDeviceAuth();
       currentDeviceToken = null;
@@ -95,6 +119,8 @@ async function rpc(name, params) {
         showScreen('login');
         showError('login-error', message === 'このアカウントは現在ご利用いただけません' ? message : 'ログイン状態が無効になりました。もう一度ログインしてください。');
       }
+    } else if (isSessionInvalid) {
+      // noSessionReset: 端末トークンの生死確認中。保存済みトークンには触れない。
     } else if (isAuthRejection) {
       // 端末承認待ち・resume時の失効など。エラー報告せず、案内だけ出してログイン/承認待ちへ。
       if (document.getElementById('screen-login')) {
@@ -108,7 +134,14 @@ async function rpc(name, params) {
       // セッション失効・認証拒否(想定内)以外は、可視化マップが検知できるよう実Productionエラーとして報告する。
       window.ClientErrorReporter.reportHttpError(`rpc/${name}`, res.status, message);
     }
-    throw new Error(message);
+    const err = new Error(message);
+    err.httpStatus = res.status;
+    err.rpcName = name;
+    err.isSessionInvalid = isSessionInvalid;   // サーバーが明示的に「このトークンは無効」と答えた
+    err.isPendingApproval = isPendingApproval; // 端末は登録済みだが管理者の承認待ち
+    // 5xx・404・想定外のエラーは「サーバー側の不調」であってトークンの失効ではない。
+    err.isServerTrouble = res.status >= 500 || (res.status === 404 && !OPTIONAL_MISSING_RPCS.has(name));
+    throw err;
   }
   return text ? JSON.parse(text) : null;
 }
@@ -242,26 +275,100 @@ async function uploadReceiptPhoto(employeeCode, file) {
   return json;
 }
 
+// ============================================================
+// 端末に残す情報の読み書き (2026-09-05 全面的に例外安全化)
+//
+// 【なぜ直したか】localStorage / sessionStorage は、iOSのプライベートブラウズ・
+// ストレージ制限・容量超過で **setItem が例外を投げる**ことがある。従来は素の
+// setItem を直接呼んでいたため、1回でも例外が出ると呼び出し元(端末トークンの保存・
+// セッション復元)ごと失敗し、「登録できたのに次に開くと未登録」という症状になった。
+// 例外は握りつぶさず、書けなかったという事実だけを返す(呼び出し側で分岐できる)。
+//
+// 【トークンの保存先を二重化した理由】端末トークンはこの端末の唯一の認証情報であり、
+// これを失うと必ず暗証番号の再入力 → 新しい端末行の作成 → 管理者承認待ち、になる。
+// localStorageを主、Cookieを控えとして同じ値を書き、読み出し時はlocalStorage →
+// Cookieの順に探す。片方が消えても、もう片方から復元してlocalStorageへ書き戻す。
+// ============================================================
+const DEVICE_AUTH_COOKIE = 'jinshou_device_auth';
+const DEVICE_AUTH_COOKIE_MAX_AGE = 60 * 60 * 24 * 365; // 1年
+
+function safeLocalGet(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+function safeLocalSet(key, value) {
+  try { localStorage.setItem(key, value); return true; } catch (e) { return false; }
+}
+function safeLocalRemove(key) {
+  try { localStorage.removeItem(key); } catch (e) { /* 消せなくても続行する */ }
+}
+
+function readCookie(name) {
+  try {
+    const hit = document.cookie.split('; ').find((row) => row.startsWith(`${name}=`));
+    return hit ? decodeURIComponent(hit.slice(name.length + 1)) : null;
+  } catch (e) { return null; }
+}
+function writeCookie(name, value) {
+  try {
+    const secure = location.protocol === 'https:' ? '; Secure' : '';
+    document.cookie = `${name}=${encodeURIComponent(value)}; Max-Age=${DEVICE_AUTH_COOKIE_MAX_AGE}; Path=/; SameSite=Lax${secure}`;
+    return true;
+  } catch (e) { return false; }
+}
+function deleteCookie(name) {
+  try { document.cookie = `${name}=; Max-Age=0; Path=/; SameSite=Lax`; } catch (e) { /* 消せなくても続行する */ }
+}
+
 function getSession() {
   try { return JSON.parse(sessionStorage.getItem(SESSION_KEY)); } catch { return null; }
 }
-function setSession(session) { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); }
-function clearSession() {
-  sessionStorage.removeItem(SESSION_KEY);
-  localStorage.removeItem(REMEMBERED_CODE_KEY);
+function setSession(session) {
+  // sessionStorageが使えない環境でも、ログインそのものは成立させる(画面表示用の
+  // キャッシュに過ぎず、実際の認証は端末トークンが担っているため)。
+  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(session)); return true; } catch (e) { return false; }
 }
-function getRememberedCode() { return localStorage.getItem(REMEMBERED_CODE_KEY); }
-function setRememberedCode(code) { localStorage.setItem(REMEMBERED_CODE_KEY, code); }
+function clearSession() {
+  try { sessionStorage.removeItem(SESSION_KEY); } catch (e) { /* 消せなくても続行する */ }
+  // 2026-09-05: ここで社員番号の記憶まで消していたため、セッションが切れるたびに
+  // 「社員番号の入力」からやり直しになり、社員には「また最初から登録し直し」に見えていた。
+  // 社員番号は入力補助でしかなく秘密情報でもないため、明示的なログアウト
+  // (switchEmployee)のときだけ消す。
+}
+function getRememberedCode() { return safeLocalGet(REMEMBERED_CODE_KEY); }
+function setRememberedCode(code) { safeLocalSet(REMEMBERED_CODE_KEY, code); }
+function clearRememberedCode() { safeLocalRemove(REMEMBERED_CODE_KEY); }
+
+function parseDeviceAuth(raw) {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.token && parsed.employeeCode) return parsed;
+  } catch (e) { /* 壊れた値は無いものとして扱う */ }
+  return null;
+}
 
 function getDeviceAuth() {
-  try { return JSON.parse(localStorage.getItem(DEVICE_AUTH_KEY)); } catch { return null; }
+  const fromLocal = parseDeviceAuth(safeLocalGet(DEVICE_AUTH_KEY));
+  if (fromLocal) return fromLocal;
+  // localStorageが消えていてもCookieに残っていれば復元する(iOSのストレージ削除・
+  // プライベートブラウズ・容量超過などで主保存先だけが失われる場合の救済)。
+  const fromCookie = parseDeviceAuth(readCookie(DEVICE_AUTH_COOKIE));
+  if (fromCookie) {
+    safeLocalSet(DEVICE_AUTH_KEY, JSON.stringify(fromCookie));
+    return fromCookie;
+  }
+  return null;
 }
 function setDeviceAuth(employeeCode, token) {
-  localStorage.setItem(DEVICE_AUTH_KEY, JSON.stringify({ employeeCode, token }));
+  const raw = JSON.stringify({ employeeCode, token });
+  const okLocal = safeLocalSet(DEVICE_AUTH_KEY, raw);
+  const okCookie = writeCookie(DEVICE_AUTH_COOKIE, raw);
   currentDeviceToken = token;
+  return okLocal || okCookie; // どちらか一方でも残せたか
 }
 function clearDeviceAuth() {
-  localStorage.removeItem(DEVICE_AUTH_KEY);
+  safeLocalRemove(DEVICE_AUTH_KEY);
+  deleteCookie(DEVICE_AUTH_COOKIE);
   currentDeviceToken = null;
 }
 
@@ -373,7 +480,13 @@ function showScreen(id, opts) {
   opts = opts || {};
   document.querySelectorAll('.screen').forEach((el) => el.classList.remove('active'));
   document.getElementById(`screen-${id}`).classList.add('active');
-  const preAuthScreens = ['login', 'pin-entry', 'pin-register'];
+  // 2026-09-05修正: 'device-pending'(端末の承認待ち)・'pin-forgot'(暗証番号を忘れた)・
+  // 'connection-retry'(通信不良)がこの一覧から漏れていたため、まだログインが成立して
+  // いないのに下部ナビ・案内AIのボタンが表示されていた。社員がそれを押すと
+  // enterMenu()/loadMyInfo()がセッション未確立のまま走り、JavaScriptが例外で停止して
+  // 画面が固まる(本番のクライアントエラーログで、承認待ちの時間帯に
+  // 「null is not an object (evaluating 'session.employeeName')」を計8件記録していた)。
+  const preAuthScreens = ['login', 'pin-entry', 'pin-register', 'device-pending', 'pin-forgot', 'connection-retry'];
   if (!preAuthScreens.includes(id)) {
     if (ADMIN_SCREENS.has(id)) inAdminMode = true;
     else if (BOTTOM_NAV_MAP[id] || id === 'menu') inAdminMode = false; // 個人側の画面へ来たら管理者モードを解除
@@ -388,6 +501,9 @@ function showScreen(id, opts) {
   document.getElementById('admin-bottom-nav').style.display = (!preAuthScreens.includes(id) && inAdminMode) ? 'flex' : 'none';
   // ログイン前・管理者モード中は案内AIを表示しない(下部ナビと同じ扱い)。
   document.getElementById('ai-guide-fab-wrap').style.display = (!preAuthScreens.includes(id) && !inAdminMode) ? '' : 'none';
+  // LINEの中のブラウザで開いている間だけ、ログイン前の画面にSafariへの切り替え案内を出す。
+  const lineNotice = document.getElementById('line-browser-notice');
+  if (lineNotice) lineNotice.style.display = (preAuthScreens.includes(id) && isLineInAppBrowser()) ? '' : 'none';
   if (preAuthScreens.includes(id) || inAdminMode) closeAiGuidePanel();
   document.querySelectorAll('.bottom-nav-item').forEach((btn) => {
     btn.classList.toggle('active', btn.getAttribute('data-nav') === (BOTTOM_NAV_MAP[id] || id));
@@ -463,24 +579,44 @@ let pendingLoginCode = null; // 社員番号入力〜暗証番号入力/登録�
 // 起動時: この端末が有効な端末トークンを持っていれば、暗証番号なしでログイン状態を
 // 復元する(「初回だけ本人確認、以後はログイン状態を維持」の実体)。トークンが
 // 無効(別端末・管理者に無効化された・退職/利用停止)なら暗証番号の入力へフォールバックする。
+// 【2026-09-05 重大修正】以前はここが「例外が出たら理由を問わず clearDeviceAuth()」
+// だった。そのため圏外・電波の切り替わり・サーバーの一時不調・localStorageの書き込み
+// 失敗といった **認証とは無関係な失敗** でも、この端末の唯一の認証情報である端末トークンを
+// 消してしまい、社員は暗証番号を入れ直す → 新しい端末行が作られる → 管理者の承認待ちに
+// なる、という流れで「登録できない」状態に落ちていた(本番の実データで、1人の社員に
+// 9件の端末行・別の社員に50件の端末行が作られていた)。
+//
+// サーバーが「このトークンは無効だ」と明示的に答えたときだけトークンを消す。
+// それ以外(通信不良・サーバー不調)は 'network' を返し、トークンは必ず残す。
+// 通信の一時的な失敗は、その場で数回だけ静かに再試行する。
 async function tryResumeDeviceSession() {
   const auth = getDeviceAuth();
   if (!auth || !auth.token || !auth.employeeCode) return false;
   currentDeviceToken = auth.token;
-  try {
-    const rows = await rpc('resume_employee_session', { p_employee_code: auth.employeeCode });
-    const info = rows && rows[0];
-    if (!info) throw new Error('empty');
-    setSession({ employeeCode: auth.employeeCode, employeeId: info.out_employee_id, employeeName: info.out_employee_name, requestRole: info.out_request_role });
-    return true;
-  } catch (e) {
-    // この端末が管理者の承認待ちなだけの場合は、トークンを消さずに承認待ち画面へ留める
-    // (ここでclearDeviceAuth()してしまうと、承認待ちの間にアプリを開くたびPIN再入力を要求し、
-    // そのたびに新しい「承認待ち端末」が作られてしまう)。
-    if ((e.message || '').includes('承認待ち')) return 'pending';
-    clearDeviceAuth();
-    return false;
+  const RETRY_DELAYS_MS = [0, 700, 1800]; // 圏外から復帰しかけている場面を拾う
+  let lastError = null;
+  for (const delay of RETRY_DELAYS_MS) {
+    if (delay) await new Promise((r) => setTimeout(r, delay));
+    try {
+      const rows = await rpc('resume_employee_session', { p_employee_code: auth.employeeCode });
+      const info = rows && rows[0];
+      if (!info) { lastError = { isServerTrouble: true }; continue; }
+      // sessionStorageへ書けなくてもログイン自体は成立させる(実際の認証は端末トークン)。
+      setSession({ employeeCode: auth.employeeCode, employeeId: info.out_employee_id, employeeName: info.out_employee_name, requestRole: info.out_request_role });
+      return true;
+    } catch (e) {
+      lastError = e;
+      // 端末は登録済みだが管理者の承認待ち。トークンは有効なので絶対に消さない
+      // (消すと開くたびに暗証番号を要求し、そのたびに新しい承認待ち端末が増える)。
+      if (e.isPendingApproval || (e.message || '').includes('承認待ち')) return 'pending';
+      // サーバーが明示的に「無効」と答えた場合だけ、保存済みトークンを破棄する。
+      if (e.isSessionInvalid) { clearDeviceAuth(); return false; }
+      if (e.isNetworkError || e.isServerTrouble) continue; // 再試行の価値がある
+      // 分類できない失敗もトークンは残す(消して困るのは社員のほうであるため)。
+      return 'network';
+    }
   }
+  return (lastError && lastError.isNetworkError) ? 'network' : 'network';
 }
 
 // 起動時: 端末が社員番号を覚えていれば暗証番号入力画面へ、覚えていなければ社員番号入力画面へ。
@@ -488,6 +624,10 @@ async function startLoginFlow() {
   const resumeResult = await tryResumeDeviceSession();
   if (resumeResult === true) { enterMenu(); return; }
   if (resumeResult === 'pending') { showScreen('device-pending'); return; }
+  // 通信不良で自動ログインを確認できなかった場合。端末トークンは残したまま、
+  // 「もう一度つなぐ」を案内する画面を出す(ここで暗証番号を入れさせてしまうと、
+  // 有効な端末があるのに新しい端末行が作られ、承認待ちで詰む原因になる)。
+  if (resumeResult === 'network') { showScreen('connection-retry'); return; }
 
   const remembered = getRememberedCode();
   if (!remembered) { showScreen('login'); return; }
@@ -502,6 +642,7 @@ async function startLoginFlow() {
     if (!info || !info.exists_and_active) {
       // 退職・無効化された社員番号を端末が覚えていた場合は、社員番号入力からやり直させる。
       clearSession();
+      clearRememberedCode();
       showScreen('login');
       return;
     }
@@ -636,8 +777,11 @@ async function doPinForgotReset() {
     if (!rows || rows.length === 0) { showError('pin-forgot-error', '設定できましたが、ログインに失敗しました。もう一度お試しください。'); return; }
     const emp = rows[0];
     setSession({ employeeCode: pendingLoginCode, employeeId: emp.out_employee_id, employeeName: emp.out_employee_name, requestRole: emp.out_request_role });
-    setDeviceAuth(pendingLoginCode, emp.out_device_token);
-    if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
+    // この経路は「端末トークンが手元にある人」だけが通る(reset_my_pin_with_deviceが
+    // 端末トークンで本人確認しているため)。承認済みの手持ちトークンを、
+    // 新しい承認待ちトークンで上書きして自分を締め出さないようにする。
+    const adopted = await adoptDeviceTokenAfterAuth(pendingLoginCode, emp);
+    if (adopted === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
     showError('pin-forgot-error', e.message);
@@ -739,6 +883,38 @@ function unmountAssignmentCalendar() {
   if (root) root.innerHTML = '';
 }
 
+// ============================================================
+// 暗証番号ログイン/初回登録が成功したあとの、端末トークンの採用判断 (2026-09-05追加)
+//
+// 【直した問題】暗証番号ログインに成功すると、サーバーは必ず新しい端末トークンを発行する。
+// その新しい端末が「承認待ち」で返ってきた場合、従来は無条件に保存し直していたため、
+// **もともと手元にあった承認済みトークンを、使えない承認待ちトークンで上書きしていた**。
+// その瞬間からアプリは全RPCで「この端末はまだ管理者の承認待ちです」と言われ続け、
+// 管理者が押すまで何もできなくなる。実際に本番で、承認済み端末を持っていた社員が
+// 承認待ちに落ちて約23時間ポータルを使えなかった(2026-09-02 23:04 〜 09-03 22:12)。
+//
+// そこで、新端末が承認待ちで返ってきたときだけ、保存済みの古いトークンがまだ有効か
+// サーバーへ確かめ、有効ならそちらを残す。社員から見ると「今までどおり使えるまま」になる。
+// 確認の呼び出しでは noSessionReset を付け、確認そのものが保存済みトークンを消さないようにする。
+async function adoptDeviceTokenAfterAuth(employeeCode, emp) {
+  if (emp.out_approval_status === 'pending') {
+    const previous = getDeviceAuth();
+    if (previous && previous.employeeCode === employeeCode && previous.token && previous.token !== emp.out_device_token) {
+      try {
+        const rows = await rpc('resume_employee_session', { p_employee_code: employeeCode },
+          { deviceToken: previous.token, noSessionReset: true });
+        if (rows && rows[0]) {
+          // 古い端末トークンは今も承認済みで有効。こちらを使い続ける。
+          setDeviceAuth(employeeCode, previous.token);
+          return 'kept-existing';
+        }
+      } catch (e) { /* 古いトークンも使えない。新しい承認待ちトークンを採用する。 */ }
+    }
+  }
+  setDeviceAuth(employeeCode, emp.out_device_token);
+  return emp.out_approval_status === 'pending' ? 'pending' : 'approved';
+}
+
 async function doVerifyPin() {
   const pin = document.getElementById('pin-entry-code').value.trim();
   hideError('pin-entry-error');
@@ -754,9 +930,9 @@ async function doVerifyPin() {
     }
     const emp = rows[0];
     setSession({ employeeCode: pendingLoginCode, employeeId: emp.out_employee_id, employeeName: emp.out_employee_name, requestRole: emp.out_request_role });
-    setDeviceAuth(pendingLoginCode, emp.out_device_token);
+    const adopted = await adoptDeviceTokenAfterAuth(pendingLoginCode, emp);
     document.getElementById('pin-entry-code').value = '';
-    if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
+    if (adopted === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
     showError('pin-entry-error', e.message);
@@ -778,6 +954,8 @@ function resetRegisterSteps() {
   if (identified) identified.textContent = '';
   hideError('pin-register-error');
   hideError('pin-register-error2');
+  const usePinBtn = document.getElementById('pin-register-use-pin');
+  if (usePinBtn) usePinBtn.style.display = 'none';
   for (const id of ['pin-register-code', 'pin-register-confirm']) {
     const el = document.getElementById(id);
     if (el) el.value = '';
@@ -805,6 +983,15 @@ async function doIdentifyForRegister() {
     document.getElementById('pin-register-step2').style.display = '';
     hideError('pin-register-error2');
   } catch (e) {
+    // 2026-09-05: 「既に暗証番号を登録済み」の人がこの画面に来てしまった場合、
+    // 「コードが正しくありません」とだけ言われると、非エンジニアの社員には
+    // 「使えない・詰んだ」としか読めない。何をすればよいかまで書く。
+    if ((e.message || '').includes('既に暗証番号が登録されて')) {
+      showError('pin-register-error', 'この社員番号は初回登録がすでに済んでいます。初回登録コードは不要です。前の画面から、ご自分で決めた4〜6桁の暗証番号でログインしてください。');
+      const back = document.getElementById('pin-register-use-pin');
+      if (back) back.style.display = '';
+      return;
+    }
     showError('pin-register-error', e.message);
   } finally {
     btn.disabled = false;
@@ -835,11 +1022,11 @@ async function doRegisterPin() {
     const rows = await rpc('register_employee_pin', { p_employee_code: pendingLoginCode, p_first_login_code: firstCode, p_pin: pin });
     const emp = rows[0];
     setSession({ employeeCode: pendingLoginCode, employeeId: emp.out_employee_id, employeeName: emp.out_employee_name, requestRole: emp.out_request_role });
-    setDeviceAuth(pendingLoginCode, emp.out_device_token);
+    const adopted = await adoptDeviceTokenAfterAuth(pendingLoginCode, emp);
     document.getElementById('pin-register-first-code').value = '';
     document.getElementById('pin-register-code').value = '';
     document.getElementById('pin-register-confirm').value = '';
-    if (emp.out_approval_status === 'pending') { showScreen('device-pending'); return; }
+    if (adopted === 'pending') { showScreen('device-pending'); return; }
     enterMenu();
   } catch (e) {
     showError('pin-register-error2', e.message);
@@ -859,6 +1046,73 @@ async function retryDevicePending() {
   if (btn) btn.disabled = false;
 }
 
+// ============================================================
+// 通信不良画面 (2026-09-05追加)
+// 端末トークンは残したまま、つながるまで何度でも試せるようにする。
+// ============================================================
+async function retryConnection() {
+  const btn = document.getElementById('connection-retry-btn');
+  if (btn) btn.disabled = true;
+  hideError('connection-retry-error');
+  try {
+    const resumeResult = await tryResumeDeviceSession();
+    if (resumeResult === true) { enterMenu(); return; }
+    if (resumeResult === 'pending') { showScreen('device-pending'); return; }
+    if (resumeResult === false) { startLoginFlow(); return; } // トークンが本当に無効だった
+    showError('connection-retry-error', 'まだつながりません。電波の良い場所でもう一度お試しください。');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// 通信不良画面から、あえて暗証番号の入力へ進む(何度試してもつながらない場合の逃げ道)。
+function fallBackToPinEntry() {
+  const remembered = getRememberedCode();
+  const auth = getDeviceAuth();
+  const code = remembered || (auth && auth.employeeCode);
+  if (!code) { showScreen('login'); return; }
+  pendingLoginCode = code;
+  hideError('pin-entry-error');
+  document.getElementById('pin-entry-name').textContent = '';
+  showScreen('pin-entry');
+}
+
+// ============================================================
+// LINEのトーク内から開かれた場合の案内 (2026-09-05追加)
+//
+// 社員へのポータルの配布はLINEグループのリンクで行っている。iPhoneでそのリンクを
+// 押すとLINEアプリの中のブラウザで開き、Safari本体・ホーム画面のアイコン(PWA)とは
+// **別の保存領域**になる。そこで初回登録を済ませても、あとでSafariやホーム画面から
+// 開くと「登録していない端末」として扱われ、暗証番号の入力 → 新しい端末 →
+// 管理者の承認待ち、という流れになる。本番の実データでも、最初の登録が
+// LINEの中のブラウザ(User-Agentに Line/26.13.0)で行われ、その9分後に
+// Safariから別の端末として承認申請が出ていた。
+//
+// LINEは、URLに openExternalBrowser=1 を付けたリンクを外部ブラウザ(Safari)で開く。
+// ============================================================
+function isLineInAppBrowser() {
+  return /\bLine\//i.test(navigator.userAgent || '');
+}
+
+function buildOpenExternalBrowserUrl() {
+  try {
+    const url = new URL(location.href);
+    url.searchParams.set('openExternalBrowser', '1');
+    return url.toString();
+  } catch (e) {
+    return location.href + (location.href.includes('?') ? '&' : '?') + 'openExternalBrowser=1';
+  }
+}
+
+function setupLineBrowserNotice() {
+  const notice = document.getElementById('line-browser-notice');
+  if (!notice) return;
+  if (!isLineInAppBrowser()) { notice.style.display = 'none'; return; }
+  const link = document.getElementById('line-browser-open-safari');
+  if (link) link.setAttribute('href', buildOpenExternalBrowserUrl());
+  notice.style.display = '';
+}
+
 // 「別の社員番号でログインし直す」= 実質的なログアウト。既にログイン済みであれば、
 // この端末のトークンをサーバー側でも明示的に無効化してから画面を切り替える
 // (共有端末の切り替え時に前の利用者のトークンを残さないため)。
@@ -869,6 +1123,9 @@ async function switchEmployee() {
   }
   clearSession();
   clearDeviceAuth();
+  // 明示的な「別の社員番号でログイン」のときだけ、覚えていた社員番号も消す
+  // (共有端末で前の利用者の番号が残らないようにするため)。
+  clearRememberedCode();
   pendingLoginCode = null;
   document.getElementById('login-code').value = '';
   showScreen('login');
@@ -1061,8 +1318,11 @@ function enterMenu(replace) {
   if (consumeLoginRedirect()) return;
   const session = getSession();
   // セッションが失効/未確立のまま呼ばれた場合、社員名の参照で
-  // "null is not an object" 例外(finding#14/#10)になりホームが描画されない。ログインへ戻す。
-  if (!session) { showScreen('login'); return; }
+  // "null is not an object" 例外(finding#14/#10)になりホームが描画されない。
+  // 2026-09-05: 単に'login'を出すと、端末トークンは有効なのに社員番号の入力から
+  // やり直しに見えてしまう。startLoginFlow()へ戻し、端末トークンでの自動復帰・
+  // 承認待ち・通信不良を正しく振り分ける。
+  if (!session) { startLoginFlow(); return; }
   const { greeting, sub } = buildHomeGreeting();
   document.getElementById('menu-greeting-hi').textContent = greeting;
   document.getElementById('menu-greeting-name').textContent = `${session.employeeName}さん`;
@@ -13331,9 +13591,16 @@ function init() {
   document.getElementById('pin-register-submit').addEventListener('click', doRegisterPin);
   document.getElementById('pin-register-back').addEventListener('click', resetRegisterSteps);
   document.getElementById('pin-register-switch').addEventListener('click', switchEmployee);
+  onId('pin-register-use-pin', 'click', fallBackToPinEntry);
 
   document.getElementById('device-pending-retry').addEventListener('click', retryDevicePending);
   document.getElementById('device-pending-switch').addEventListener('click', switchEmployee);
+
+  // 通信不良画面 (2026-09-05追加)
+  onId('connection-retry-btn', 'click', retryConnection);
+  onId('connection-retry-pin', 'click', fallBackToPinEntry);
+  // LINEの中のブラウザで開かれた場合の案内(Safariへの切り替えリンクを組み立てる)
+  setupLineBrowserNotice();
 
   document.getElementById('logout-btn').addEventListener('click', switchEmployee);
   document.getElementById('logout-btn-2').addEventListener('click', switchEmployee);
