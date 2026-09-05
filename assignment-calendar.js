@@ -4823,11 +4823,37 @@
         // このモジュールの上に別の帯(開発用シェルのSTAGING帯、統合後は社員ポータルの
         // ヘッダー等)がある場合、その高さぶんだけ自分の高さを縮める。
         // これをやらないと画面からはみ出し、結局ページ全体がスクロールしてしまう。
+        // 載せた側が画面の下へ固定しているもの(社員ポータルの下タブ等)の高さを測る。
+        // 以前はポータル側のCSSが 64px と決め打ちしていたが、実際の下タブは 82px あり、
+        // 月表示の最後の週がその下へ隠れていた(2026-09-06 実機指摘)。決め打ちをやめ、
+        // カレンダー自身が実測する。自分の高さに影響されない要素だけを見るので、
+        // 「高さを変える→測り直す→また高さが変わる」の往復にはならない。
+        function hostBottomInset() {
+            const vh = window.innerHeight || 0;
+            if (!vh) return 0;
+            let inset = 0;
+            for (const node of document.querySelectorAll('body *')) {
+                if (node === root || node.contains(root) || root.contains(node)) continue;
+                const st = getComputedStyle(node);
+                if (st.position !== 'fixed' && st.position !== 'sticky') continue;
+                if (st.display === 'none' || st.visibility === 'hidden') continue;
+                const r = node.getBoundingClientRect();
+                if (r.height < 8) continue;
+                if (r.bottom < vh - 4) continue;      // 画面の底に接していない
+                if (r.top < vh * 0.5) continue;       // 画面の下半分にない(全画面の覆い等は数えない)
+                inset = Math.max(inset, Math.round(vh - r.top));
+            }
+            return Math.min(inset, Math.round(vh * 0.4));
+        }
+
         function syncHostOffset() {
             const top = Math.max(0, Math.round(root.getBoundingClientRect().top));
             const cur = parseInt(root.style.getPropertyValue('--ac-host-offset') || '0', 10) || 0;
             // 自分自身の高さを変えると rect.top も動きうるので、実際に変わったときだけ書く
             if (Math.abs(top - cur) >= 1) root.style.setProperty('--ac-host-offset', `${top}px`);
+            const bottom = hostBottomInset();
+            const curB = parseInt(root.style.getPropertyValue('--ac-host-bottom') || '0', 10) || 0;
+            if (Math.abs(bottom - curB) >= 1) root.style.setProperty('--ac-host-bottom', `${bottom}px`);
         }
 
         // 再描画で elBody を作り直すため、そのままだと保存のたびに先頭へ飛ぶ。

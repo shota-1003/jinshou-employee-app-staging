@@ -1332,16 +1332,19 @@ body.is-staging::after {
    「日付移動UIが画面外へ出ない」ことを構造的に保証している。ページ側が別に
    スクロールするとその保証が崩れるため、この画面の間だけ body を固定する。 */
 body.assignment-calendar-open { overflow: hidden; }
-/* 配置カレンダー自身の高さは 100dvh から --ac-host-offset を引いて決まる。
-   ポータルは下部ナビが画面下に固定で乗るため、そのぶんを差し引く。 */
 #screen-assignment-calendar { padding: 0; }
 /* 配置カレンダーは画面いっぱいに使う。main の余白が残ると
    月表示に使える高さが削られ、1日あたりの表示件数が落ちる。 */
 body.assignment-calendar-open main { padding: 0; }
-#screen-assignment-calendar .ac-root { --ac-nav-h: 64px; }
-body.assignment-calendar-open #screen-assignment-calendar .ac-root {
-  height: calc(100dvh - var(--ac-host-offset, 0px) - var(--ac-nav-h));
-}
+/* 高さの決め方はカレンダー側(assignment-calendar.css)に任せる。
+   以前はここで下部ナビを 64px と決め打ちして差し引いていたが、実際の下部ナビは
+   82px あり、月表示の最後の週が下部ナビの下へ隠れていた(2026-09-06 実機指摘)。
+   いまはカレンダー自身が画面下の固定バーを実測し --ac-host-bottom へ入れるため、
+   ここで高さを上書きしない(決め打ちの数値を2か所に置かない)。 */
+/* この画面の間はポータルの飾りヘッダーを隠す。残しておくと、専用ページから開いた
+   ときとポータルから開いたときで月表示の1日あたり件数が変わり、「開き方によって
+   見え方が違う」状態になる(2026-09-06 実機指摘)。戻る導線は下部ナビのホーム。 */
+body.assignment-calendar-open .app-header { display: none; }
 
 /* 初回登録で「あなたは〇〇さんですね」と確認させるための氏名表示。
    見間違えると他人のアカウントを登録してしまうため、本文より明確に大きくする。 */

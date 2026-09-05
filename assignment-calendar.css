@@ -46,8 +46,11 @@
      その高さ。JS側が実測して入れる。 */
   display: flex;
   flex-direction: column;
-  height: calc(100vh - var(--ac-host-offset, 0px));
-  height: calc(100dvh - var(--ac-host-offset, 0px));
+  /* --ac-host-bottom は、画面の下に固定で乗っているもの(社員ポータルの下タブ等)の高さ。
+     上だけ引くと、月表示の最後の週がその下タブに隠れる(2026-09-06 実機指摘)。
+     載せる側が決め打ちで指定するのではなく、カレンダー自身が実測して入れる。 */
+  height: calc(100vh - var(--ac-host-offset, 0px) - var(--ac-host-bottom, 0px));
+  height: calc(100dvh - var(--ac-host-offset, 0px) - var(--ac-host-bottom, 0px));
   overflow: hidden;
 }
 .ac-header, .ac-weeknav, .ac-offline { flex: 0 0 auto; }
