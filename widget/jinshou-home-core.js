@@ -47,7 +47,7 @@ const FAMILY_DAYS = {
 // 画面に出す版番号。iPhoneへ届いたのが古い版かどうかを、実機を見ただけで判別するため。
 // 見た目を変えたら必ず1つ上げる(2026-09-05、届いていた版が古く「変わっていない」と
 // 見えた実例があったため)。
-const WIDGET_VERSION = 'v4';
+const WIDGET_VERSION = 'v5';
 
 function isLockScreen(family) {
     return String(family || '').startsWith('accessory');
