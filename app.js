@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v149-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T06:23:11.566Z';
+const BUILD_DEPLOYED_AT = '2026-09-05T06:35:38.199Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -932,6 +932,9 @@ const LOGIN_RETURN_KEY = 'jinshou_login_return';
 const LOGIN_RETURN_TARGETS = {
   calendar: { kind: 'page', path: 'calendar/' },
   'daily-report': { kind: 'screen', screen: 'daily-report' },
+  // 配置の確認。ホームの「配置予定」カードに「配置を確認する」ボタンが並んでいるので、
+  // そこまで連れて行く。専用画面は作らない(押す場所を増やさない)。
+  'assignment-confirm': { kind: 'screen', screen: 'menu', focus: 'home-assignment-card' },
 };
 const LOGIN_RETURN_DATE_KEY = 'jinshou_login_return_date';
 
@@ -971,14 +974,52 @@ function consumeLoginRedirect() {
     sessionStorage.removeItem(LOGIN_RETURN_KEY);
     sessionStorage.removeItem(LOGIN_RETURN_DATE_KEY);
   } catch (e) { /* 消せなくても遷移はする */ }
+  // 2026-09-05: URL の ?next=/&date= も消す(1回だけ使う)。showScreen は location.search を保ったまま
+  // 履歴を積むため、残したままだと enterMenu のたびにここで URL の next を読み直して日報へ送り返し、
+  // ホームへ戻れなくなる(test-widget-deeplink-browser.js 2-4 で再現)。
+  try {
+    const u = new URL(location.href);
+    if (u.searchParams.has('next') || u.searchParams.has('date')) {
+      u.searchParams.delete('next');
+      u.searchParams.delete('date');
+      history.replaceState(history.state, '', u.pathname + u.search + u.hash);
+    }
+  } catch (e) { /* URL を触れない環境では従来どおり */ }
   if (target.kind === 'page') {
     location.replace(target.path + (date ? `?date=${date}` : ''));
     return true;
   }
   // 画面内の移動。日報はその日を開いた状態にする(既存の前指定の仕組みを使う)。
   if (date) dailyReportPrefillDate = date;
+  if (target.screen === 'menu') {
+    // ホームは enterMenu が中身を描くので、そちらへ回す(この関数から呼び戻すと無限に回る)。
+    pendingHomeFocus = target.focus || null;
+    return false;
+  }
   showScreen(target.screen);
   return true;
+}
+
+// ホームを開いたあとに寄せたいカードのid(ウィジェットの「確認」から来たとき等)。
+let pendingHomeFocus = null;
+function consumeHomeFocus() {
+  const id = pendingHomeFocus;
+  pendingHomeFocus = null;
+  if (!id) return;
+  // カードは配置データを取ってから描かれるので、描き終わるのを少し待ってから寄せる。
+  let tries = 0;
+  const go = () => {
+    const el = document.getElementById(id);
+    tries += 1;
+    if (el && el.style.display !== 'none' && el.offsetHeight > 0) {
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      el.classList.add('home-focus-flash');
+      setTimeout(() => el.classList.remove('home-focus-flash'), 2000);
+      return;
+    }
+    if (tries < 20) setTimeout(go, 250);
+  };
+  setTimeout(go, 300);
 }
 
 function enterMenu(replace) {
@@ -1007,6 +1048,7 @@ function enterMenu(replace) {
   renderHomeMyOutingBanner(session);
   renderHomeAssignmentCard(session);
   refreshPinWeakBanner(session);
+  consumeHomeFocus();
 }
 
 // 本人が現在「外出・一時離脱」中の場合、ホーム最上部に目立つバナーで表示し、その場で
