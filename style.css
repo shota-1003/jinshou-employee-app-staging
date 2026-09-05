@@ -411,6 +411,24 @@ button.link {
    読み込み完了までは薄い枠のプレースホルダーを見せ、タップで拡大(openImageZoom)する。 */
 .receipt-thumb-wrap { margin-top: 8px; }
 /* 日報管理: 本日の社員の分類内訳(提出対象/対象外)。数字はタップで対象者一覧へ。 */
+/* 日報管理の日付ナビ(2026-09-05): [＜] 2026年9月5日(土) [今日] [＞] を1行に収める。
+   共通 button(width:100%/padding:14px)や button.secondary(margin-top:10px)を継がず、
+   iPhone 375px で横に溢れない固定幅ボタン+可変幅の日付ラベルで構成する。 */
+#drm-date-nav.card { padding: 6px 8px; margin-bottom: 10px; }
+.drm-date-nav-row { display: flex; align-items: center; gap: 6px; min-height: 36px; }
+.drm-date-btn {
+  flex: none; width: 36px; height: 34px; padding: 0; margin: 0; border-radius: var(--radius-sm);
+  background: var(--info-bg); color: var(--text); border: none; box-shadow: none;
+  font-size: 14px; font-weight: 800; line-height: 34px; text-align: center;
+}
+.drm-date-btn.drm-date-today { width: auto; padding: 0 10px; font-size: 13px; }
+.drm-date-btn:disabled { opacity: .45; }
+.drm-date-btn:active:not(:disabled) { transform: translateY(1px); }
+.drm-date-label {
+  flex: 1; min-width: 0; text-align: center; font-weight: 800; font-size: 15px; letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.drm-date-label.is-today { color: var(--primary); }
 .drm-breakdown-card { padding: 12px 14px; }
 .drm-bd-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 14px; }
 .drm-bd-total { font-size: 15px; border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 4px; }

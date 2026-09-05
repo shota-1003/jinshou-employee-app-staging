@@ -209,6 +209,8 @@
             month_data: null,
             day_data: null,
             issues: null,
+            issuesOpen: false,   // 警告を開いているか(既定は畳む。一覧性を優先する)
+            memberOpen: {},      // 現場ID -> 社員名を全員出しているか
             confirmation: null,
             categories: [],
             employees: [],
@@ -1391,7 +1393,36 @@
 
             if (state.canEdit && state.issues && state.issues.issues && state.issues.issues.length) {
                 const box = el('div', 'ac-issues');
-                for (const i of state.issues.issues) {
+                // 警告は「重大さ」ではなく「件数」で畳む。
+                // 時間の重なりは1人ずつ1件になるため、実データで15件出た日は警告だけで
+                // 2000px近くになり、現場が1件も見えなかった(2026-09-05 実機相当データで確認)。
+                // 重要なもの(error)を先頭へ寄せたうえで先頭2件だけ出し、残りは件数で畳む。
+                // 畳んでも「何が何件あるか」は必ず読めるようにする。
+                // 畳んでいるあいだは見出しの1行だけにする。1件でも本文を出すと
+                // 承認・編集のボタン2つが付いて100px近く使い、現場が1つ隠れる。
+                const ISSUE_PREVIEW = 0;
+                const rank = (x) => (x.severity === 'error' ? 0 : (x.severity === 'warning' ? 1 : 2));
+                const all = state.issues.issues.slice().sort((a, b) => rank(a) - rank(b));
+                const collapse = all.length > 1 && !state.issuesOpen;
+                const shown = collapse ? all.slice(0, ISSUE_PREVIEW) : all;
+                const foldable = all.length > 1;
+                if (foldable) {
+                    const kinds = {};
+                    const add = (k) => { kinds[k] = (kinds[k] || 0) + 1; };
+                    for (const x of all) {
+                        if (x.rule === 'no_leader') add('職長が未定');
+                        else if (x.rule === 'double_booking' || x.rule === 'vehicle_conflict') add('時間の重なり');
+                        else if (x.rule === 'double_booking_approved' || x.rule === 'vehicle_conflict_approved') add('承認済みの重なり');
+                        else add('その他');
+                    }
+                    const label = Object.entries(kinds).map(([k, v]) => `${k} ${v}件`).join(' / ');
+                    const bar = el('button', 'ac-issuefold', collapse
+                        ? `▼ 確認したいこと ${all.length}件（${label}）›`
+                        : `▲ 確認したいこと ${all.length}件（${label}）を畳む`);
+                    bar.addEventListener('click', () => { state.issuesOpen = !state.issuesOpen; render(); });
+                    box.append(bar);
+                }
+                for (const i of shown) {
                     const line = el('div', 'ac-issue ac-' + i.severity, i.message);
                     // 意図した複数現場配置なら承認して警告から外せるようにする。
                     // 本当に危険な二重配置が警告の山に埋もれないようにするため。
@@ -1584,12 +1615,15 @@
                 meta.push(`社員${s.employee_count}人 外注${s.subcontractor_count}人`);
             }
             if (!s.counts_as_deployment) meta.push('※配置人数に含めない種別');
-            box.append(el('div', 'ac-schedmeta', meta.join(' ／ ')));
+            if (meta.length) box.append(el('div', 'ac-schedmeta', meta.join(' ／ ')));
 
             // 通知済みなのに未確認の人だけを色で示す。未確認者の名前を別バッジで
             // もう一度並べると、同じ名前が2回出て日別詳細の行数が無駄に増える。
             const mem = el('div', 'ac-members');
-            for (const m of s.members) {
+            const MEM_PREVIEW = 5;
+            const openAll = !!state.memberOpen[s.id];
+            const memList = openAll ? s.members : s.members.slice(0, MEM_PREVIEW);
+            for (const m of memList) {
                 const confirmed = m.notification_status === 'confirmed';
                 const waiting = m.notification_status === 'notified';
                 const haul = m.assignment_kind === 'haul';
@@ -1629,6 +1663,24 @@
                 // 現場を見たいのに社員を押してしまう事故が起きていた。
                 // 「1人を別の現場へ移す」操作は現場詳細の中から行う。
                 mem.append(chip);
+            }
+            if (s.members.length > memList.length) {
+                const more = el('button', 'ac-memmore', `他${s.members.length - memList.length}人 ▾`);
+                more.title = 'この現場の残りの人を表示します';
+                more.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    state.memberOpen[s.id] = true;
+                    render();
+                });
+                mem.append(more);
+            } else if (openAll && s.members.length > MEM_PREVIEW) {
+                const less = el('button', 'ac-memmore', '畳む ▴');
+                less.addEventListener('click', (ev) => {
+                    ev.stopPropagation();
+                    delete state.memberOpen[s.id];
+                    render();
+                });
+                mem.append(less);
             }
             box.append(mem);
 

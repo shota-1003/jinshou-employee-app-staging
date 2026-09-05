@@ -378,10 +378,12 @@
 .ac-badge.ac-warn { background: #fde8cf; color: #8a4b12; }
 .ac-schedmeta { font-size: 11px; color: var(--ac-muted); margin-top: 1px; }
 .ac-members { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
+/* 1画面に入る現場数を増やすため、チップの余白を詰める。
+   文字は12pxまでにとどめ、押せる高さは26px以上を保つ(手袋でも押せる下限)。 */
 .ac-mem {
-  font-size: 12.5px; font-weight: 600; padding: 5px 7px; border-radius: 3px;
+  font-size: 12px; font-weight: 600; padding: 3px 6px; border-radius: 3px;
   background: #eef1f5; border: 1px solid var(--ac-line);
-  display: inline-flex; align-items: center; min-height: 30px;
+  display: inline-flex; align-items: center; min-height: 26px;
 }
 .ac-mem.ac-confirmed { background: #e3f4e8; border-color: #a8d8b6; }
 .ac-mem.ac-unconfirmed { background: #fdf0e0; border-color: #e2c197; }
@@ -646,6 +648,21 @@
 
 /* ---------------- 重複警告のボタン ---------------- */
 .ac-issuebtns { display: flex; gap: 6px; margin-top: 5px; flex-wrap: wrap; }
+/* 警告の折りたたみバー。危険な警告(error)は畳まれず必ず出る。 */
+.ac-issuefold {
+  display: block; width: 100%; text-align: left; cursor: pointer;
+  border: 0; background: transparent; color: #7a5b12;
+  font-size: 12px; font-weight: 700; padding: 6px 0; min-height: 32px;
+}
+.ac-issuefold:active { opacity: .6; }
+/* 「他N人」。押すと同じ場所で全員に開く。 */
+.ac-memmore {
+  font-size: 11.5px; font-weight: 700; color: var(--ac-muted);
+  background: #f2f5f9; border: 1px dashed var(--ac-line-strong);
+  border-radius: 3px; padding: 3px 8px; min-height: 26px;
+  display: inline-flex; align-items: center; cursor: pointer;
+}
+.ac-memmore:active { background: #e6ebf2; }
 .ac-issuebtns .ac-btn { min-height: 36px; }
 
 /* ---------------- 「どちらを編集しますか？」の選択行 ---------------- */
@@ -672,15 +689,15 @@
 .ac-sched {
   border-left-width: 10px;
   border-bottom: 2px solid #e3e7ee;
-  padding: 4px 8px 5px 8px;
+  padding: 3px 8px 4px 8px;
 }
-.ac-sched + .ac-sched { margin-top: 3px; }
+.ac-sched + .ac-sched { margin-top: 2px; }
 
 /* 現場名を最優先で読ませる。人数・種別・確認は脇役として少し小さくする。 */
 .ac-schedname { font-size: 15px; line-height: 1.25; }
 .ac-sched .ac-badge { font-size: 10px; padding: 1px 5px; }
 .ac-sched .ac-schedmeta { margin: 1px 0 2px; }
-.ac-members { gap: 2px; margin-top: 3px; }
+.ac-members { gap: 2px; margin-top: 2px; }
 
 /* 人の区分。色の面積は小さく保ち、必ず短い文字ラベルを添える。
    色だけで判断させない(色覚差・屋外の直射日光下でも読めるように)。 */

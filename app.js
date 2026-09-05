@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v146-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T02:14:46.584Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v147-staging';
+const BUILD_DEPLOYED_AT = '2026-09-05T03:02:57.037Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -55,7 +55,7 @@ window.ClientErrorReporter.init({
 // ブラウザ用コードのためscripts/lib/optional-degrade-rpcs.js(QA側の正本)をrequireできず値を
 // 複製している。このSetを変更する際は必ずscripts/lib/optional-degrade-rpcs.jsも同時に更新すること
 // (2026-09-04: 更新漏れでQAが想定内の404を障害として誤検知した教訓、errors.id=1300)。
-const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule']);
+const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule', 'admin_list_lucky_draws', 'admin_run_lucky_draw', 'admin_set_lucky_payout']);
 async function rpc(name, params) {
   const headers = {
     apikey: SUPABASE_ANON_KEY,
@@ -288,6 +288,47 @@ const ADMIN_SCREENS = new Set([
   'vehicle-admin',
 ]);
 let inAdminMode = false;
+
+// 管理者画面の論理的な親画面(PARENT_ROUTE、2026-09-05 ユーザー指示)。
+// 管理者画面の「戻る」はブラウザ履歴(どこから来たか)に任せず、この表で定めた親画面へ必ず戻る。
+// 同じ画面を複数の入口(ダッシュボード/日報管理/人員・台帳管理/HOMEの件数カード)から開いても
+// 「戻る先がバラバラ」にならないための単一の正。index.html の各管理者画面の戻るボタン(data-nav)も
+// この表と一致させる(scripts/audit-portal-nav.js の auditParentRoutes() が不一致を検出する)。
+// 個人側の画面(申請・履歴など)は従来どおり履歴ベース(goBackToOrigin)のまま。
+const PARENT_ROUTE = Object.freeze({
+  'admin-dashboard': 'menu',
+  // ダッシュボード直下(管理機能の一覧から開く画面)
+  'admin': 'admin-dashboard', 'admin-announce': 'admin-dashboard', 'admin-request-list': 'admin-dashboard',
+  'admin-all-requests': 'admin-dashboard', 'admin-role-management': 'admin-dashboard', 'anon-admin': 'admin-dashboard',
+  'category-review': 'admin-dashboard', 'info-change-admin': 'admin-dashboard', 'supply-master-admin': 'admin-dashboard',
+  'entertainment-admin': 'admin-dashboard', 'site-admin': 'admin-dashboard', 'leave-admin': 'admin-dashboard',
+  'employee-summary': 'admin-dashboard', 'attendance-matrix': 'admin-dashboard', 'bulk-expense-admin': 'admin-dashboard',
+  'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
+  'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
+  'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
+  'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
+  // 注: ADMIN_SCREENS にある 'master-management-hub' は index.html に画面が無い(死んだ定義)ため、ここには載せない。
+  // 匿名相談
+  'anon-admin-thread': 'anon-admin',
+  // 人員・台帳管理(名簿・資格・健診・常用伝票・支給品・初回コード・外注マスタ)
+  'qual-admin': 'personnel-ledger-hub', 'employee-directory': 'personnel-ledger-hub', 'health-admin': 'personnel-ledger-hub',
+  'joyo-denpyo-admin': 'personnel-ledger-hub', 'joyo-denpyo-summary': 'personnel-ledger-hub', 'supply-holdings-admin': 'personnel-ledger-hub',
+  'first-login-codes-admin': 'personnel-ledger-hub', 'subcontractor-company-admin': 'personnel-ledger-hub', 'subcontractor-worker-admin': 'personnel-ledger-hub',
+  // 社員名簿の下
+  'employee-create': 'employee-directory', 'employee-detail': 'employee-directory',
+  // 有給管理・経費精算・まとめ精算の下
+  'leave-grant': 'leave-admin', 'employee-monthly-detail': 'employee-summary', 'expense-payment': 'employee-monthly-detail',
+  'bulk-expense-detail': 'bulk-expense-admin',
+  // 日報管理の下
+  'daily-report-admin': 'daily-report-management', 'daily-report-needs-review-admin': 'daily-report-management',
+  'daily-report-edit-requests-admin': 'daily-report-management', 'daily-report-people': 'daily-report-management',
+  'daily-report-detail': 'daily-report-management',
+});
+// 現在表示中の画面IDを返す(戻る先の決定に使う)。
+function currentScreenId() {
+  const el = document.querySelector('.screen.active');
+  return el ? el.id.replace(/^screen-/, '') : null;
+}
 // 「戻る」ボタンの遷移元復帰(2026-08-28)で使う、アプリ内で実際に何回画面遷移したかのカウンタ。
 // showScreenでpushStateするたびに増え、popstateで戻るたびに減る。0の間はまだ本当の遷移元が
 // 無い(リロード直後等)ことを示す。
@@ -10037,8 +10078,10 @@ async function loadDailyReportNeedsReviewAdmin() {
         // 表示名が違っても同一site_idなら不一致にしない(表示値と判定結果の論理矛盾を避ける)。
         const reasonRaw = (r.review_reason || '');
         const siteMismatch = /CAL_MISMATCH|現場が異な/.test(reasonRaw) || (r.consistency_issues || []).some((i) => /現場.*異な|現場.*不一致/.test(i.message || ''));
-        const reasonText = (r.consistency_issues || []).map((iss) => iss.message).join(' / ')
-          || reasonRaw.replace(/\[[A-Z_]+\]/g, '').split('/').map((s) => s.trim()).filter(Boolean).join(' / ')
+        // [LATE](後日提出)は要確認の理由ではなく別属性(提出日時の横に「後日提出」タグで示す)。理由文には出さない。
+        const isLateNote = (s) => /^\[LATE\]/.test(s.trim()) || /^後日提出\(勤務日から日をおいて/.test(s.trim());
+        const reasonText = (r.consistency_issues || []).map((iss) => iss.message).filter((m) => !isLateNote(String(m || ''))).join(' / ')
+          || reasonRaw.split('/').filter((s) => !isLateNote(s)).map((s) => s.replace(/\[[A-Z_]+\]/g, '').trim()).filter(Boolean).join(' / ')
           || '要確認';
         return `
         <div class="card" style="margin-top:8px;padding:10px;background:var(--surface-2,rgba(255,255,255,0.03));">
@@ -10046,7 +10089,7 @@ async function loadDailyReportNeedsReviewAdmin() {
           <div class="field-row"><span>日報現場</span><span>${r.site_name || '(未設定)'}</span></div>
           <div class="field-row"><span>配置現場</span><span>${r.assignment_site || '(配置なし)'}${siteMismatch ? ' <span class="mini-tag danger">不一致</span>' : ''}</span></div>
           <div class="field-row"><span>勤務区分 / 人工</span><span>${r.work_type || '-'} / ${Number(r.headcount || 0)}人工${r.overtime_hours ? ' ・残業' + r.overtime_hours + 'h' : ''}</span></div>
-          <div class="field-row"><span>提出日時</span><span>${r.submitted_at ? new Date(r.submitted_at).toLocaleString('ja-JP') : '-'}</span></div>
+          <div class="field-row"><span>提出日時</span><span>${r.submitted_at ? new Date(r.submitted_at).toLocaleString('ja-JP') : '-'}${drmLateTagHtml(r) ? ' ' + drmLateTagHtml(r) : ''}</span></div>
           <div class="mini-tag danger" style="display:block;margin-top:4px;">⚠ 理由: ${reasonText}</div>
           <div class="button-row" style="margin-top:8px;">
             <button type="button" class="secondary" data-ack-id="${r.id}">問題なしとして確定</button>
@@ -10602,20 +10645,17 @@ function renderDrmDateNav() {
   if (!nav) return;
   const today = todayJST();
   const shift = (days) => { const d = new Date(drmSelectedDate + 'T00:00:00'); d.setDate(d.getDate() + days); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
-  // コンパクトな1行ナビ: [‹] 日付 [今日バッジ] [›] [今日へ]。日付移動は主役にせず高さを最小化する。
-  // 「今日」バッジと「今日へ」ボタンで行の高さが変わらないよう、右端は常に固定幅の枠を確保する。
-  nav.style.padding = '4px 6px';
-  nav.style.marginBottom = '8px';
+  // コンパクトな横一列ナビ(2026-09-05 ユーザー指示): [＜] 2026年9月5日(土) [今日] [＞]。
+  // 見た目は style.css の .drm-date-nav-row / .drm-date-btn に集約(共通 button.secondary の margin-top や
+  // 14px padding を継がない)。「今日」は常に同じ位置に置き、今日を表示中は押せない状態にする
+  // (要素の出入りで行の高さ・幅が変わらない)。iPhone 375px で横に溢れないことをスクリーンショットで確認済み。
+  const isToday = drmSelectedDate === today;
   nav.innerHTML = `
-    <div style="display:flex;align-items:center;gap:6px;">
-      <button type="button" class="secondary" id="drm-date-prev" style="flex:none;width:auto;padding:5px 11px;">‹</button>
-      <div style="flex:1;min-width:0;text-align:center;font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-        ${formatJpDateWithDow(drmSelectedDate)}${drmSelectedDate === today ? ' <span class="mini-tag info" style="vertical-align:middle;">今日</span>' : ''}
-      </div>
-      <button type="button" class="secondary" id="drm-date-next" style="flex:none;width:auto;padding:5px 11px;">›</button>
-      <div style="flex:none;width:56px;text-align:right;">
-        ${drmSelectedDate === today ? '' : '<button type="button" class="secondary" id="drm-date-today" style="width:auto;padding:5px 8px;font-size:12px;">今日へ</button>'}
-      </div>
+    <div class="drm-date-nav-row">
+      <button type="button" class="drm-date-btn" id="drm-date-prev" aria-label="前の日">＜</button>
+      <div class="drm-date-label${isToday ? ' is-today' : ''}">${formatJpDateWithDow(drmSelectedDate)}</div>
+      <button type="button" class="drm-date-btn drm-date-today" id="drm-date-today" ${isToday ? 'disabled aria-current="date"' : ''}>今日</button>
+      <button type="button" class="drm-date-btn" id="drm-date-next" aria-label="次の日">＞</button>
     </div>`;
   // 日付切替時は、選択日のすべての集計(件数要約・内訳バケット・サマリーカード・未提出バナー・一覧)を
   // 選択日で再取得する。renderだけ日付を変えて中身が本日固定のまま、という状態を作らない。
@@ -10782,6 +10822,21 @@ function drmStatusBadge(f) {
   // submitted: 照合の要確認(不一致)か、比較対象なしの提出済みかを分ける。
   if (f.needs_review || f.validation_status === 'anomaly') return { style: 'background:#e0a021;color:#fff;', label: '要確認' };
   return { style: 'background:#dbeafe;color:#1d4ed8;', label: '提出済み' };
+}
+
+// 後日提出(勤務日から2日を超えて提出)は「いつ提出したか」の別属性。照合ステータス(上の4色)の理由には
+// 一切しない(2026-09-05 ユーザー指示: 配置一致なら後日提出でも🟢)。サーバ側 evaluate_daily_report_auto_confirm の
+// [LATE] 判定(JSTの提出日 > 勤務日+2)と同じ基準で、表示用のタグだけを出す。
+function drmIsLateSubmission(r) {
+  if (!r || !r.report_date || !r.submitted_at) return false;
+  const rd = new Date(String(r.report_date).slice(0, 10) + 'T00:00:00');
+  const sd = new Date(new Date(r.submitted_at).toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  sd.setHours(0, 0, 0, 0);
+  return Math.round((sd - rd) / 86400000) > 2;
+}
+function drmLateTagHtml(rows) {
+  const list = Array.isArray(rows) ? rows : [rows];
+  return list.some((r) => drmIsLateSubmission(r)) ? '<span class="mini-tag muted drm-late-tag" title="勤務日から日をおいて提出された日報(照合結果には影響しません)">後日提出</span>' : '';
 }
 
 async function loadDailyReportManagement() {
@@ -11134,6 +11189,7 @@ function renderDrmAll() {
         <div class="row1"><span>${personName}</span><span>${f.report_date}</span></div>
         <div class="row2">${sites}</div>
         <span class="status-badge ${b.cls || ''}" style="${b.style || ''}">${b.label}</span>
+        ${drmLateTagHtml(g.rows)}
         ${g.rows.some((r) => r.reflect_override_work_type) ? '<span class="mini-tag info">反映値を調整済み</span>' : ''}
         ${g.rows.every((r) => r.reflected_to_sheet_at) ? '<span class="mini-tag info">シート反映済み</span>' : ''}
         <div class="checkbox-row"><input type="checkbox" class="drm-row-check" data-key="${g.key}" ${drmSelected.has(g.key) ? 'checked' : ''}><label>選択</label></div>
@@ -11169,7 +11225,7 @@ function renderDrmAll() {
         <td>${site1.work_type || '-'}</td>
         <td>${site2.site_name ? `${site2.site_name}(${site2.work_type || ''})` : '-'}</td>
         <td>${f.submitted_at ? new Date(f.submitted_at).toLocaleString('ja-JP') : '-'}</td>
-        <td><span class="status-badge ${b.cls || ''}" style="${b.style || ''}">${b.label}</span>${g.rows.some((r) => r.reflect_override_work_type) ? ' <span class="mini-tag info">調整済み</span>' : ''}</td>
+        <td><span class="status-badge ${b.cls || ''}" style="${b.style || ''}">${b.label}</span>${drmLateTagHtml(g.rows) ? ' ' + drmLateTagHtml(g.rows) : ''}${g.rows.some((r) => r.reflect_override_work_type) ? ' <span class="mini-tag info">調整済み</span>' : ''}</td>
         <td>${f.confirmed_by ? f.confirmed_by : (f.report_status === 'confirmed' || f.report_status === 'rejected' ? '-' : '未確認')}</td>
         <td>${reflected ? '反映済み' : '未反映'}</td>
       </tr>
@@ -12795,8 +12851,9 @@ function applyStagingIndicator() {
 function init() {
   applyStagingIndicator();
   hydrateIcons(document);
-  // 演出プレビューはテスト環境(Staging)の管理者だけに見せる(本番の一般社員には公開しない)。
-  if (IS_STAGING) document.querySelectorAll('.lucky-preview-entry').forEach((el) => { el.style.display = ''; });
+  // 演出プレビュー・ラッキー賞管理はテスト環境(先行更新版)の管理者だけに見せる(本番の一般社員には公開しない)。
+  // ラッキー賞は本番反映禁止のため、管理入口も本番では出さない(2026-09-05: 本番露出で404が障害として上がっていた)。
+  if (IS_STAGING) document.querySelectorAll('.lucky-preview-entry, .lucky-admin-entry').forEach((el) => { el.style.display = ''; });
 
   document.getElementById('login-btn').addEventListener('click', doSubmitEmployeeCode);
   // 外注の方の入口(仕様3): 外注ポータル(/sub/)へ遷移。社員番号入力とは別導線。
@@ -13315,6 +13372,17 @@ function init() {
       // 完了画面(screen-done)からの遷移は、完了画面自体を履歴に残さず置き換える
       // (この後さらに「戻る」を押しても完了画面へ戻ってくる=無限ループに見える、を防ぐ)。
       const leavingDone = document.getElementById('screen-done').classList.contains('active');
+      // 管理者画面の「戻る」は論理的な親画面(PARENT_ROUTE)へ固定(2026-09-05)。履歴の遷移元やボタンの
+      // data-nav ではなく表を正とする(index.html 側の data-nav は表と一致させ、監査で検出する)。
+      const isBackControl = el.classList.contains('back-link') || el.classList.contains('back-to-origin');
+      if (isBackControl) {
+        const cur = currentScreenId();
+        if (cur && PARENT_ROUTE[cur]) {
+          if (PARENT_ROUTE[cur] === 'menu') { enterMenu(leavingDone); return; }
+          showScreen(PARENT_ROUTE[cur], { replace: leavingDone });
+          return;
+        }
+      }
       if (el.classList.contains('back-to-origin')) { goBackToOrigin(target); return; }
       if (target === 'menu') { enterMenu(leavingDone); return; }
       if (target === 'expense') { showScreen('expense-select', { replace: leavingDone }); return; }
@@ -13418,7 +13486,8 @@ function init() {
   SCREEN_ENTER_HOOKS['loan-history'] = loadLoanHistory;
   SCREEN_ENTER_HOOKS['loan-admin'] = loadLoanAdminList;
   SCREEN_ENTER_HOOKS['lucky-month'] = () => { wireLucky(); const now = todayJST(); luckyYM = { y: Number(now.slice(0, 4)), m: Number(now.slice(5, 7)) }; loadLuckyMonth(); };
-  SCREEN_ENTER_HOOKS['lucky-admin'] = () => { wireLucky(); loadLuckyAdmin(); };
+  // 本番(IS_STAGING=false)ではラッキー賞管理を開かせない(直リンク・履歴復元でも RPC を呼ばずホームへ戻す)。
+  SCREEN_ENTER_HOOKS['lucky-admin'] = () => { if (!IS_STAGING) { enterMenu(); return; } wireLucky(); loadLuckyAdmin(); };
   SCREEN_ENTER_HOOKS['lucky-preview'] = () => { if (!IS_STAGING) { enterMenu(); return; } wireLucky(); loadLuckyPreview(); };
   SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;

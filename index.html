@@ -412,7 +412,7 @@
 
   <!-- 借入申請 管理(管理者) -->
   <section id="screen-loan-admin" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">借入申請の管理</div>
     <div id="loan-admin-list"><div class="hint">読み込み中...</div></div>
   </section>
@@ -441,7 +441,7 @@
 
   <!-- ラッキー賞 管理(管理者) -->
   <section id="screen-lucky-admin" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">ラッキー賞管理</div>
     <div class="card" id="lucky-admin-summary"></div>
     <div id="lucky-admin-list"></div>
@@ -449,7 +449,7 @@
 
   <!-- 演出プレビュー(管理者・Stagingのみ) -->
   <section id="screen-lucky-preview" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">演出プレビュー(テスト)</div>
     <div class="hint" id="lucky-preview-note" style="margin-bottom:10px;"></div>
     <div class="lucky-preview-grid">
@@ -845,7 +845,7 @@
   <!-- 日報管理(管理者/日報担当): 日付・社員・外注・現場・状態で検索、本日の未提出を確認、
        複数件まとめて確認、外注マスターへの導線。サクミルの日報機能を置き換える中核画面。 -->
   <section id="screen-daily-report-management" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">日報管理</div>
 
     <!-- 日報管理権限(nippo_admin/executive)で、日報・経費申請から入力された承認待ちの新規現場を確認・承認/却下する入口。
@@ -992,7 +992,7 @@
 
   <!-- 外注会社マスター管理 -->
   <section id="screen-subcontractor-company-admin" class="screen">
-    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">外注会社管理</div>
     <div class="card">
       <div class="form-title" style="font-size:15px;">外注会社を追加</div>
@@ -1010,7 +1010,7 @@
 
   <!-- 外注作業員マスター管理 -->
   <section id="screen-subcontractor-worker-admin" class="screen">
-    <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">外注作業員管理</div>
     <div class="card">
       <div class="form-title" style="font-size:15px;">外注作業員を追加</div>
@@ -1174,7 +1174,7 @@
 
   <!-- 資格管理(管理者) -->
   <section id="screen-qual-admin" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">資格・免許管理</div>
     <div class="search-bar">
       <span class="icon-slot" data-icon="search"></span>
@@ -2033,9 +2033,11 @@
         <div class="menu-item-body">借入申請の管理<span class="desc">社員からの借入申請を承認/却下/差し戻し</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
-      <button type="button" class="menu-item" data-nav="lucky-admin">
+      <!-- ラッキー賞は本番反映禁止(未完成)。管理入口も演出プレビューと同じく先行更新版(IS_STAGING)だけに出す。
+           本番で表示すると admin_list_lucky_draws が404になり「本物の障害」として監視に上がるため(2026-09-05)。 -->
+      <button type="button" class="menu-item lucky-admin-entry" data-nav="lucky-admin" style="display:none;">
         <span class="icon-slot" data-icon="gift"></span>
-        <div class="menu-item-body">ラッキー賞管理<span class="desc">当選・支給状況・年間予算を確認</span></div>
+        <div class="menu-item-body">ラッキー賞管理<span class="desc">当選・支給状況・年間予算を確認(テスト環境のみ)</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item lucky-preview-entry" data-nav="lucky-preview" style="display:none;">
@@ -2295,7 +2297,7 @@
   <!-- 支給品マスター管理(管理者) -->
   <!-- 支給品保有一覧(横断): 「今、誰が、何を、いくつ持っているか」を全社員分まとめて確認する -->
   <section id="screen-supply-holdings-admin" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">支給品保有一覧</div>
     <div class="hint" style="margin-bottom:10px;">全社員の現在の保有状況です。初期登録・通常支給・追加支給・交換をまとめて集計しています。</div>
     <div class="search-bar">
@@ -2430,7 +2432,7 @@
   </section>
 
   <section id="screen-site-admin" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">現場管理</div>
     <div class="card">
       <div class="form-title" style="font-size:15px;">新規現場を登録</div>
@@ -2963,7 +2965,7 @@
   </section>
 
   <section id="screen-employee-directory" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">社員名簿</div>
     <button type="button" class="secondary" id="employee-create-open-btn" data-nav="employee-create" style="margin-bottom:12px;">＋ 新入社員を登録する</button>
     <div class="search-bar">
@@ -3302,7 +3304,7 @@
 
   <!-- 健康診断 管理(ダッシュボードからのドリルダウン) -->
   <section id="screen-health-admin" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">健康診断管理</div>
     <div class="filter-row">
       <button type="button" class="filter-chip active" data-health-filter="">すべて</button>
@@ -3475,7 +3477,7 @@
 
   <!-- 匿名相談スレッド(管理者側) -->
   <section id="screen-anon-admin-thread" class="screen">
-    <button type="button" class="back-link back-to-origin" data-nav="anon-admin">戻る</button>
+    <button type="button" class="back-link back-to-origin" data-nav="anon-admin">匿名相談管理に戻る</button>
     <div class="form-title">相談番号: <span id="anon-admin-thread-code"></span></div>
     <label for="anon-admin-status-select">対応状況</label>
     <select id="anon-admin-status-select">
@@ -3570,7 +3572,7 @@
 
   <!-- 常用伝票 管理者検索 -->
   <section id="screen-joyo-denpyo-admin" class="screen">
-    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
     <div class="form-title">常用伝票管理</div>
     <div class="hint" id="jda-employee-filter-hint" style="display:none;"></div>
     <button type="button" class="link" id="jda-clear-employee-filter-btn" style="display:none;">すべての社員の伝票を表示</button>
