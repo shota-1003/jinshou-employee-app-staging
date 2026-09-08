@@ -1517,3 +1517,73 @@ body.assignment-calendar-open .app-header { display: none; }
   text-align: center;
   text-decoration: none;
 }
+
+/* 経費申請の全体追跡(2026-09-06・X2)。承認待ち/承認済み/履歴/台帳/要確認 のどの入口から
+   開いても同じ項目が同じ見た目で出る。iPhone 375px で横に溢れないよう、ラベルと値は
+   折り返し可・値は右寄せで幅を分け合う。 */
+.exd-card { padding: 12px 14px; margin-bottom: 10px; }
+.exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
+.exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.exd-card .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
+.exd-item { margin-bottom: 10px; }
+.exd-item .field-group { margin: 4px 0; }
+.exd-item .field-row { padding: 6px 2px; align-items: flex-start; gap: 10px; font-size: 13px; }
+.exd-item .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.exd-item .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
+.exd-category { border-top: 1px dashed var(--border); margin-top: 8px; padding-top: 8px; }
+.exd-category-form { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.exd-category-input { flex: 1 1 140px; min-width: 0; margin: 0; }
+.exd-category-form button { width: auto; margin-top: 0; padding: 8px 12px; flex: 0 0 auto; }
+.exd-pay-form { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; }
+.exd-pay-form .exd-payable-missing { color: var(--danger); font-weight: 700; }
+.exd-pay-form input, .exd-pay-form select { max-width: 100%; }
+#exd-pay-submit:disabled { opacity: .45; }
+#exd-schedule-save { width: auto; margin-top: 0; padding: 8px 12px; flex: 0 0 auto; }
+.expense-ledger-detail-btn { width: auto; padding: 8px 12px; }
+.ela-row-detail-btn { background: none; border: none; padding: 0; width: auto; color: var(--primary); text-decoration: underline; cursor: pointer; font-size: 13px; }
+
+/* ===== 経費精算書（税理士提出用の紙の様式をそのまま画面に出す） =====
+   2026-09-07ユーザー指示。税理士へ送るのはこの紙なので、申請を開いたら
+   まずこの様式が見え、その下に領収書と申請内容が並ぶ構成にする。
+   スマホでは横幅が足りないため、用紙ごと横スクロールさせて形を崩さない。 */
+.settlement-sheet-wrap {
+  border: 1px solid var(--line, #d8dce3);
+  border-radius: 8px;
+  background: #fff;
+  margin-top: 12px;
+  overflow: hidden;
+}
+.settlement-sheet-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; background: #f4f6f9; color: #1b2230; font-weight: 700; font-size: 13px;
+  border-bottom: 1px solid var(--line, #d8dce3);
+}
+.settlement-sheet-head button { padding: 4px 10px; font-size: 12px; }
+.settlement-sheet-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+.settlement-sheet { width: 720px; font-size: 12px; }
+/* アプリ全体の配色(薄い文字色・暗い背景)をこの用紙の中にだけ持ち込まない。
+   紙と同じ「白地に黒」で見えないと、承認する人が読めない(2026-09-07、実機確認で判明)。 */
+.settlement-sheet, .settlement-sheet * { color: #111 !important; background: #fff !important; }
+.settlement-sheet th, .settlement-sheet td { border-color: #111 !important; }
+.settlement-sheet .ss-title {
+  text-align: center; font-size: 20px; font-weight: 700; letter-spacing: 6px; margin: 4px 0 14px;
+}
+.settlement-sheet .ss-meta { text-align: right; margin-bottom: 10px; line-height: 1.9; }
+.settlement-sheet .ss-meta b { display: inline-block; min-width: 120px; border-bottom: 1px solid #111; text-align: left; padding-left: 6px; font-weight: 400; }
+.settlement-sheet table { border-collapse: collapse; width: 100%; }
+.settlement-sheet th, .settlement-sheet td { border: 1px solid #111; padding: 4px 6px; height: 22px; }
+.settlement-sheet th { background: #fff; font-weight: 400; text-align: center; letter-spacing: 2px; white-space: nowrap; }
+.settlement-sheet .ss-admin th { width: 92px; }
+.settlement-sheet td.num { text-align: right; white-space: nowrap; }
+.settlement-sheet td.small { font-size: 10.5px; }
+.settlement-sheet .ss-bottom { display: flex; gap: 12px; margin-top: 10px; align-items: flex-start; }
+.settlement-sheet .ss-admin { flex: 1; }
+.settlement-sheet .ss-total { width: 320px; }
+.settlement-sheet .ss-note { font-size: 10.5px; text-align: center; margin-top: 4px; }
+.settlement-sheet .ss-company { text-align: right; margin-top: 14px; font-size: 13px; }
+.settlement-sheet .ss-stamp { height: 44px; text-align: center; vertical-align: bottom; font-size: 10.5px; }
+
+/* 勘定科目の「まとめて確定」バー。人が押すのは例外(除外)のときだけにする(2026-09-07) */
+.exd-bulk-bar { margin: 10px 0 14px; }
+.exd-bulk-bar button { width: 100%; }
+.exd-bulk-bar .hint-inline { margin-top: 6px; }

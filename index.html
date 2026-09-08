@@ -906,7 +906,8 @@
         <option value="subcontractor_admin">外注管理担当(subcontractor_admin、外注会社・作業員の管理)</option>
         <option value="site_admin">現場管理担当(site_admin、現場の承認)</option>
         <option value="device_admin">端末承認担当(device_admin)</option>
-        <option value="expense_approval_exempt">経費承認免除(expense_approval_exempt、本人の経費申請が自動承認になる。給与・支払いは対象外)</option>
+        <!-- 【撤去 2026-09-06】expense_approval_exempt(本人の経費申請の自動承認)は新規付与できない。
+             自動承認トリガは DROP 済み。既に付与されている行の表示だけは残す。 -->
       </select>
       <label for="arm-add-search">社員名・社員番号で検索</label>
       <input type="text" id="arm-add-search" placeholder="検索...">
@@ -929,6 +930,13 @@
     <button type="button" class="menu-item" data-nav="site-admin" style="margin-bottom:12px;">
       <span class="icon-slot" data-icon="map-pin"></span>
       <div class="menu-item-body">新規現場の確認<span class="desc">日報・経費申請から入力された承認待ちの新規現場を承認/却下</span></div>
+      <span class="icon-slot arrow" data-icon="chevron-right"></span>
+    </button>
+    <!-- 2026-09-07: 日報管理権限者(nippo_admin)はトラックマスター(車両)を管理できる(既存の権限仕様の未反映修正)。
+         管理者ダッシュボードの車両マスター管理と同じ画面。実機で「見つからない」とならないよう、画面最上部(新規現場の確認の直下)に置く。 -->
+    <button type="button" class="menu-item" id="drm-vehicle-master-btn" data-nav="vehicle-admin" style="margin-bottom:12px;">
+      <span class="icon-slot" data-icon="package"></span>
+      <div class="menu-item-body">トラックマスター<span class="desc">車両の追加・編集・使用停止/再開(配置の運搬で選べる車両)</span></div>
       <span class="icon-slot arrow" data-icon="chevron-right"></span>
     </button>
 
@@ -1671,7 +1679,7 @@
       </button>
       <button type="button" class="menu-item" data-nav="leave-history">
         <span class="icon-slot" data-icon="calendar"></span>
-        <div class="menu-item-body">有給取得履歴<span class="desc">これまで取得した有給を確認</span></div>
+        <div class="menu-item-body">休暇履歴<span class="desc">有給・普通休暇・欠勤など、申請した休暇の全履歴</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="my-supply">
@@ -1708,6 +1716,11 @@
         <span class="icon-slot" data-icon="message-circle"></span>
         <div class="menu-item-body">匿名相談<span class="desc">悩み・意見を匿名で送る</span></div>
         <span class="unread-badge" id="home-anon-badge" style="display:none;"></span>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="widget-setup">
+        <span class="icon-slot" data-icon="phone"></span>
+        <div class="menu-item-body">ホーム画面ウィジェット<span class="desc">iPhoneのホーム画面に自分の配置を出す</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="pin-change">
@@ -1763,6 +1776,56 @@
     </div>
   </section>
 
+  <!-- ホーム画面ウィジェットの設定(本人が自分で取り付け用コードを作る)。
+       2026-09-08: それまでは担当者が1人ずつ発行して個別に渡す運用だったため、
+       全社員へ配れなかった。発行RPC(issue_widget_token)は以前から本人しか
+       呼べない作りになっており、ここでは画面を足しただけで権限は変えていない。 -->
+  <section id="screen-widget-setup" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="myinfo">自分の情報に戻る</button>
+    <div class="form-title">ホーム画面ウィジェット</div>
+    <div class="hint" style="margin-bottom:12px;">iPhoneのホーム画面に、その日の現場・集合時間・一緒に行く人・日報の提出状況を出せます。アプリを開かなくてもホーム画面で分かります。取り付けは5分ほど、お金はかかりません。Androidでは使えません。</div>
+
+    <div class="card">
+      <div class="form-title">手順1　Scriptable を入れる</div>
+      <div class="hint" style="margin-bottom:10px;">App Store で「Scriptable」という無料アプリを入れてください。作者は <b>Simon B. Støvring</b> です。似た名前のアプリがあるので作者名を確かめてください。</div>
+      <a class="link" id="widget-setup-store-link" href="https://apps.apple.com/jp/app/scriptable/id1405459188" target="_blank" rel="noopener">App Store で Scriptable を開く</a>
+    </div>
+
+    <div class="card">
+      <div class="form-title">手順2　取り付け用のコードを作る</div>
+      <div class="hint" style="margin-bottom:10px;">下のボタンを押すと、あなたの配置を読み込むためのコードができます。作り直しても前のウィジェットは動いたままです。</div>
+      <button id="widget-setup-issue-btn">取り付け用のコードを作る</button>
+      <div class="error" id="widget-setup-error"></div>
+    </div>
+
+    <div class="card" id="widget-setup-result" style="display:none;">
+      <div class="form-title">手順3　コードをコピーする</div>
+      <div class="hint" style="margin-bottom:10px;">下のボタンで全部コピーされます。途中で切れると動かないので、手で選ばずにボタンを使ってください。</div>
+      <button id="widget-setup-copy-btn">コードをすべてコピーする</button>
+      <div class="hint-inline" id="widget-setup-copy-status" style="margin-top:6px;"></div>
+      <textarea id="widget-setup-code" readonly rows="8" style="width:100%;margin-top:10px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;"></textarea>
+      <div class="hint" id="widget-setup-expires" style="margin-top:8px;"></div>
+    </div>
+
+    <div class="card">
+      <div class="form-title">手順4　iPhone に貼り付ける</div>
+      <ol class="hint" style="margin:0;padding-left:1.2em;line-height:2;">
+        <li>Scriptable を開いて、右上の <b>＋</b> を押す</li>
+        <li>黒い画面を長押しして <b>ペースト</b>(貼り付け)</li>
+        <li>上の <b>Untitled Script</b> を押して、名前を <b>迅翔ホーム</b> に変える</li>
+        <li>右上の <b>Done</b> を押す</li>
+        <li>ホーム画面を長押し →左上の <b>＋</b> →<b>Scriptable</b> を選ぶ</li>
+        <li>大きさは <b>中(横長)</b> がおすすめ。<b>ウィジェットを追加</b> を押す</li>
+        <li>置いたウィジェットを長押し →<b>ウィジェットを編集</b> →Script に <b>迅翔ホーム</b> を選ぶ</li>
+      </ol>
+    </div>
+
+    <div class="section-title">取り付けたウィジェット</div>
+    <div class="card">
+      <div id="widget-setup-list"></div>
+      <div class="hint" style="margin-top:10px;">機種変更などで使わなくなったものは「止める」を押してください。押したウィジェットはその端末で表示されなくなります。</div>
+    </div>
+  </section>
   <!-- 自分の変更申請の状況 -->
   <section id="screen-my-change-requests" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="myinfo">自分の情報に戻る</button>
@@ -1780,13 +1843,37 @@
   <!-- 申請履歴(下部ナビ「履歴」タブ) -->
   <section id="screen-history" class="screen">
     <div class="form-title">申請履歴</div>
+    <button type="button" class="link" data-nav="my-expense-ledger">経費の履歴(領収書・承認・支払)をすべて見る</button>
     <div id="history-list"></div>
   </section>
 
-  <!-- 有給取得履歴 -->
+  <!-- 経費の履歴台帳(社員本人)。承認済み・却下・支払済みを含む自分の全履歴を、
+       領収書1枚=1行で表示する。集計ではなく1件ずつの記録が見えることを優先する。 -->
+  <section id="screen-my-expense-ledger" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="history">申請履歴に戻る</button>
+    <div class="form-title">経費の履歴</div>
+    <div class="hint" style="margin-bottom:10px;">自分が申請した経費を、領収書1枚ごとに表示します。承認済み・却下・支払済みもすべて残ります。</div>
+    <label for="mel-month">帰属月(領収書の日付の月)</label>
+    <input type="month" id="mel-month">
+    <button type="button" class="secondary" id="mel-clear-month">すべての月を表示</button>
+    <div class="hint" id="mel-count" style="margin:10px 0;"></div>
+    <div id="mel-list"></div>
+  </section>
+
+  <!-- 休暇履歴(本人。有給だけでなく普通休暇・欠勤・会社都合休み・その他休暇も、
+       申請中・承認済み・却下・取消まですべて表示する) -->
   <section id="screen-leave-history" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="leave">戻る</button>
-    <div class="form-title">有給取得履歴</div>
+    <div class="form-title">休暇履歴</div>
+    <div class="hint" style="margin-bottom:10px;">これまでに申請した休暇のすべてです(有給休暇・普通休暇・欠勤・会社都合休み・その他休暇)。申請中・承認済み・却下・取消も含めて表示します。</div>
+    <div class="filter-row" id="lh-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべて</button>
+      <button type="button" class="filter-chip" data-status="pending">承認待ち</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+      <button type="button" class="filter-chip" data-status="cancelled">取消</button>
+    </div>
+    <div class="hint" id="lh-count" style="margin:10px 0;"></div>
     <div id="leave-history-list"></div>
   </section>
 
@@ -2056,6 +2143,16 @@
         <div class="menu-item-body">まとめ精算管理<span class="desc">複数領収書の一括申請を明細単位で承認/却下</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="expense-payment-pending">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <div class="menu-item-body">経費の支払待ち<span class="desc">承認したあと、まだ支払っていない経費立替をまとめて確認</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="expense-ledger-admin">
+        <span class="icon-slot" data-icon="hash"></span>
+        <div class="menu-item-body">経費の履歴台帳<span class="desc">申請者・科目・領収書・承認・支払・税理士送信を人別/月別に確認しCSV出力</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="info-change-admin">
         <span class="icon-slot" data-icon="edit"></span>
         <div class="menu-item-body">個人情報の変更申請<span class="desc">住所・電話番号等の変更を確認</span></div>
@@ -2285,6 +2382,45 @@
   </section>
 
   <!-- 申請管理: 全申請を種類横断で検索・確認 -->
+  <!-- 経費履歴台帳(管理者)。全員分を1領収書=1行で出し、人別・月別・状態別に絞れる。
+       PC利用が主(表形式)だが、375pxでも横スクロールで読めるようにする。
+       税理士へ渡すCSVはこの画面からそのまま出せる(既存の税理士提出バッチとは別に、
+       いつでも今の状態を確認できる出口として用意する)。 -->
+  <section id="screen-expense-ledger-admin" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">経費の履歴台帳</div>
+    <div class="hint" style="margin-bottom:10px;">申請者・勘定科目・領収書・申請日時・承認日時と承認方式・支払予定日・支払完了日・帰属月・税理士への送信状態を、領収書1枚ごとに1行で表示します。承認済み・却下・支払済みを含む全履歴が対象です。</div>
+    <label for="ela-month">帰属月</label>
+    <input type="month" id="ela-month">
+    <label for="ela-employee">社員(社員番号)</label>
+    <select id="ela-employee"><option value="">全員</option></select>
+    <div class="filter-row" id="ela-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべて</button>
+      <button type="button" class="filter-chip" data-status="pending">未処理</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+      <button type="button" class="filter-chip" data-status="unpaid">立替未精算</button>
+      <button type="button" class="filter-chip" data-status="paid">支払済み</button>
+    </div>
+    <div class="hint" id="ela-count" style="margin:10px 0;"></div>
+    <button type="button" class="secondary" id="ela-export-csv">税理士向けCSVを書き出す</button>
+    <div class="error" id="ela-error"></div>
+    <div id="ela-list"></div>
+    <div id="ela-table-wrap" class="areq-table-wrap" style="overflow-x:auto;">
+      <table class="areq-table">
+        <thead>
+          <tr>
+            <th>帰属月</th><th>利用日</th><th>申請者</th><th>支払先</th><th>現場</th>
+            <th>勘定科目</th><th>金額</th><th>領収書</th><th>申請日時</th>
+            <th>承認状態</th><th>承認方式</th><th>承認者</th><th>承認日時</th>
+            <th>支払予定日</th><th>支払完了日</th><th>税理士送信</th>
+          </tr>
+        </thead>
+        <tbody id="ela-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
   <section id="screen-admin-all-requests" class="screen">
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">申請管理</div>
@@ -2296,7 +2432,7 @@
     <div class="filter-row" id="areq-type-filter">
       <button type="button" class="filter-chip active" data-type="">すべての種類</button>
       <button type="button" class="filter-chip" data-type="expense_reimbursement">経費立替</button>
-      <button type="button" class="filter-chip" data-type="paid_leave">有給</button>
+      <button type="button" class="filter-chip" data-type="paid_leave">休暇</button>
       <button type="button" class="filter-chip" data-type="meeting">会議</button>
       <button type="button" class="filter-chip" data-type="supply_item">支給品</button>
       <button type="button" class="filter-chip" data-type="entertainment_preapproval">接待事前申請</button>
@@ -2353,17 +2489,37 @@
   <!-- 申請詳細(管理者) -->
   <section id="screen-request-detail" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-all-requests">申請管理に戻る</button>
-    <div class="card">
+    <div class="card" id="rdetail-fields-card">
       <div class="form-title" id="rdetail-title">申請詳細</div>
       <div class="field-group" id="rdetail-fields"></div>
     </div>
-    <div class="section-title">変更履歴</div>
+    <!-- 2026-09-06追加: 承認する前に領収書の原本を必ず見られるようにする。以前はこの承認画面に
+         画像要素そのものが無く、原本を確認しないまま承認でき、税理士へ出せない状態だった。
+         同日(X2)さらに、経費立替申請ではこの枠に「経費申請の全体」(日付6種・金額・承認方式・
+         明細と領収書・勘定科目3層・支払・税理士提出・変更履歴)を共通の1関数で描画するようにした。
+         入口(承認待ち/承認済み/履歴/台帳/要確認)が違っても同じ項目が出る。 -->
+    <div class="section-title" id="rdetail-receipt-title" style="display:none;">領収書の原本</div>
+    <div id="rdetail-receipts"></div>
+    <div class="section-title" id="rdetail-history-title">変更履歴</div>
     <div id="rdetail-history"></div>
     <div class="card" id="rdetail-action-box">
       <div class="form-title" style="font-size:15px;">操作</div>
       <div id="rdetail-actions"></div>
       <div class="error" id="rdetail-error"></div>
     </div>
+  </section>
+
+  <!-- 経費の支払待ち(管理者)。承認したあとの行き先。承認すると承認待ちの一覧から消えるため、
+       ここに集まることを分かるようにする(2026-09-07ユーザー指摘「支払待ちが簡単なところにない」)。 -->
+  <section id="screen-expense-payment-pending" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">経費の支払待ち</div>
+    <div class="hint" style="margin-bottom:10px;">承認が済んで、まだ支払っていない経費立替です。タップすると経費精算書・領収書・支払の記録欄が開きます。</div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">支払待ちの件数</span><span class="stat-mini-value" id="epp-count">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">未払い合計</span><span class="stat-mini-value" id="epp-total">-</span></div>
+    </div>
+    <div id="epp-list"></div>
   </section>
 
   <!-- 個人情報の変更申請確認(管理者) -->
@@ -2481,7 +2637,7 @@
        将来ここへ車検期限・自賠責/任意保険・点検・修理履歴・リース期限・必要免許を足していく。 -->
   <section id="screen-vehicle-admin" class="screen">
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
-    <div class="form-title">車両マスター管理</div>
+    <div class="form-title">トラックマスター(車両マスター管理)</div>
     <div class="hint" style="margin-bottom:12px;">会社の車両の名簿です。配置カレンダーの運搬で選べる車両は、ここに「使用中」で登録されているものです。使わなくなった車両は消さずに「使用停止」にしてください（過去の配置の記録が読めなくなるため）。</div>
     <div class="card">
       <div class="form-title" style="font-size:15px;">車両を追加</div>
@@ -2496,7 +2652,18 @@
         <option value="own">自社</option>
         <option value="lease">リース</option>
       </select>
-      <label for="vehicle-type">車種</label>
+      <label for="vehicle-type-code">車両種別</label>
+      <select id="vehicle-type-code"><option value="">(未設定)</option></select>
+      <div class="hint-inline">種別はマスター(キャブ / 2t / 3t / 4t / 10t …)から選びます。無い種別は下の「種別を追加」で追加できます(コードへ埋め込みません)。</div>
+      <details id="vehicle-type-add" style="margin:6px 0 10px;"><summary class="link">種別を追加</summary>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;">
+          <input type="text" id="vehicle-type-new-code" placeholder="コード(例: 8t)" style="flex:1;min-width:90px;">
+          <input type="text" id="vehicle-type-new-label" placeholder="表示名(例: 8t)" style="flex:1;min-width:90px;">
+          <button type="button" class="secondary" id="vehicle-type-add-btn" style="flex:none;">追加</button>
+        </div>
+        <div class="error" id="vehicle-type-error"></div>
+      </details>
+      <label for="vehicle-type">車種メモ(任意)</label>
       <input type="text" id="vehicle-type" placeholder="例: ユニック / 平ボディ / ダンプ">
       <label for="vehicle-size">サイズ / 積載区分</label>
       <input type="text" id="vehicle-size" placeholder="例: 4t / 8t / 10t">
@@ -2781,11 +2948,54 @@
       <input type="text" id="la-search" placeholder="氏名・社員番号で検索...">
     </div>
     <div class="hint" id="la-count" style="margin:10px 0;"></div>
+    <button type="button" class="secondary" data-nav="admin-leave-history" style="margin-bottom:12px;">休暇履歴(全社員・全種別)を見る</button>
     <div id="la-list" class="areq-cards"></div>
     <div class="areq-table-wrap">
       <table class="areq-table">
         <thead><tr><th>社員番号</th><th>氏名</th><th>方式</th><th>残日数</th><th>付与累計</th><th>使用累計</th><th>次回付与目安</th><th></th></tr></thead>
         <tbody id="la-table-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 休暇履歴(管理者、全社員・人別/月別)。有給元帳(付与・使用)とは別に、
+       「誰が・いつ・どの種別で休んだか」を承認済み/申請中/却下/取消まで含めて一覧する。
+       社長の実機指摘「承認した休暇の履歴が見えない、どこにあるのか分からない」への出口。 -->
+  <section id="screen-admin-leave-history" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="leave-admin">有給管理に戻る</button>
+    <div class="form-title">休暇履歴(全社員)</div>
+    <div class="hint" style="margin-bottom:10px;">有給休暇・普通休暇・欠勤・会社都合休み・その他休暇のすべてを、申請時の種別のまま表示します。社員と月で絞り込めます。「配置」列は配置カレンダーへ反映済みかどうかです。</div>
+    <label for="alh-month">対象月</label>
+    <input type="month" id="alh-month">
+    <label for="alh-employee">社員(社員番号)</label>
+    <select id="alh-employee"><option value="">全員</option></select>
+    <div class="filter-row" id="alh-category-filter">
+      <button type="button" class="filter-chip active" data-category="">すべての種別</button>
+      <button type="button" class="filter-chip" data-category="paid_leave">有給休暇</button>
+      <button type="button" class="filter-chip" data-category="regular_leave">普通休暇</button>
+      <button type="button" class="filter-chip" data-category="absence">欠勤</button>
+      <button type="button" class="filter-chip" data-category="company_leave">会社都合休み</button>
+      <button type="button" class="filter-chip" data-category="other_leave">その他休暇</button>
+    </div>
+    <div class="filter-row" id="alh-status-filter">
+      <button type="button" class="filter-chip active" data-status="">すべての状態</button>
+      <button type="button" class="filter-chip" data-status="pending">承認待ち</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+      <button type="button" class="filter-chip" data-status="cancelled">取消</button>
+    </div>
+    <div class="hint" id="alh-count" style="margin:10px 0;"></div>
+    <div id="alh-error" class="error-text" style="display:none;"></div>
+    <div id="alh-list"></div>
+    <div id="alh-table-wrap" class="areq-table-wrap" style="overflow-x:auto;">
+      <table class="areq-table">
+        <thead>
+          <tr>
+            <th>開始日</th><th>終了日</th><th>社員番号</th><th>氏名</th><th>種別</th><th>日数</th>
+            <th>事由</th><th>状態</th><th>承認者</th><th>承認日時</th><th>配置</th>
+          </tr>
+        </thead>
+        <tbody id="alh-table-body"></tbody>
       </table>
     </div>
   </section>
@@ -2956,6 +3166,17 @@
       <div class="stat-mini"><span class="stat-mini-label">申請総額</span><span class="stat-mini-value" id="bed-total">-</span></div>
     </div>
 
+    <!-- 税理士へ提出する「経費精算書」。紙の様式と同じ形で、申請データから自動で作る
+         (2026-09-07ユーザー指示: 申請があったらこの紙が出て、その下に領収書と申請内容が見える)。 -->
+    <div class="settlement-sheet-wrap">
+      <div class="settlement-sheet-head">
+        <span>経費精算書（税理士提出用）</span>
+        <button type="button" class="secondary" id="bed-sheet-toggle">閉じる</button>
+      </div>
+      <div id="bed-settlement-sheet" class="settlement-sheet-scroll"></div>
+    </div>
+
+    <div class="section-label" style="margin-top:14px;">申請の内訳と領収書</div>
     <div class="filter-row" style="margin:10px 0;">
       <button type="button" class="secondary" id="bed-select-all">全件選択</button>
       <button type="button" class="secondary" id="bed-select-none">選択解除</button>
@@ -2987,6 +3208,11 @@
     </div>
     <div id="mrd-payment-card"></div>
     <div class="section-title">申請内容</div>
+    <!-- 2026-09-06追加(X2): 経費立替申請は、管理者側の申請詳細とまったく同じ項目
+         (利用日/申請日/登録日/承認日/支払日/税理士送信日・勘定科目の3層・承認方式・
+          支払状態・領収書の原本)を本人にも出す。描画は共通の
+          renderExpenseRequestDetailInto() 1つに統一している。 -->
+    <div id="mrd-expense-full"></div>
     <div id="mrd-items"></div>
   </section>
 
@@ -3236,12 +3462,9 @@
       <button type="button" class="secondary danger" id="employee-detail-revoke-all-devices-btn">この社員の全端末を無効化する</button>
       <div id="employee-detail-devices-list"></div>
 
-      <!-- 経費等の承認免除(self_approval_exempt)。代表取締役のみ設定可。氏名ハードコードでなく属性で管理。 -->
-      <div class="card" id="employee-detail-approval-exempt-card" style="border:1px solid var(--border); display:none;">
-        <div class="row1"><span>経費等の承認免除</span><span id="employee-detail-approval-exempt-status" class="mini-tag">-</span></div>
-        <div class="hint" style="margin:6px 0;">オンにすると、この社員の経費・会議・支給品・接待事前申請は本人登録時点で自動的に承認済みになり、承認待ちキューへ入りません(記録・監査ログは通常どおり残ります)。代表取締役のみ設定できます。</div>
-        <button type="button" class="secondary" id="employee-detail-approval-exempt-toggle-btn">-</button>
-      </div>
+      <!-- 【撤去 2026-09-06】経費等の承認免除(self_approval_exempt)の設定カード。
+           Shota 指示: 社員ポータルに社長専用の承認免除・自動承認を持たせない(全員同じ通常フロー)。
+           DB 側でも自動承認トリガ・関数を DROP 済み(202609061030_expense-p0-finalize.sql)。 -->
 
       <!-- 雇用状態(退職処理)。「アカウント停止(在職のまま一時停止・復旧可)」とは明確に別概念。 -->
       <div class="section-title" style="margin-top:22px;">雇用状態</div>

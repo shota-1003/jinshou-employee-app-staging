@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v152-staging';
-const BUILD_DEPLOYED_AT = '2026-09-05T18:51:19.686Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v157-staging';
+const BUILD_DEPLOYED_AT = '2026-09-08T06:50:41.189Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -92,7 +92,15 @@ async function rpc(name, params, opts) {
     // SupabaseのRPCエラー(RAISE EXCEPTIONのメッセージ)はJSONで返るため、
     // 表示用に読みやすいメッセージだけを取り出す(生JSONをそのまま見せない)。
     let message = `通信エラー(${res.status})`;
-    try { const parsed = JSON.parse(text); if (parsed && parsed.message) message = parsed.message; } catch { /* JSONでなければそのまま */ }
+    let parsedErr = null;
+    try { parsedErr = JSON.parse(text); if (parsedErr && parsedErr.message) message = parsedErr.message; } catch { /* JSONでなければそのまま */ }
+    // 2026-09-07 本番実測: 混雑時に get_admin_dashboard が anon の statement_timeout(3 秒)で 1 回だけ 500(57014)になった。
+    // タイムアウトで取り消された文はコミットされていない(PostgREST は 1 呼び出し 1 トランザクション)ため、1 回だけ自動で再試行しても
+    // 二重登録にはならない。2 回目も失敗したら従来どおりエラーを表示する。
+    if (res.status >= 500 && parsedErr && parsedErr.code === '57014' && !opts._retriedTimeout) {
+      await new Promise((r) => setTimeout(r, 700));
+      return rpc(name, params, Object.assign({}, opts, { _retriedTimeout: true }));
+    }
     // 端末が無効化された/退職・利用停止になった等でセッションが失効した場合は、
     // その場のエラー表示だけで終わらせず、ログイン画面へ強制的に戻す。
     // 想定内の認証拒否(auth rejection)は「Productionエラー」ではなく通常フロー。
@@ -383,6 +391,81 @@ function clearDeviceAuth() {
   currentDeviceToken = null;
 }
 
+// ============================================================
+// 登録済みの外注さんを、入口の選択画面(社員の方/外注の方)を通さずに外注ポータルへ送る
+// (2026-09-06 社長指摘: 「一度登録した外注の人が、開くたびに どっちだったか を選ばされる。
+//  登録済みの人は『こんにちは○○さん』まで直接行けるようにしてほしい」)。
+//
+// 仕組み: 社員ポータル(ルート)と外注ポータル(/sub/)は同一オリジンのため、パスが違っても
+// localStorage と Path=/ のCookieは共有される。外注ポータルはログイン成功・登録成功のたびに
+//   jinshou_portal_pref = 'sub'    (この端末は外注ポータルで使われている、という目印)
+//   jinshou_sub_auth    = {loginCode, token, ...}
+// を localStorage / Cookie / sessionStorage に書き、ログアウトで消す。ここではその目印だけを
+// 読み、あれば ./sub/ へ転送する。認証そのものは外注ポータル側の端末トークンが行うため、
+// この転送でログインが緩くなることはない(目印が偽装されても外注ホームには入れず、
+// 外注のログイン画面が出るだけ)。
+// ============================================================
+const SUB_PORTAL_PREF_KEY = 'jinshou_portal_pref';        // localStorage / Cookie: 'sub'
+const SUB_PORTAL_AUTH_KEY = 'jinshou_sub_auth';           // 外注ポータルの端末認証情報
+const SUB_PORTAL_STAY_KEY = 'jinshou_portal_stay_employee'; // sessionStorage: この タブでは転送しない
+const SUB_PORTAL_PATH = './sub/';
+
+// この端末が「外注ポータルで登録済み」かどうか。localStorage → Cookie の順に探す
+// (LINEアプリ内ブラウザなど、片方だけ消えることがあるため両方見る)。
+function hasSubcontractorDeviceMarker() {
+  try {
+    if (safeLocalGet(SUB_PORTAL_PREF_KEY) === 'sub') return true;
+    if (readCookie(SUB_PORTAL_PREF_KEY) === 'sub') return true;
+  } catch (e) { /* 読めないときは目印なしとして扱う */ }
+  for (const raw of [safeLocalGet(SUB_PORTAL_AUTH_KEY), readCookie(SUB_PORTAL_AUTH_KEY)]) {
+    if (!raw) continue;
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.loginCode) return true;
+    } catch (e) { /* 壊れた値は無いものとして扱う */ }
+  }
+  return false;
+}
+
+// 外注さんが社員ポータルを見たいときの逃げ道。?portal=employee が付いていたら
+// このタブでは転送しない(外注ポータルの「社員の方はこちら」がこのURLへ来る)。
+function isSubPortalRedirectSuppressed() {
+  try {
+    const q = new URLSearchParams(location.search);
+    if (q.get('portal') === 'employee') {
+      try { sessionStorage.setItem(SUB_PORTAL_STAY_KEY, '1'); } catch (e) { /* 覚えられなくても今回は止める */ }
+      return true;
+    }
+  } catch (e) { /* URLが読めないときは抑止しない */ }
+  try { return sessionStorage.getItem(SUB_PORTAL_STAY_KEY) === '1'; } catch (e) { return false; }
+}
+
+// 転送してよい状況かを判定し、してよければ ./sub/ へ移動して true を返す。
+// 社員としての利用実績(端末トークン・記憶した社員番号)がある端末は絶対に転送しない。
+function maybeRedirectToSubPortal() {
+  try {
+    if (isSubPortalRedirectSuppressed()) return false;
+    // 社員が優先。片方でも社員の痕跡があれば従来どおり社員ポータルを出す。
+    if (getDeviceAuth()) return false;
+    if (getRememberedCode()) return false;
+    if (getSession()) return false;
+    // ウィジェット・QRなどの社員向けディープリンク(?next=...)で開かれた場合は転送しない。
+    try { if (new URLSearchParams(location.search).has('next')) return false; } catch (e) { /* 読めなければ通常判定 */ }
+    if (!hasSubcontractorDeviceMarker()) return false;
+    // 万一 /sub/ 側から戻されるような状況になっても往復し続けないようにする。
+    try {
+      const last = Number(sessionStorage.getItem('jinshou_portal_redirect_at') || '0');
+      if (last && Date.now() - last < 10000) return false;
+      sessionStorage.setItem('jinshou_portal_redirect_at', String(Date.now()));
+    } catch (e) { /* sessionStorageが使えない環境では回数制限なしで続行 */ }
+    window.location.replace(SUB_PORTAL_PATH);
+    return true;
+  } catch (e) {
+    // 転送に失敗したら従来どおり選択画面を出す(行き止まりを作らない)。
+    return false;
+  }
+}
+
 const SCREEN_ENTER_HOOKS = {};
 
 // 下部ナビは5つ(ホーム/申請/お知らせ/履歴/自分)。そこから遷移するサブ画面にいる間も、
@@ -396,9 +479,9 @@ const BOTTOM_NAV_MAP = {
   'entertainment-submit': 'menu-apply', 'daily-report': 'menu-apply',
   'joyo-denpyo-list': 'menu-apply', 'joyo-denpyo-form': 'menu-apply', 'joyo-denpyo-detail': 'menu-apply', 'joyo-denpyo-print': 'menu-apply',
   announcements: 'announcements',
-  history: 'history',
+  history: 'history', 'my-expense-ledger': 'history',
   myinfo: 'myinfo', 'leave-history': 'myinfo', 'my-supply': 'myinfo', 'my-qual': 'myinfo', 'my-health': 'myinfo',
-  'my-change-requests': 'myinfo', 'profile-edit': 'myinfo', 'pin-change': 'myinfo', 'anon-consult': 'myinfo', 'anon-submit': 'myinfo',
+  'my-change-requests': 'myinfo', 'profile-edit': 'myinfo', 'pin-change': 'myinfo', 'widget-setup': 'myinfo', 'anon-consult': 'myinfo', 'anon-submit': 'myinfo',
   'anon-done': 'myinfo', 'anon-thread': 'myinfo', 'my-entertainment': 'myinfo', 'my-daily-reports': 'myinfo',
   'entertainment-update': 'myinfo', 'entertainment-late-submit': 'myinfo',
 };
@@ -430,15 +513,16 @@ const ADMIN_SCREENS = new Set([
   'admin', 'admin-dashboard', 'admin-announce', 'admin-request-list', 'admin-all-requests', 'admin-role-management',
   'anon-admin', 'anon-admin-thread',
   'qual-admin', 'category-review', 'employee-directory', 'employee-detail', 'info-change-admin',
-  'supply-master-admin', 'entertainment-admin', 'site-admin', 'leave-admin', 'leave-grant',
+  'supply-master-admin', 'entertainment-admin', 'site-admin', 'leave-admin', 'leave-grant', 'admin-leave-history',
   'employee-summary', 'employee-monthly-detail', 'attendance-matrix', 'bulk-expense-admin', 'bulk-expense-detail',
+  'expense-payment-pending',
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'lucky-admin', 'lucky-preview',
-  'vehicle-admin',
+  'vehicle-admin', 'expense-ledger-admin',
 ]);
 let inAdminMode = false;
 
@@ -460,6 +544,7 @@ const PARENT_ROUTE = Object.freeze({
   'entertainment-admin': 'admin-dashboard', 'site-admin': 'admin-dashboard', 'leave-admin': 'admin-dashboard',
   'employee-summary': 'admin-dashboard', 'attendance-matrix': 'admin-dashboard', 'bulk-expense-admin': 'admin-dashboard',
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
+  'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard',
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
@@ -473,7 +558,8 @@ const PARENT_ROUTE = Object.freeze({
   // 社員名簿の下
   'employee-create': 'employee-directory', 'employee-detail': 'employee-directory',
   // 有給管理・経費精算・まとめ精算の下
-  'leave-grant': 'leave-admin', 'employee-monthly-detail': 'employee-summary', 'expense-payment': 'employee-monthly-detail',
+  'leave-grant': 'leave-admin', 'admin-leave-history': 'leave-admin',
+  'employee-monthly-detail': 'employee-summary', 'expense-payment': 'employee-monthly-detail',
   'bulk-expense-detail': 'bulk-expense-admin',
   // 日報管理の下
   'daily-report-admin': 'daily-report-management', 'daily-report-needs-review-admin': 'daily-report-management',
@@ -665,7 +751,7 @@ function showScreen(id, opts) {
     }
   }
   window.scrollTo(0, 0);
-  if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
+  if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id](opts);
   // 戻るボタンのラベルは入口から作る。enterフックが固定文言を書き込む画面(申請詳細など)も
   // あるため、フックのあとに実行して必ずこちらを最終値にする。
   updateBackLabel(id);
@@ -1750,7 +1836,7 @@ async function renderHomeAdminBanner(session) {
         <span class="main-menu-card-icon">${icon('clipboard-list')}</span>
         <span style="text-align:left;">
           <span class="main-menu-label" style="display:block;">日報管理(日報担当)</span>
-          <span class="main-menu-desc">日報の確認・未提出者確認・外注代理入力</span>
+          <span class="main-menu-desc">日報の確認・未提出者確認・新規現場の承認・トラックマスター</span>
         </span>
         <span style="margin-left:auto; color:var(--text-faint);">${icon('chevron-right')}</span>
       </button>
@@ -1850,27 +1936,53 @@ async function loadLeaveBalance() {
   }
 }
 
+// 休暇履歴(本人)。2026-09-06の実機指摘「承認した休暇の履歴が見えない」への修正。
+// 以前は get_leave_taken_history(WHERE leave_category='paid_leave')だったため、
+// 普通休暇・欠勤・会社都合休み・その他休暇は承認済みでも1件も表示されなかった。
+// 会社ルール(履歴は原則すべて閲覧可能)に合わせ、全種別・全ステータスを出す。
+const LEAVE_STATUS_GROUP_LABEL = { pending: '承認待ち', approved: '承認済み', rejected: '却下', cancelled: '取消', needs_review: '差し戻し(要修正)', other: '処理中' };
+// 休暇履歴の日付表示(本人画面・管理者画面で共通に使う)。DBはDATE型で返るため時差の影響を受けない。
+const fmtLeaveDate = (d) => (d ? new Date(d).toLocaleDateString('ja-JP') : '-');
+const leavePeriodText = (r) => (r.start_date === r.end_date ? fmtLeaveDate(r.start_date) : `${fmtLeaveDate(r.start_date)} 〜 ${fmtLeaveDate(r.end_date)}`);
+let leaveHistoryRows = [];
+let leaveHistoryStatusFilter = '';
+
+function renderLeaveHistory() {
+  const listEl = document.getElementById('leave-history-list');
+  const countEl = document.getElementById('lh-count');
+  const rows = leaveHistoryStatusFilter
+    ? leaveHistoryRows.filter((r) => r.status_group === leaveHistoryStatusFilter)
+    : leaveHistoryRows;
+  if (countEl) countEl.textContent = `${rows.length}件`;
+  if (rows.length === 0) {
+    listEl.innerHTML = `<div class="hint">${leaveHistoryRows.length === 0 ? 'これまでに申請した休暇はありません。' : 'この状態の休暇はありません。'}</div>`;
+    return;
+  }
+  listEl.innerHTML = rows.map((r) => {
+    const statusClass = r.status_group === 'approved' ? 'done' : (['rejected', 'cancelled'].includes(r.status_group) ? 'rejected' : '');
+    const period = leavePeriodText(r);
+    const approverLine = r.approver_name
+      ? `<div class="row2">承認者: ${r.approver_name}${r.decided_at ? `・${new Date(r.decided_at).toLocaleString('ja-JP')}` : ''}</div>` : '';
+    const rejectLine = r.rejection_reason ? `<div class="row2">理由: ${r.rejection_reason}</div>` : '';
+    return `
+      <div class="history-item">
+        <div class="row1"><span>${r.leave_category_label}${r.is_half_day ? '(半休)' : ''}</span><span>${r.requested_days}日</span></div>
+        <div class="row2">${period}${r.reason ? `　${r.reason}` : ''}</div>
+        ${approverLine}
+        ${rejectLine}
+        <span class="status-badge ${statusClass}">${LEAVE_STATUS_GROUP_LABEL[r.status_group] || r.status}</span>
+      </div>
+    `;
+  }).join('');
+}
+
 async function loadLeaveHistory() {
   const session = getSession();
   const listEl = document.getElementById('leave-history-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('get_leave_taken_history', { p_employee_code: session.employeeCode });
-    if (!rows || rows.length === 0) {
-      listEl.innerHTML = '<div class="hint">承認済みの有給取得履歴はまだありません。</div>';
-      return;
-    }
-    listEl.innerHTML = '';
-    rows.forEach((r) => {
-      const div = document.createElement('div');
-      div.className = 'history-item';
-      div.innerHTML = `
-        <div class="row1"><span>${r.start_date} 〜 ${r.end_date}</span><span>${r.requested_days}日</span></div>
-        <div class="row2">${r.reason || ''}${r.is_half_day ? '(半休)' : ''}</div>
-        <span class="status-badge done">承認済み</span>
-      `;
-      listEl.appendChild(div);
-    });
+    leaveHistoryRows = (await rpc('get_my_leave_history', { p_employee_code: session.employeeCode })) || [];
+    renderLeaveHistory();
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -3453,6 +3565,8 @@ async function loadBulkExpenseDetail() {
           : '<div class="hint-inline">領収書画像なし</div>'}
       </div>
     `).join('');
+    renderSettlementSheet(head, items || []);
+    wireSettlementSheetToggle();
     hydrateIcons(document.getElementById('bed-item-list'));
     hydrateReceiptImages(document.getElementById('bed-item-list'));
     document.querySelectorAll('.bed-item-check').forEach((cb) => {
@@ -3466,6 +3580,124 @@ async function loadBulkExpenseDetail() {
   } catch (e) {
     document.getElementById('bed-item-list').innerHTML = `<div class="hint">読み込みに失敗しました: ${e.message}</div>`;
   }
+}
+
+
+// 税理士へ提出する「経費精算書」を、紙の様式と同じ形で画面に描く。
+// 2026-09-07ユーザー指示:「税理士に送るのはこの紙になるので、この紙も作ってアプリ内で
+// 見えるようにしてほしい。申請がありました、でこの紙が出てくる。そしてそこから下に
+// 領収書なり申請したあれなりが見えるようにしといてください。内容は申請してきた時の勘定科目で」
+// 明細と同じデータから作るので、画面の数字と紙の数字がずれない。
+function renderSettlementSheet(head, items) {
+  const box = document.getElementById('bed-settlement-sheet');
+  if (!box) return;
+  // 店名・現場名・氏名は領収書の読み取り結果やDBから来る値なので、HTMLとして解釈させない。
+  // (「<」を含む店名が来ただけで表示が崩れる／不正なタグが混ざるのを防ぐ)
+  const esc = (v) => String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const yen = (n) => (n === null || n === undefined || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const ymd = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
+  };
+  const md = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return Number.isNaN(dt.getTime()) ? String(d) : `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+  // 却下された明細は税理士へ出す紙に載せない(承認・未処理のものだけを載せる)。
+  const rows = (items || []).filter((it) => it.approval_status !== 'rejected');
+  const total = rows.reduce((a, it) => a + Number(it.amount || 0), 0);
+  const MIN_ROWS = 12;
+  const blanks = Math.max(0, MIN_ROWS - rows.length);
+  const payLabel = head && head.payment_status === 'paid' ? '振込み'
+    : '現金　・　振込み';
+  // 承認欄には、実際に承認した人の名前と日付を入れる(2026-09-07ユーザー指示
+  // 「承認者の名前を記載する」)。承認がまだなら空欄のままにして、承認前後を取り違えない。
+  const approvers = [];
+  for (const it of rows) {
+    if (it.approval_status !== 'approved' || !it.approval_decided_by) continue;
+    if (!approvers.some((a) => a.name === it.approval_decided_by)) {
+      approvers.push({ name: it.approval_decided_by, at: it.approval_decided_at });
+    }
+  }
+  const approvedCount = rows.filter((it) => it.approval_status === 'approved').length;
+  const stamp = (n) => {
+    const a = approvers[n];
+    if (!a) return '';
+    return `<div style="font-size:10px;line-height:1.3;">${esc(a.name)}<br>${a.at ? ymd(a.at) : ''}</div>`;
+  };
+  const approvalNote = rows.length === 0 ? ''
+    : approvedCount === rows.length ? '全明細 承認済み'
+      : approvedCount === 0 ? '未承認（承認するとここに承認者名が入ります）'
+        : `${rows.length}件中 ${approvedCount}件 承認済み`;
+
+  box.innerHTML = `
+    <div class="settlement-sheet">
+      <div class="ss-title">経 費 精 算 書</div>
+      <div class="ss-meta">
+        申請日：<b>${head ? ymd(head.requested_at) : ''}</b><br>
+        氏　名：<b>${esc(head ? head.employee_name : '')}</b>
+      </div>
+      <table>
+        <tr>
+          <th style="width:56px;">日 付</th><th style="width:150px;">現 場</th>
+          <th style="width:150px;">支 払 先</th><th style="width:110px;">内 容</th>
+          <th style="width:80px;">備 考</th><th>金 額</th>
+        </tr>
+        ${rows.map((it) => `
+        <tr>
+          <td>${md(it.document_date)}</td>
+          <td class="small">${esc(it.site_name)}</td>
+          <td class="small">${esc(it.vendor_name)}</td>
+          <td class="small">${esc(it.purpose_category || it.purpose)}</td>
+          <td class="small">${esc(it.content_description)}</td>
+          <td class="num">${yen(it.amount)}</td>
+        </tr>`).join('')}
+        ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+      </table>
+      <div class="ss-bottom">
+        <div class="ss-admin">
+          <div style="font-size:10.5px;margin-bottom:2px;">［管理欄］</div>
+          <table>
+            <tr><th style="width:80px;">支 払 日</th><td>${head && head.scheduled_payment_date ? `${ymd(head.scheduled_payment_date)}${head.payment_status === 'paid' ? '' : '（予定）'}` : '　年　　月　　日'}</td></tr>
+            <tr><th>支払方法</th><td>${payLabel}</td></tr>
+            <tr><th>承認状況</th><td colspan="4" style="font-size:10.5px;">${esc(approvalNote)}</td></tr>
+            <tr>
+              <th style="height:44px;">備　考</th><td></td>
+              <td class="ss-stamp" style="width:60px;">${stamp(0)}社 長</td>
+              <td class="ss-stamp" style="width:60px;">${stamp(1)}専 務</td>
+              <td class="ss-stamp" style="width:60px;">${stamp(2)}経 理</td>
+            </tr>
+          </table>
+        </div>
+        <div class="ss-total">
+          <table>
+            <tr><th style="width:96px;">合　　計</th><td class="num" style="font-size:14px;">${yen(total)}</td></tr>
+            <tr><th>受 取 方 法</th><td style="text-align:center;">${payLabel}</td></tr>
+          </table>
+          <div class="ss-note">※　振込み手数料、申請者負担</div>
+        </div>
+      </div>
+      <div class="ss-company">株式会社　迅翔興業</div>
+    </div>`;
+}
+
+
+let bedSheetToggleWired = false;
+function wireSettlementSheetToggle() {
+  if (bedSheetToggleWired) return;
+  const btn = document.getElementById('bed-sheet-toggle');
+  const box = document.getElementById('bed-settlement-sheet');
+  if (!btn || !box) return;
+  bedSheetToggleWired = true;
+  btn.addEventListener('click', () => {
+    const hidden = box.style.display === 'none';
+    box.style.display = hidden ? '' : 'none';
+    btn.textContent = hidden ? '閉じる' : '開く';
+  });
 }
 
 function updateBulkExpenseSelectedCount() {
@@ -3565,7 +3797,10 @@ async function doSubmitMeeting() {
 // ---------- 申請履歴 ----------
 
 const REQUEST_TYPE_LABEL = {
-  paid_leave: '有給休暇申請', expense_reimbursement: '経費立替申請', meeting: '会議申請', supply_item: '支給品申請',
+  // paid_leave は「有給」だけでなく普通休暇・欠勤・会社都合休み・その他休暇を含む共通の申請種別
+  // (種別そのものは paid_leave_requests.leave_category が持ち、要約テキストの先頭に必ず出る)。
+  // ここを「有給休暇申請」と書いていたため、普通休暇で申請しても一覧では有給に見えていた。
+  paid_leave: '休暇申請', expense_reimbursement: '経費立替申請', meeting: '会議申請', supply_item: '支給品申請',
   entertainment_preapproval: '接待事前申請', qualification: '資格・免許', other: 'その他',
   site_proposal: '新規現場申請', info_change: '個人情報変更申請',
 };
@@ -3576,6 +3811,24 @@ const STATUS_LABEL = {
   pending: '確認待ち', pending_verification: '確認待ち', active: '有効', expired: '期限切れ',
 };
 const STATUS_GROUP_LABEL = { pending: '承認待ち', needs_review: '差し戻し(要修正)', special_review: '特別承認待ち', approved: '承認済み', rejected: '却下' };
+
+// 申請IDの配列に対して承認方式(auto_self_approval_exempt / manual / manual_legacy / none)を
+// まとめて引く。本人の申請は常に、他人の申請は経理管理者/役員だけがサーバー側で返る。
+// 付加情報なので、失敗しても空のMapを返して一覧本体は必ず描画させる。
+async function loadApprovalMethodMap(employeeCode, requestIds) {
+  const ids = (requestIds || []).map(Number).filter((n) => Number.isFinite(n));
+  if (ids.length === 0) return new Map();
+  try {
+    // 応答が返らないときに待ち続けないよう、時間で打ち切る(この情報は無くても一覧は出せる)。
+    const rows = await Promise.race([
+      rpc('list_request_approval_methods', { p_employee_code: employeeCode, p_request_ids: ids }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('承認方式の取得が時間内に返りませんでした')), 8000)),
+    ]);
+    return new Map((rows || []).map((r) => [String(r.employee_request_id), r]));
+  } catch (e) {
+    return new Map();
+  }
+}
 
 async function loadHistory() {
   const session = getSession();
@@ -3588,6 +3841,9 @@ async function loadHistory() {
       return;
     }
     listEl.innerHTML = '';
+    // 承認方式(人の承認 / 承認免除ルールによる自動承認)をまとめて取得する。取得できなくても
+    // 履歴自体は必ず表示する(全履歴が見えることを優先し、付加情報の失敗で一覧を落とさない)。
+    const methodMap = await loadApprovalMethodMap(session.employeeCode, rows.map((r) => r.id));
     const detailableTypes = ['expense_reimbursement', 'paid_leave', 'meeting', 'supply_item'];
     rows.forEach((r) => {
       const div = document.createElement('div');
@@ -3598,14 +3854,18 @@ async function loadHistory() {
       // 却下された申請だけでなく、承認待ち/一部承認/承認済み/支払済み/受取確認済みなど
       // 全ステータスで詳細を開けるようにする(以前はrejectedのみタップ可能だった不具合の修正)。
       const clickable = detailableTypes.includes(r.request_type);
+      const method = methodMap.get(String(r.id));
+      const isAuto = method && method.approval_method === 'auto_self_approval_exempt';
       const approverLine = r.approver_name
-        ? `<div class="row2">承認者: ${r.approver_name}・${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : ''}</div>`
+        ? `<div class="row2">${isAuto ? '自動承認' : '承認者'}: ${r.approver_name}・${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : ''}</div>`
         : (['approved', 'rejected'].includes(r.status) ? '<div class="row2">承認者記録なし(旧データ)</div>' : '');
       div.innerHTML = `
         <div class="row1"><span>${REQUEST_TYPE_LABEL[r.request_type] || r.request_type}</span><span>${amountStr}</span></div>
         <div class="row2">${dateStr}　${r.summary || ''}</div>
         ${approverLine}
         <span class="status-badge ${statusClass}">${STATUS_LABEL[r.status] || r.status}</span>
+        ${isAuto ? ` <span class="mini-tag info">${method.approval_method_label || '自動承認'}</span>` : ''}
+        ${isAuto ? approvalMethodNoteHtml(method.approval_method) : ''}
         ${clickable ? '<div class="hint-inline">タップして詳細を確認</div>' : ''}
       `;
       if (clickable) {
@@ -3622,7 +3882,12 @@ async function loadHistory() {
 // ---------- 申請の詳細(社員本人視点、通知タップ/お知らせ/申請履歴から遷移。全ステータス対応) ----------
 
 // 詳細画面の「戻る」リンクを、遷移元(申請履歴/お知らせ/ホーム)に応じて出し分ける。
-const MRD_RETURN_LABEL = { history: '申請履歴に戻る', announcements: 'お知らせに戻る', home: 'ホームに戻る' };
+// 2026-09-06(X2): 経費履歴台帳から申請詳細を開けるようにしたので、その戻り先を追加した
+// (「入った場所へ戻る」= 台帳から入ったら台帳へ戻る)。
+const MRD_RETURN_LABEL = {
+  history: '申請履歴に戻る', announcements: 'お知らせに戻る', home: 'ホームに戻る',
+  'my-expense-ledger': '経費の履歴に戻る',
+};
 
 function openImageZoom(url) {
   if (!url) return;
@@ -3780,22 +4045,38 @@ async function loadMyRequestDetailContent() {
         ${r.target_date ? `<div class="row2">${r.target_date}</div>` : ''}
         ${r.note ? `<div class="row2">備考: ${r.note}</div>` : ''}
         ${r.item_approval_status === 'rejected' && r.item_rejection_reason ? `<div class="row2">却下理由: ${r.item_rejection_reason}</div>` : ''}
-        ${r.receipt_url
-          ? `<div class="row2"><img class="mrd-receipt-thumb" src="${r.receipt_url}" alt="領収書" data-zoom="${r.receipt_url}"></div>`
+        ${r.document_id
+          ? `<div class="row2"><img class="secure-proxy-thumb mrd-receipt-thumb" data-secure-kind="receipt" data-secure-id="${r.document_id}" alt="領収書" loading="lazy"></div>`
           : '<div class="hint-inline">この明細には領収書画像が添付されていません</div>'}
       </div>
     `).join('');
-    if (head.cover_sheet_url) {
+    if (head.cover_sheet_file_id) {
       document.getElementById('mrd-items').insertAdjacentHTML('afterbegin', `
         <div class="mrd-item-card">
           <div class="row1"><span>経費精算書</span></div>
-          <img class="mrd-receipt-thumb" src="${head.cover_sheet_url}" alt="経費精算書" data-zoom="${head.cover_sheet_url}">
+          <img class="secure-proxy-thumb mrd-receipt-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${Number(requestId)}" alt="経費精算書" loading="lazy">
         </div>
       `);
     }
+    // 2026-09-06修正: 領収書・経費精算書の原本はGoogle Driveの非公開ファイルで、Driveの
+    // ビューアページURL(files.url)を<img src>に入れても画像としては絶対に描画されない。
+    // 認証付きEdge Functionプロキシ(receipt-image)経由でBlobを取得して表示する
+    // (まとめ精算詳細・社員個人詳細・領収書ギャラリーと同じ唯一の経路に揃える)。
+    hydrateSecureImages(document.getElementById('mrd-items'));
     document.getElementById('mrd-items').querySelectorAll('[data-zoom]').forEach((img) => {
       img.addEventListener('click', () => openImageZoom(img.dataset.zoom));
     });
+
+    // 【2026-09-06・X2】経費立替申請は、本人の申請履歴から開いても管理者の申請詳細と
+    // まったく同じ項目(利用日/申請日/登録日/承認日/支払日/税理士送信日・勘定科目の3層・
+    // 承認方式・支払状態・領収書の原本)が出るよう、共通の1関数へ差し替える。
+    // 本人は管理者RPCを呼べないので、本人向けRPCから同じ形を組み立てている(mode:'employee')。
+    const mrdExpenseFull = document.getElementById('mrd-expense-full');
+    if (mrdExpenseFull) mrdExpenseFull.innerHTML = '';
+    if (mrdExpenseFull && head.request_type === 'expense_reimbursement') {
+      document.getElementById('mrd-items').innerHTML = '';
+      await renderExpenseRequestDetailInto('mrd-expense-full', requestId, { mode: 'employee' });
+    }
 
     // item16: 承認前の有給申請は本人が取り消せる(承認済み/支払済み/却下/取消済みは不可)。
     const leaveCancelable = head.request_type === 'paid_leave'
@@ -4297,7 +4578,13 @@ async function isNippoAdmin() {
   const session = getSession();
   try {
     _nippoAdminCache = await rpc('check_nippo_admin', { p_employee_code: session.employeeCode });
-  } catch (e) { _nippoAdminCache = false; }
+  } catch (e) {
+    // 2026-09-07: 通信不良・混雑(statement_timeout)で確認できなかっただけなら「権限なし」として固定しない。
+    // 以前は false をタブ内キャッシュしていたため、一度失敗すると再読込まで 日報管理・トラックマスターの
+    // 入口が丸ごと消えた(日報管理権限者の実機で「表示されない」の一因になり得る)。次回の呼び出しで再確認する。
+    _nippoAdminCache = null;
+    return false;
+  }
   return _nippoAdminCache;
 }
 
@@ -5147,8 +5434,14 @@ function openAdminRequestList(filter) {
 // (1)日付窓を渡し忘れる(「本日の申請」カードなのに全期間が出る)、(2)日付入力欄と
 // 実際の絞り込みがずれる、という不整合が起きていた。state と画面表示は必ずここで同時に合わせる。
 // nav = { type, category, status, dateFrom, dateTo, decidedFrom, decidedTo, name, site, partner }
+// setAreqFilters(nav) で条件付きの入場が準備されたことを、直後の画面入場 1 回だけ覚える。
+// 下部ナビ・管理メニューなど条件なしの入場では既定(全件)へ戻すための印(2026-09-06)。
+// admin_search_requests の p_category(202609060500)と同じ値: paid_leave / expense / supply / meeting(会議+接待) / other(新規現場+個人情報変更)
+const AREQ_CATEGORY_LABELS = { paid_leave: '休暇', expense: '経費', supply: '支給品', meeting: '会議・接待', other: 'その他(新規現場・個人情報変更)', qualification: '資格' };
+let areqFiltersPrimed = false;
 function setAreqFilters(nav) {
   const n = nav || {};
+  areqFiltersPrimed = !!nav;
   areqFilters = {
     type: n.type || '', category: n.category || '', status: n.status || '', name: n.name || '',
     dateFrom: n.dateFrom || '', dateTo: n.dateTo || '',
@@ -5180,12 +5473,14 @@ function renderAreqActiveFilterChip() {
   const parts = [];
   if (areqFilters.decidedFrom || areqFilters.decidedTo) parts.push(`決裁日 ${areqFilters.decidedFrom || ''}〜${areqFilters.decidedTo || ''}`);
   if (areqFilters.dateFrom || areqFilters.dateTo) parts.push(`申請日 ${areqFilters.dateFrom || ''}〜${areqFilters.dateTo || ''}`);
+  // カード由来のカテゴリ絞り込みは種類チップに表れないため、ここで必ず見せる(見えない絞り込みを作らない)。
+  if (areqFilters.category) parts.push(`カード「${AREQ_CATEGORY_LABELS[areqFilters.category] || areqFilters.category}」`);
   if (!parts.length) { el.style.display = 'none'; el.innerHTML = ''; return; }
   el.style.display = '';
   el.innerHTML = `<span class="mini-tag info">${parts.join(' / ')}で絞り込み中</span> <button type="button" class="link" id="areq-clear-window">絞り込みを解除</button>`;
   const btn = document.getElementById('areq-clear-window');
   if (btn) btn.addEventListener('click', () => {
-    setAreqFilters({ ...areqFilters, dateFrom: '', dateTo: '', decidedFrom: '', decidedTo: '' });
+    setAreqFilters({ ...areqFilters, category: '', dateFrom: '', dateTo: '', decidedFrom: '', decidedTo: '' });
     loadAdminAllRequests();
   });
 }
@@ -5199,7 +5494,7 @@ function openAdminRequestsFiltered(type, status, nav) {
 }
 // 承認カテゴリ(複数source_typeを束ねる)で申請管理を開く。HOME件数と一覧を admin_search_requests の
 // p_category で完全一致させる(「その他→経費」誤遷移・支給品の"その他"混入を防ぐ)。
-const APPROVAL_CATEGORY_LABEL = { paid_leave: '有給', expense: '経費', supply: '支給品', meeting: '接待・会議費', other: 'その他(現場・個人情報)' };
+const APPROVAL_CATEGORY_LABEL = { paid_leave: '休暇', expense: '経費', supply: '支給品', meeting: '接待・会議費', other: 'その他(現場・個人情報)' };
 function openAdminRequestsByCategory(category, status, nav) {
   setAreqFilters({ ...(nav || {}), type: '', category: category || '', status: status || '' });
   showScreen('admin-all-requests');
@@ -5215,12 +5510,21 @@ async function loadAdminRequestList() {
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する申請はありません。</div>'; return; }
     listEl.innerHTML = rows.map((r) => {
       const amountStr = r.amount != null ? `${Number(r.amount).toLocaleString()}円` : '';
+      // 経費立替は、用紙(経費精算書)と領収書を見てから承認する。この一覧の場で承認できると
+      // 中身を見ずに承認できてしまうため、詳細を開く導線だけにする
+      // (2026-09-07ユーザー指摘「ここから入ったら見えない、タップしても」)。
+      const isExpense = r.request_type === 'expense_reimbursement';
       return `
-        <div class="history-item" data-id="${r.id}">
+        <div class="history-item" data-id="${exdEsc(r.id)}" data-type="${exdEsc(r.request_type)}">
           <div class="row1"><span>${r.employee_name || ''}・${REQUEST_TYPE_LABEL[r.request_type] || r.request_type}</span><span>${amountStr}</span></div>
           <div class="row2">${new Date(r.requested_at).toLocaleDateString('ja-JP')}　${r.summary || ''}</div>
           <span class="status-badge">${STATUS_LABEL[r.status] || r.status}</span>
-          ${canDecide ? `
+          ${isExpense ? `
+            <div class="qual-verify-btns">
+              <button type="button" class="open-detail-btn">経費精算書と領収書を見て承認する</button>
+            </div>
+          ` : ''}
+          ${canDecide && !isExpense ? `
             <div class="qual-verify-btns">
               <button type="button" class="approve-btn">承認する</button>
               <button type="button" class="reject-btn">差し戻す</button>
@@ -5233,6 +5537,16 @@ async function loadAdminRequestList() {
         </div>
       `;
     }).join('');
+    // 行をタップしても詳細が開くようにする(ボタンを押したときは二重に開かない)。
+    listEl.querySelectorAll('.history-item').forEach((item) => {
+      const open = () => openRequestDetail(item.dataset.type, item.dataset.id);
+      const btn = item.querySelector('.open-detail-btn');
+      if (btn) btn.addEventListener('click', (e) => { e.stopPropagation(); open(); });
+      if (item.dataset.type === 'expense_reimbursement') {
+        item.style.cursor = 'pointer';
+        item.addEventListener('click', open);
+      }
+    });
     listEl.querySelectorAll('.approve-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doDecideRequest(e.target.closest('.history-item').dataset.id, 'approved'));
     });
@@ -5646,6 +5960,1101 @@ async function doVerifyQualification(id, action) {
   } catch (e) { /* 失敗時は一覧が更新されないだけ */ }
 }
 
+// ---------- 経費の承認方式の表示(共通) ----------
+
+// 2026-09-06、社長の実機確認で「承認していないのに関口(=代表取締役本人)の経費が承認になっている」
+// という指摘を受けて追加。実データを調べたところバグではなく、employees.self_approval_exempt
+// (承認免除の役割属性、202609030317)による自動承認だった。人が承認画面で押した承認と、
+// ルールによる自動承認を「承認済み」の一語で同じに見せていたことが問題の本体なので、
+// 承認状態を出すすべての画面がこの1関数を通して同じ表現をするようにする。
+const EXPENSE_ITEM_STATUS_LABEL = { pending: '未処理', approved: '承認済み', rejected: '却下', on_hold: '保留(差戻し)' };
+
+function expenseApprovalBadgeHtml(itemApprovalStatus, approvalMethod, approvalMethodLabel, approverName, approvedAt) {
+  const label = EXPENSE_ITEM_STATUS_LABEL[itemApprovalStatus] || itemApprovalStatus || '未処理';
+  const cls = itemApprovalStatus === 'approved' ? 'done' : (itemApprovalStatus === 'rejected' ? 'rejected' : '');
+  const auto = approvalMethod === 'auto_self_approval_exempt';
+  const who = approverName ? `${approverName}` : '(承認者記録なし)';
+  const when = approvedAt ? new Date(approvedAt).toLocaleString('ja-JP') : '';
+  const detail = itemApprovalStatus === 'pending'
+    ? 'まだ誰も承認していません'
+    : `${auto ? '自動承認' : '承認者'}: ${who}${when ? `・${when}` : ''}`;
+  return `<span class="status-badge ${cls}">${label}</span>`
+    + (auto ? ` <span class="mini-tag info">${approvalMethodLabel || '自動承認(承認免除ルール)'}</span>` : '')
+    + `　${detail}`;
+}
+
+// 自動承認の根拠を、承認状態のすぐ下に必ず日本語で出す(「なぜ承認になっているのか」を
+// 画面だけで理解できるようにする)。
+function approvalMethodNoteHtml(approvalMethod) {
+  if (approvalMethod !== 'auto_self_approval_exempt') return '';
+  return '<div class="hint-inline">代表者本人の申請のため、承認免除ルールにより自動で承認されています。人が承認画面で押した承認ではありません。</div>';
+}
+
+// ---------- 経費の履歴台帳(社員本人 / 管理者) ----------
+//
+// 2026-09-06、社長の指摘「経費の申請を、誰が・どの項目で・この領収書で・いつ申請し・いつ承認し、
+// いつお金を渡すと言ったか、を全部データにして、個人ごとにも月ごとにも見られるようにして、
+// 税理士に出せるようにして、とお願いしたのに、なぜ見えなくなっているのか。承認しただけでは
+// 意味がない」「すべての履歴は基本的に見えるようにしておいて」を満たす画面。
+// データは新しい台帳テーブルではなく、既存テーブルを束ねたビュー expense_ledger_rows
+// (RPC: get_my_expense_ledger / admin_get_expense_ledger)から取る。
+
+const EXPENSE_PAYMENT_STATUS_LABEL = {
+  not_applicable: '会社払い(精算不要)', not_started: '未精算', scheduled: '精算予定',
+  waiting_payment: '支払待ち(精算予定日あり)', partially_paid: '一部精算済み',
+  processing: '手続き中', paid: '精算済み',
+};
+const TAX_SUBMISSION_STATE_LABEL = {
+  unsent: '未送信', sent: '送信済み', changed_since_sent: '送信後に変更あり(要追送)',
+};
+
+function yenText(n) { return n == null ? '-' : `${Number(n).toLocaleString('ja-JP')}円`; }
+function dateText(v) { return v ? new Date(v).toLocaleDateString('ja-JP') : '-'; }
+function dateTimeText(v) { return v ? new Date(v).toLocaleString('ja-JP') : '-'; }
+
+// 1行分の共通表示(社員側カード / 管理者側カードで同じ意味・同じ言葉を使う)。
+// 2026-09-06(X2): 「領収書リンク」がGoogle Driveのビューア直リンクだったため、Googleに
+// ログインしていない端末(社員のiPhone・税理士の端末)では開けなかった(A1指摘)。
+// 認証プロキシ(receipt-image)経由のサムネイル+タップ拡大に統一し、Driveの生URLは出さない。
+function expenseLedgerCardHtml(r, opts) {
+  const showName = !opts || opts.showName !== false;
+  return `
+    <div class="history-item expense-ledger-card" data-request-id="${r.employee_request_id}" data-document-id="${r.document_id || ''}">
+      <div class="row1"><span>${showName ? `${r.employee_name}・` : ''}${r.store_name || '(支払先不明)'}</span><span>${yenText(r.amount)}</span></div>
+      <div class="row2">帰属月: ${r.belonging_year_month || '-'}　利用日: ${dateText(r.document_date)}　現場: ${r.site_name || '-'}</div>
+      <div class="row2">勘定科目: ${r.account_category || '(未確定)'}${r.account_category_status === 'confirmed' ? '' : '(要確認)'}　区分: ${r.expense_category === 'employee_advance' ? '立替' : '会社払い'}</div>
+      <div class="row2">領収書: ${r.has_receipt && r.document_id
+    ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb" data-secure-kind="receipt" data-secure-id="${r.document_id}" alt="領収書" loading="lazy"><div class="hint-inline">タップで拡大(書類ID ${r.document_id})</div></div>`
+    : '<span class="mini-tag warn">なし</span>'}</div>
+      <div class="row2">申請日時: ${dateTimeText(r.requested_at)}</div>
+      <div class="row2">${expenseApprovalBadgeHtml(r.item_approval_status, r.approval_method, r.approval_method_label, r.approver_name, r.approved_at)}</div>
+      ${approvalMethodNoteHtml(r.approval_method)}
+      <div class="row2">支払予定日: ${dateText(r.scheduled_payment_date)}　支払完了日: ${dateText(r.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status || '-'}</div>
+      <div class="row2">税理士への提出: ${TAX_SUBMISSION_STATE_LABEL[r.tax_submission_state] || r.tax_submission_state || '未送信'}${r.tax_last_sent_at ? `(最終送信 ${dateText(r.tax_last_sent_at)})` : ''}</div>
+      ${r.item_approval_status === 'rejected' && (r.item_approval_reason || r.rejection_reason) ? `<div class="row2">却下理由: ${r.item_approval_reason || r.rejection_reason}</div>` : ''}
+      <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">この経費の全体を見る</button>
+    </div>
+  `;
+}
+
+// --- 社員本人 ---
+let myExpenseLedgerMonth = '';
+
+async function loadMyExpenseLedger() {
+  const session = getSession();
+  const listEl = document.getElementById('mel-list');
+  const countEl = document.getElementById('mel-count');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('get_my_expense_ledger', {
+      p_employee_code: session.employeeCode,
+      p_year_month: myExpenseLedgerMonth || null,
+    });
+    if (countEl) countEl.textContent = `${(rows || []).length}件`;
+    if (!rows || rows.length === 0) {
+      listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map((r) => expenseLedgerCardHtml(r, { showName: false })).join('');
+    hydrateIcons(listEl);
+    // 領収書は認証プロキシ経由で表示し、タップで拡大(Driveの直リンクは使わない)。
+    hydrateSecureImages(listEl);
+    // 台帳の1行からも、申請詳細とまったく同じ「経費の全体」を開ける(入口が違っても同じ描画関数)。
+    listEl.querySelectorAll('.expense-ledger-detail-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const card = e.target.closest('.expense-ledger-card');
+        openMyRequestDetail(card.dataset.requestId, 'my-expense-ledger');
+      });
+    });
+  } catch (e) {
+    // 「0件」と「取得失敗」を混同させない。
+    if (countEl) countEl.textContent = '';
+    listEl.innerHTML = `<div class="hint">読み込みに失敗しました: ${e.message}</div>`;
+  }
+}
+
+// --- 管理者 ---
+let expenseLedgerAdminFilters = { yearMonth: '', employeeCode: '', statusGroup: '' };
+let expenseLedgerAdminRows = [];
+
+async function loadExpenseLedgerAdmin() {
+  const session = getSession();
+  const listEl = document.getElementById('ela-list');
+  const bodyEl = document.getElementById('ela-table-body');
+  const countEl = document.getElementById('ela-count');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  hideError('ela-error');
+  try {
+    expenseLedgerAdminRows = await rpc('admin_get_expense_ledger', {
+      p_admin_employee_code: session.employeeCode,
+      p_year_month: expenseLedgerAdminFilters.yearMonth || null,
+      p_target_employee_code: expenseLedgerAdminFilters.employeeCode || null,
+      p_status_group: expenseLedgerAdminFilters.statusGroup || null,
+    }) || [];
+    const total = expenseLedgerAdminRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    if (countEl) countEl.textContent = `${expenseLedgerAdminRows.length}件・合計${yenText(total)}`;
+    if (expenseLedgerAdminRows.length === 0) {
+      listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
+      bodyEl.innerHTML = '<tr><td colspan="16"><div class="hint">この条件の経費履歴はありません。</div></td></tr>';
+      return;
+    }
+    listEl.innerHTML = expenseLedgerAdminRows.map((r) => expenseLedgerCardHtml(r)).join('');
+    hydrateIcons(listEl);
+    hydrateSecureImages(listEl);
+    // 台帳の1行 →「この経費の全体を見る」で申請詳細(共通の1関数)へ。入った場所(台帳)へ戻る。
+    listEl.querySelectorAll('.expense-ledger-detail-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRequestDetail('expense_reimbursement', e.target.closest('.expense-ledger-card').dataset.requestId);
+      });
+    });
+    bodyEl.innerHTML = expenseLedgerAdminRows.map((r) => `
+      <tr>
+        <td>${r.belonging_year_month || '-'}</td>
+        <td>${dateText(r.document_date)}</td>
+        <td>${r.employee_name}</td>
+        <td>${r.store_name || '-'}</td>
+        <td>${r.site_name || '-'}</td>
+        <td>${r.account_category || '(未確定)'}${r.account_category_status === 'confirmed' ? '' : '(要確認)'}</td>
+        <td>${yenText(r.amount)}</td>
+        <td>${r.has_receipt
+    ? `<button type="button" class="link ela-row-detail-btn" data-request-id="${r.employee_request_id}">開く</button>`
+    : 'なし'}</td>
+        <td>${dateTimeText(r.requested_at)}</td>
+        <td>${EXPENSE_ITEM_STATUS_LABEL[r.item_approval_status] || r.item_approval_status}</td>
+        <td>${r.approval_method_label || '-'}</td>
+        <td>${r.approver_name || '-'}</td>
+        <td>${dateTimeText(r.approved_at)}</td>
+        <td>${dateText(r.scheduled_payment_date)}</td>
+        <td>${dateText(r.paid_at)}</td>
+        <td>${TAX_SUBMISSION_STATE_LABEL[r.tax_submission_state] || r.tax_submission_state || '未送信'}</td>
+      </tr>
+    `).join('');
+    // PC表の「領収書 開く」も、Driveの直リンクではなく申請詳細(認証プロキシで原本表示)へ送る。
+    bodyEl.querySelectorAll('.ela-row-detail-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRequestDetail('expense_reimbursement', btn.dataset.requestId);
+      });
+    });
+  } catch (e) {
+    if (countEl) countEl.textContent = '';
+    listEl.innerHTML = '';
+    bodyEl.innerHTML = '';
+    showError('ela-error', e.message || '読み込みに失敗しました。');
+  }
+}
+
+// 税理士へそのまま渡せるCSV(Excelでそのまま開けるようUTF-8 BOM付き)。
+// 列は既存の税理士提出パッケージ(scripts/lib/receipt-monthly-tax-export.js)の台帳CSVと
+// 同じ意味の項目に揃え、承認方式・税理士送信状態を追加している。
+const EXPENSE_LEDGER_CSV_COLUMNS = [
+  ['帰属月', 'belonging_year_month'], ['利用日', 'document_date'], ['申請者', 'employee_name'],
+  ['社員番号', 'employee_code'], ['経費区分', (r) => (r.expense_category === 'employee_advance' ? '立替' : '会社払い')],
+  ['支払先', 'store_name'], ['現場', 'site_name'], ['使用目的', 'purpose_category'], ['使用目的詳細', 'purpose'],
+  ['勘定科目', 'account_category'], ['勘定科目の確認状態', (r) => (r.account_category_status === 'confirmed' ? '確定' : '要確認')],
+  ['支払方法', 'payment_method'], ['金額', 'amount'], ['消費税', 'tax_amount'], ['税率', 'tax_rate'],
+  ['インボイス番号', 'invoice_registration_number'],
+  ['領収書', (r) => (r.has_receipt ? 'あり' : 'なし')],
+  // 2026-09-06(X2): 旧「領収書リンク」はGoogle Driveのビューア直リンクで、Googleに
+  // ログインしていない端末(税理士側を含む)では開けなかった。CSVにはDriveのURLを載せず、
+  // 社内の管理画面で原本にたどり着くための書類ID・申請IDだけを載せる。
+  ['領収書の確認方法', (r) => (r.has_receipt
+    ? `社員ポータル 管理者→経費履歴台帳→この行の「この経費の全体を見る」(申請ID ${r.employee_request_id} / 書類ID ${r.document_id})`
+    : '領収書なし')],
+  ['申請日時', 'requested_at'],
+  ['承認状態', (r) => EXPENSE_ITEM_STATUS_LABEL[r.item_approval_status] || r.item_approval_status || ''],
+  ['承認方式', 'approval_method_label'], ['承認者', 'approver_name'], ['承認日時', 'approved_at'],
+  ['支払予定日', 'scheduled_payment_date'], ['支払完了日', 'paid_at'],
+  ['精算状態', (r) => EXPENSE_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status || ''],
+  ['税理士送信状態', (r) => TAX_SUBMISSION_STATE_LABEL[r.tax_submission_state] || r.tax_submission_state || ''],
+  ['税理士初回送信', 'tax_first_sent_at'], ['税理士最終送信', 'tax_last_sent_at'], ['追送回数', 'tax_additional_send_count'],
+  ['伝票ID', 'expense_item_id'], ['申請ID', 'employee_request_id'], ['書類ID', 'document_id'],
+];
+
+function expenseLedgerToCsv(rows) {
+  const esc = (v) => {
+    const s = v == null ? '' : String(v);
+    return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  const header = EXPENSE_LEDGER_CSV_COLUMNS.map(([label]) => esc(label)).join(',');
+  const body = rows.map((r) => EXPENSE_LEDGER_CSV_COLUMNS.map(([, key]) => {
+    const v = typeof key === 'function' ? key(r) : r[key];
+    return esc(v);
+  }).join(',')).join('\r\n');
+  return `${header}\r\n${body}\r\n`;
+}
+
+function downloadExpenseLedgerCsv() {
+  if (!expenseLedgerAdminRows || expenseLedgerAdminRows.length === 0) {
+    showError('ela-error', '書き出す行がありません。条件を変えてから実行してください。');
+    return;
+  }
+  const csv = expenseLedgerToCsv(expenseLedgerAdminRows);
+  const blob = new Blob([`﻿${csv}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `経費台帳_${expenseLedgerAdminFilters.yearMonth || '全期間'}${expenseLedgerAdminFilters.employeeCode ? `_${expenseLedgerAdminFilters.employeeCode}` : ''}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// ---------- 経費申請の全体追跡(入口が違っても同じ1つの描画関数、2026-09-06 P0・X2担当) ----------
+//
+// 【なぜ1つの関数に統一したか】2026-09-06、社長の指摘(原文要旨)
+//   「管理者が経費立替申請を開いても領収書も内容も確認できない。承認・支払・税理士提出が
+//    できる状態ではない。私が管理画面を見て、誰が / いつ / 何に / いくら使い / どの領収書が
+//    証拠で / 誰がいつ承認し / いつ支払い / どの勘定科目で / 税理士に何を渡すのか を
+//    1件ごとに理解できることが完成条件。『DBに値がある』『テスト30/30』では完成にしない。」
+//   それまでは 申請詳細 / 経費台帳 / 勘定科目要確認 / 本人の申請履歴 がそれぞれ別の描画を
+//   持っていて、入口によって出る項目が違い、承認後は「この申請は既に処理済みです。」だけに
+//   なって項目が消えていた(状態で項目を減らしていた)。
+//   以後、経費申請の詳細は入口(承認待ち / 承認済み / 履歴 / 台帳 / 要確認 / 本人の申請履歴)に
+//   関わらず renderExpenseRequestDetailInto() ただ1つを通す。状態で項目を減らさない。
+//
+// 【日付のルール】必ず「利用日 / 申請日 / 登録日 / 承認日 / 支払日 / 経理処理日 / 税理士送信日」と
+//   ラベルを付けて出す。「9/4」だけの表示は禁止(何の日付か分からない、という指摘の恒久対策)。
+// 【勘定科目のルール】社員入力 / AI推定(確信度) / 経理確定 を必ず3行並べて出す。
+// 【承認のルール】承認者 / 承認日時 / 承認方式(人の承認 / AI自動承認(承認免除ルール) / システム移行)。
+// 【承認と支払は別状態】承認済み=支払済み ではない。支払可能条件を満たさないときは
+//   「不足: …」を出して支払ボタンを無効化する(判定の正本は DB の expense_payable_check)。
+//
+// 【データの正本】X1(DB担当)の admin_get_expense_request_full(jsonb)。この画面が使う形は
+//   その戻り値の形そのもの。契約RPCが無い環境(古い本番など)では、既存RPCを束ねて
+//   同じキーの形を組み立てて描画する(項目が「-」になるものがあることを画面に明記する)。
+
+let expenseFullRpcAvailable = null; // null=未判定 / true=契約RPCあり / false=組み立て経路
+let expenseSetFinalCategoryRpcAvailable = null;
+let expenseRecordPaymentRpcAvailable = null;
+
+function exdEsc(v) {
+  if (v == null) return '';
+  return String(v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function exdText(v) { const s = v == null || v === '' ? '' : String(v); return s === '' ? '-' : exdEsc(s); }
+function exdRow(label, valueHtml) {
+  return `<div class="field-row"><span class="field-label">${exdEsc(label)}</span><span class="field-value">${valueHtml == null || valueHtml === '' ? '-' : valueHtml}</span></div>`;
+}
+function exdRowText(label, value) { return exdRow(label, exdText(value)); }
+
+const EXD_CONFIDENCE_LABEL = { high: '高', medium: '中', low: '低' };
+const EXD_APPROVAL_STATUS_LABEL = { approved: '承認済み', rejected: '却下', pending: '承認待ち', on_hold: '保留(差戻し)' };
+const EXD_PAYMENT_STATUS_LABEL = {
+  not_applicable: '会社払い(社員への支払はありません)', not_started: '未着手',
+  payment_pending: '支払待ち(承認済み・未払い)', partially_paid: '一部支払済み', paid: '支払済み',
+  waiting_payment: '支払待ち', scheduled: '精算予定', processing: '手続き中',
+};
+const EXD_STATE_LABEL = {
+  SUBMITTED: '申請済み(承認待ち)', APPROVED: '承認済み', PAYMENT_PENDING: '承認済み・支払待ち',
+  PAID: '支払済み', ACCOUNTING_PROCESSED: '経理処理済み', TAX_SUBMITTED: '税理士へ提出済み',
+  REJECTED: '却下', CANCELLED: '取消',
+};
+const EXD_ACCOUNTING_LABEL = { processed: '経理処理済み', not_processed: '未処理' };
+const EXD_CATEGORY_STATUS_LABEL = {
+  confirmed: '確定済み',
+  needs_review_no_candidate: '未確定(AIが提案できていません)',
+  needs_review_no_ai_candidate: '未確定(AIが提案できていません)',
+  needs_review_no_input: '未確定(社員入力もAI提案もありません)',
+  needs_review_low_confidence: '未確定(AI提案の確信度が高くありません)',
+};
+
+// --- 取得: 契約RPC(正本)→ 無ければ既存RPCの組み立て -------------------------
+async function fetchExpenseRequestFullAdmin(session, requestId) {
+  if (expenseFullRpcAvailable !== false) {
+    try {
+      const res = await rpc('admin_get_expense_request_full', {
+        p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(requestId),
+      });
+      const full = Array.isArray(res) ? res[0] : res;
+      if (full && (full.items || full.header)) {
+        expenseFullRpcAvailable = true;
+        return normalizeExpenseFull(full, 'contract');
+      }
+    } catch (e) {
+      // 関数がまだ存在しない環境では以後この経路を試さない(毎回404を撃たない)。
+      if (/PGRST202|Could not find the function|does not exist/i.test(e.message || '')) expenseFullRpcAvailable = false;
+      else throw e;
+    }
+  }
+  return buildExpenseFullFromAdminRpcs(session, requestId);
+}
+
+function normalizeExpenseFull(full, source) {
+  const out = full && typeof full === 'object' ? full : {};
+  out.source = source;
+  out.header = out.header || {};
+  out.dates = out.dates || {};
+  out.amounts = out.amounts || {};
+  out.items = Array.isArray(out.items) ? out.items : [];
+  out.approval = out.approval || {};
+  out.payment = out.payment || {};
+  out.accounting = out.accounting || {};
+  out.tax = out.tax || {};
+  out.cover_sheet = out.cover_sheet || {};
+  out.payable = out.payable || { ok: false, missing: ['支払可能条件を判定できませんでした'], warnings: [] };
+  out.payable.missing = Array.isArray(out.payable.missing) ? out.payable.missing : [];
+  out.payable.warnings = Array.isArray(out.payable.warnings) ? out.payable.warnings : [];
+  return out;
+}
+
+// --- 契約RPCが無い環境用の組み立て(キー名は契約と同じにそろえる) ---------------
+async function buildExpenseFullFromAdminRpcs(session, requestId) {
+  const rid = Number(requestId);
+  const reqRows = await rpc('admin_search_requests', {
+    p_admin_employee_code: session.employeeCode, p_request_type: 'expense_reimbursement',
+    p_employee_code: null, p_employee_name: null, p_status_group: null, p_date_from: null,
+    p_date_to: null, p_site_name: null, p_partner_name: null, p_keyword: null,
+  }).catch(() => []);
+  const head = (reqRows || []).find((x) => String(x.source_id) === String(rid)) || null;
+  const [items, ledgerAll, payStatus, history, methodMap] = await Promise.all([
+    rpc('admin_get_bulk_expense_request_items', { p_admin_employee_code: session.employeeCode, p_employee_request_id: rid }).catch(() => []),
+    rpc('admin_get_expense_ledger', {
+      p_admin_employee_code: session.employeeCode, p_year_month: null,
+      p_target_employee_code: head ? head.employee_code : null, p_status_group: null,
+    }).catch(() => []),
+    rpc('admin_get_expense_payment_status', { p_admin_employee_code: session.employeeCode, p_employee_request_id: rid })
+      .then((r) => (Array.isArray(r) ? r[0] : r) || null).catch(() => null),
+    rpc('admin_get_request_audit_log', { p_admin_employee_code: session.employeeCode, p_target_table: 'employee_requests', p_target_id: rid }).catch(() => []),
+    loadApprovalMethodMap(session.employeeCode, [rid]).catch(() => new Map()),
+  ]);
+  return assembleExpenseFull({
+    rid, head, items: items || [], ledger: (ledgerAll || []).filter((r) => String(r.employee_request_id) === String(rid)),
+    payStatus, history: history || [],
+    method: methodMap && methodMap.get ? methodMap.get(String(rid)) : null,
+  });
+}
+
+// 社員本人側(管理者RPCは呼べない)。同じ形を本人向けRPCから組み立て、同じ描画関数へ渡す。
+async function buildExpenseFullFromEmployeeRpcs(session, requestId) {
+  const rid = Number(requestId);
+  const [detailRows, ledgerAll, methodMap] = await Promise.all([
+    rpc('get_my_request_detail', { p_employee_code: session.employeeCode, p_request_id: rid }).catch(() => []),
+    rpc('get_my_expense_ledger', { p_employee_code: session.employeeCode, p_year_month: null }).catch(() => []),
+    loadApprovalMethodMap(session.employeeCode, [rid]).catch(() => new Map()),
+  ]);
+  const d0 = (detailRows || [])[0] || {};
+  const ledger = (ledgerAll || []).filter((r) => String(r.employee_request_id) === String(rid));
+  return assembleExpenseFull({
+    rid,
+    head: {
+      source_id: rid, employee_name: (ledger[0] && ledger[0].employee_name) || null,
+      employee_code: session.employeeCode, status: d0.status, requested_at: d0.requested_at,
+      amount: d0.amount, summary: d0.purpose, site_name: d0.site_name, partner_name: d0.partner_name,
+      rejection_reason: d0.rejection_reason,
+    },
+    items: [], ledger,
+    payStatus: d0.approved_total != null
+      ? { total_amount: d0.approved_total, paid_amount: d0.paid_total, remaining_amount: d0.unpaid_total } : null,
+    history: [],
+    method: methodMap && methodMap.get ? methodMap.get(String(rid)) : null,
+    coverSheetFileId: d0.cover_sheet_file_id || null,
+  });
+}
+
+function assembleExpenseFull(ctx) {
+  const { rid, head, items, ledger, payStatus, history, method } = ctx;
+  const byItem = new Map(ledger.map((r) => [String(r.expense_item_id), r]));
+  const l0 = ledger[0] || {};
+  const base = (items && items.length) ? items : ledger.map((l) => ({
+    expense_item_id: l.expense_item_id, document_id: l.document_id, document_date: l.document_date,
+    vendor_name: l.store_name, amount: l.amount, site_name: l.site_name, purpose_category: l.purpose_category,
+    purpose: l.purpose, payment_method: l.payment_method, approval_status: l.item_approval_status,
+    approval_decided_by: l.item_approved_by, approval_decided_at: l.item_approved_at, approval_reason: l.item_approval_reason,
+  }));
+
+  const outItems = base.map((it) => {
+    const l = byItem.get(String(it.expense_item_id)) || {};
+    const confirmed = l.account_category_status === 'confirmed';
+    const docId = it.document_id != null ? it.document_id : l.document_id;
+    return {
+      expense_item_id: it.expense_item_id,
+      usage_date: it.document_date || l.document_date || null,
+      registered_at: l.created_at || null,
+      amount: it.amount != null ? it.amount : l.amount,
+      vendor: it.vendor_name || l.store_name || null,
+      purpose: it.purpose_category || l.purpose_category || null,
+      detail: it.purpose || l.purpose || it.content_description || null,
+      site_name: it.site_name || l.site_name || null,
+      partner_name: null,
+      payment_method: it.payment_method || l.payment_method || null,
+      expense_category: l.expense_category || null,
+      item_status: l.item_state || null,
+      approval_status: it.approval_status || l.item_approval_status || 'pending',
+      approved_by: it.approval_decided_by || l.item_approved_by || l.approver_name || null,
+      approved_at: it.approval_decided_at || l.item_approved_at || l.approved_at || null,
+      approval_reason: it.approval_reason || l.item_approval_reason || null,
+      approval_actor_type: null,
+      category: {
+        // 社員は勘定科目そのものを入力しない(会社ルール)。社員が実際に選んだのは「使用目的」。
+        employee_input: it.purpose_category || l.purpose_category || null,
+        ai_candidate: l.account_category_candidate || null,
+        ai_confidence: l.account_category_confidence || null,
+        final: confirmed ? (l.account_category_candidate || l.account_category || null) : null,
+        final_by: null, final_at: null, final_reason: null,
+        effective: l.account_category || null,
+        status: l.account_category_status || null,
+        review_reason: EXD_CATEGORY_STATUS_LABEL[l.account_category_status] || null,
+      },
+      ocr: {
+        tax_amount: l.tax_amount, tax_rate: l.tax_rate,
+        invoice_registration_number: l.invoice_registration_number || null,
+        item_ocr_confidence: it.ocr_confidence || null,
+        content_description: it.content_description || null,
+      },
+      confirmed: {},
+      note: null,
+      preapproval_discrepancy: l.preapproval_discrepancy || null,
+      receipts: docId != null ? [{ document_id: docId, file_id: null, kind: 'receipt', status: (l.has_receipt === false ? 'missing_drive_file' : 'attached') }] : [],
+    };
+  });
+
+  const usage = outItems.map((i) => i.usage_date).filter(Boolean).sort();
+  const approvedItems = outItems.filter((i) => i.approval_status === 'approved');
+  const requested = outItems.reduce((s, i) => s + Number(i.amount || 0), 0) || Number((head && head.amount) || 0);
+  const approved = payStatus && payStatus.total_amount != null ? Number(payStatus.total_amount)
+    : approvedItems.reduce((s, i) => s + Number(i.amount || 0), 0);
+  const paid = payStatus && payStatus.paid_amount != null ? Number(payStatus.paid_amount) : Number(l0.paid_amount || 0);
+  const remaining = payStatus && payStatus.remaining_amount != null
+    ? Number(payStatus.remaining_amount) : Math.max(0, approved - paid);
+
+  const isAdvance = l0.expense_category ? l0.expense_category === 'employee_advance' : true;
+  const reqStatus = (head && head.status) || l0.request_status || null;
+  const approvalStatus = l0.item_approval_status || (reqStatus === 'approved' || reqStatus === 'paid' ? 'approved' : 'pending');
+
+  const missing = [];
+  if (reqStatus === 'cancelled') missing.push('申請が取消されています');
+  if (reqStatus === 'rejected') missing.push('申請が却下されています');
+  if (!isAdvance) missing.push('会社払いの経費のため、社員への支払対象ではありません');
+  if (approvalStatus !== 'approved') missing.push('承認が完了していません');
+  if (!outItems.length) missing.push('支払対象の明細がありません');
+  const noReceipt = outItems.filter((i) => !i.receipts.length).length;
+  if (noReceipt > 0) missing.push(`領収書の原本が添付されていない明細が${noReceipt}件あります`);
+  if (isAdvance && approved <= 0) missing.push('承認済みの支払対象明細がありません');
+  if (isAdvance && approved > 0 && paid >= approved) missing.push('承認額の全額が支払済みです(残額がありません)');
+  const warnings = [];
+  const unconfirmed = outItems.filter((i) => i.category.status && i.category.status !== 'confirmed').length;
+  if (unconfirmed > 0) warnings.push(`勘定科目が確定していない明細が${unconfirmed}件あります(税理士提出前に経理の確定が必要)`);
+
+  return normalizeExpenseFull({
+    header: {
+      employee_request_id: rid, expense_no: `EXP-${String(rid).padStart(6, '0')}`,
+      employee_name: (head && head.employee_name) || l0.employee_name || null,
+      employee_code: (head && head.employee_code) || l0.employee_code || null,
+      submission_mode: null, batch_title: null,
+      expense_category: isAdvance ? 'employee_advance' : 'company_expense',
+      expense_category_label: isAdvance ? '社員立替(会社が社員へ支払う)' : '会社払い(支払対象外)',
+      belonging_year_month: l0.belonging_year_month || null,
+    },
+    dates: {
+      usage_date: usage.length ? usage[0] : null,
+      usage_date_last: usage.length ? usage[usage.length - 1] : null,
+      submitted_at: (head && head.requested_at) || l0.requested_at || null,
+      registered_at: l0.created_at || null,
+      approved_at: l0.approved_at || null,
+      paid_at: l0.paid_at || null,
+      accounting_processed_at: null,
+      tax_submitted_at: l0.tax_last_sent_at || null,
+    },
+    amounts: { requested, approved, paid, remaining, matched: requested === approved },
+    items: outItems,
+    cover_sheet: { file_id: ctx.coverSheetFileId != null ? ctx.coverSheetFileId : null },
+    approval: {
+      status: approvalStatus, request_status: reqStatus,
+      method: l0.approval_method || (method && method.approval_method) || 'none',
+      method_label: l0.approval_method_label || (method && method.approval_method_label) || null,
+      actor_type: null,
+      approver_name: l0.approver_name || null, approved_at: l0.approved_at || null,
+      rejection_reason: (head && head.rejection_reason) || l0.rejection_reason || null,
+      history: (history || []).map((h) => ({ at: h.created_at, actor: h.actor_name, action: h.action, actor_type: h.actor_type })),
+    },
+    payment: {
+      status: l0.payment_status || (isAdvance ? 'not_started' : 'not_applicable'),
+      scheduled_payment_date: l0.scheduled_payment_date || null,
+      scheduled_payment_by: l0.scheduled_payment_by || null,
+      paid_at: l0.paid_at || null, paid_amount: paid, payment_method: null, paid_by_name: null,
+      payments: [], history: [],
+    },
+    accounting: { status: 'not_processed', processed_at: null, processed_by: null },
+    tax: {
+      state: l0.tax_submission_state || 'unsent', batch_id: l0.tax_last_batch_id || null,
+      first_sent_at: l0.tax_first_sent_at || null, last_sent_at: l0.tax_last_sent_at || null,
+      send_count: l0.tax_additional_send_count != null ? l0.tax_additional_send_count : 0,
+    },
+    payable: { ok: missing.length === 0, missing, warnings, is_advance: isAdvance },
+    state: null,
+  }, 'fallback');
+}
+
+// --- 描画(すべての入口が呼ぶ唯一の関数) -------------------------------------
+
+// 税理士へ提出する「経費精算書」を、社内で使っている紙の様式のまま組み立てる。
+// 2026-09-07ユーザー指示: 申請を開いたらまずこの紙が見え、その下に領収書と申請内容が並ぶ。
+// 「内容」は申請時の勘定科目、承認欄には実際に承認した人の名前が入る。
+function exdSettlementSheetHtml(full) {
+  const h = full.header || {}; const d = full.dates || {};
+  const ap = full.approval || {}; const pay = full.payment || {};
+  const yen = (n) => (n == null || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const ymd = (v) => {
+    if (!v) return '';
+    const dt = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`) : new Date(v);
+    return Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
+  };
+  const md = (v) => {
+    if (!v) return '';
+    const dt = /^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`) : new Date(v);
+    return Number.isNaN(dt.getTime()) ? '' : `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+  // 却下・差戻しになった明細は、税理士へ出す紙には載せない。
+  // 紙は日付順に並んでいないと確認しづらいので、利用日で並べ替える
+  // (2026-09-07、実機の録画で 8/28→8/24→9/5→9/4 とばらばらに並んでいたため)。
+  const rows = (full.items || [])
+    .filter((it) => (it.approval_status || ap.status) !== 'rejected')
+    .slice()
+    .sort((x, y) => {
+      const tx = x.usage_date ? new Date(x.usage_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const ty = y.usage_date ? new Date(y.usage_date).getTime() : Number.MAX_SAFE_INTEGER;
+      return tx - ty;
+    });
+  const total = rows.reduce((acc, it) => acc + Number(it.amount || 0), 0);
+  const blanks = Math.max(0, 12 - rows.length);
+  const payLabel = pay.method === 'transfer' ? '振込み' : pay.method === 'cash' ? '現金' : '現金　・　振込み';
+  const approverName = ap.approved_by || ap.approver || '';
+  const approvedOn = d.approved_at ? ymd(d.approved_at) : '';
+  const stampCell = (label, filled) => `<td class="ss-stamp" style="width:60px;">${filled
+    ? `<div style="font-size:10px;line-height:1.3;">${exdEsc(approverName)}<br>${exdEsc(approvedOn)}</div>` : ''}${label}</td>`;
+  const approved = ap.status === 'approved';
+
+  return `<div class="settlement-sheet-wrap">
+    <div class="settlement-sheet-head">
+      <span>経費精算書（税理士へ提出する用紙）</span>
+      <button type="button" class="secondary exd-sheet-toggle">閉じる</button>
+    </div>
+    <div class="settlement-sheet-scroll exd-sheet-body">
+      <div class="settlement-sheet">
+        <div class="ss-title">経 費 精 算 書</div>
+        <div class="ss-meta">
+          申請日：<b>${exdEsc(ymd(d.submitted_at))}</b><br>
+          氏　名：<b>${exdEsc(h.employee_name || '')}</b>
+        </div>
+        <table>
+          <tr>
+            <th style="width:56px;">日 付</th><th style="width:150px;">現 場</th>
+            <th style="width:150px;">支 払 先</th><th style="width:110px;">内 容</th>
+            <th style="width:80px;">備 考</th><th>金 額</th>
+          </tr>
+          ${rows.map((it) => {
+    const c = it.category || {}; const o = it.ocr || {};
+    return `<tr>
+            <td>${exdEsc(md(it.usage_date))}</td>
+            <td class="small">${exdEsc(it.site_name || '')}</td>
+            <td class="small">${exdEsc(it.vendor || '')}</td>
+            <td class="small">${exdEsc(c.final || c.employee_input || c.ai_candidate || '')}</td>
+            <td class="small">${exdEsc(it.detail || o.content_description || '')}</td>
+            <td class="num">${yen(it.amount)}</td>
+          </tr>`;
+  }).join('')}
+          ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+        </table>
+        <div class="ss-bottom">
+          <div class="ss-admin">
+            <div style="font-size:10.5px;margin-bottom:2px;">［管理欄］</div>
+            <table>
+              <tr><th>支 払 日</th><td>${exdEsc(d.paid_at ? ymd(d.paid_at) : '　年　　月　　日')}</td></tr>
+              <tr><th>支払方法</th><td>${payLabel}</td></tr>
+              <tr><th>承認状況</th><td colspan="4" style="font-size:10.5px;">${approved ? '承認済み' : '未承認（承認するとここに承認者名が入ります）'}</td></tr>
+              <tr>
+                <th style="height:44px;">備　考</th><td></td>
+                ${stampCell('社 長', approved)}${stampCell('専 務', false)}${stampCell('経 理', false)}
+              </tr>
+            </table>
+          </div>
+          <div class="ss-total">
+            <table>
+              <tr><th style="width:96px;">合　　計</th><td class="num" style="font-size:14px;">${yen(total)}</td></tr>
+              <tr><th>受 取 方 法</th><td style="text-align:center;">${payLabel}</td></tr>
+            </table>
+            <div class="ss-note">※　振込み手数料、申請者負担</div>
+          </div>
+        </div>
+        <div class="ss-company">株式会社　迅翔興業</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderExpenseRequestDetailHtml(full, opts) {
+  const isAdmin = ((opts && opts.mode) || 'admin') === 'admin';
+  // 明細は利用日順に並べる。申請された順のままだと日付が前後して確認しづらい
+  // (2026-09-07ユーザー指摘「申請の順番がどうであれ、ここも順番合わせてほしい」)。
+  if (Array.isArray(full.items)) {
+    full.items = full.items.slice().sort((x, y) => {
+      const tx = x.usage_date ? new Date(x.usage_date).getTime() : Number.MAX_SAFE_INTEGER;
+      const ty = y.usage_date ? new Date(y.usage_date).getTime() : Number.MAX_SAFE_INTEGER;
+      return tx - ty;
+    });
+  }
+  const h = full.header || {}; const d = full.dates || {}; const a = full.amounts || {};
+  const ap = full.approval || {}; const pay = full.payment || {}; const tax = full.tax || {};
+  const acc = full.accounting || {}; const payable = full.payable || {};
+  const cover = full.cover_sheet || {};
+
+  const yen = (n) => (n == null || n === '' ? '-' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const dt = (v) => (v ? new Date(v).toLocaleString('ja-JP') : '未実施');
+  const dOnly = (v) => (v ? (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`).toLocaleDateString('ja-JP') : new Date(v).toLocaleDateString('ja-JP')) : '未実施');
+  const usageText = d.usage_date
+    ? (d.usage_date_last && d.usage_date_last !== d.usage_date ? `${dOnly(d.usage_date)} 〜 ${dOnly(d.usage_date_last)}` : dOnly(d.usage_date))
+    : '未実施';
+
+  // 0. 税理士へ提出する用紙。承認する人はまずこれを見て、その下の領収書・申請内容で裏を取る。
+  let html = exdSettlementSheetHtml(full);
+
+  // 1. だれの・どの申請か
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">この経費申請の全体</div>
+    <div class="field-group">
+      ${exdRowText('申請番号', h.expense_no)}
+      ${exdRowText('申請者', h.employee_name ? `${h.employee_name}(社員番号 ${h.employee_code || '-'})` : null)}
+      ${exdRowText('経費区分', h.expense_category_label)}
+      ${exdRowText('申請の出し方', h.submission_mode === 'bulk' ? `まとめて精算${h.batch_title ? `(${h.batch_title})` : ''}` : (h.submission_mode ? '1件ずつの申請' : null))}
+      ${exdRowText('帰属月', h.belonging_year_month || (d.usage_date ? String(d.usage_date).slice(0, 7) : null))}
+      ${exdRowText('いまどこまで進んだか', EXD_STATE_LABEL[full.state] || full.state || (EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status))}
+      ${exdRowText('明細件数', `${full.items.length}件`)}
+      ${ap.rejection_reason ? exdRowText('却下・差戻しの理由', ap.rejection_reason) : ''}
+    </div></div>`;
+
+  // 2. 日付(必ず何の日付かを書く)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">日付</div>
+    <div class="field-group">
+      ${(full.items || []).length > 1
+    ? exdRow('利用日(実際に使った日)', '明細ごとに記載しています(下の「明細と領収書の原本」を見てください)')
+    : exdRow('利用日(実際に使った日)', exdEsc(usageText))}
+      ${exdRow('申請日(社員が申請した日)', dt(d.submitted_at))}
+      ${exdRow('登録日(システムに登録された日)', dt(d.registered_at))}
+      ${exdRow('承認日(承認された日)', dt(d.approved_at))}
+      ${exdRow('支払日(本人へ支払った日)', dOnly(d.paid_at))}
+      ${exdRow('経理処理日', dt(d.accounting_processed_at))}
+      ${exdRow('税理士送信日(税理士へ渡した日)', dt(d.tax_submitted_at))}
+    </div></div>`;
+
+  // 3. 金額
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">金額</div>
+    <div class="field-group">
+      ${exdRow('申請金額(明細の合計)', yen(a.requested))}
+      ${exdRow('承認金額(支払対象)', yen(a.approved))}
+      ${exdRow('支払済み金額', yen(a.paid))}
+      ${exdRow('未払い残額', yen(a.remaining))}
+      ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
+    </div></div>`;
+
+  // 4. 承認(だれが・いつ・どの方式で)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">承認</div>
+    <div class="field-group">
+      ${exdRow('承認の状態', `<span class="status-badge ${ap.status === 'approved' ? 'done' : (ap.status === 'rejected' ? 'rejected' : '')}">${exdEsc(EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status || '承認待ち')}</span>`)}
+      ${exdRowText('承認者', ap.approver_name || (ap.status === 'approved' ? '(承認者の記録なし)' : 'まだ誰も承認していません'))}
+      ${exdRow('承認日時', dt(ap.approved_at))}
+      ${exdRowText('承認方式', ap.method_label || (ap.method === 'none' ? '未承認' : ap.method))}
+      ${exdRowText('承認したのは人かAIか', ap.actor_type === 'system' ? 'AI・システムによる自動承認' : (ap.actor_type === 'human' ? '人が承認画面で承認' : null))}
+    </div>
+    ${approvalMethodNoteHtml(ap.method)}
+  </div>`;
+
+  // 5. 明細と領収書の原本(勘定科目3層つき)
+  html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">明細と領収書の原本</div>';
+  if (!full.items.length) {
+    html += '<div class="hint">この申請には経費明細がありません。</div>';
+  } else {
+  if (isAdmin) {
+    // 一件ずつ押させない。まとめて確定し、ダメなものだけ「除外」を押す
+    // (2026-09-07ユーザー指示。100件まとめて来ても人の操作が例外分だけで済むようにする)。
+    const unconfirmed = (full.items || []).filter((it) => !((it.category || {}).final)).length;
+    html += `<div class="exd-bulk-bar">
+      <button type="button" id="exd-bulk-confirm-cats"${unconfirmed === 0 ? ' disabled' : ''}>勘定科目をまとめて確定する（未確定 ${unconfirmed}件）</button>
+      <div class="hint-inline">社員が入力した科目、無ければAIの推定をそのまま確定します。おかしいものは下の明細で「この科目で確定する」か「この明細を除外する」を押してください。</div>
+      <div class="error" id="exd-bulk-error"></div>
+    </div>`;
+  }
+
+    html += full.items.map((it, idx) => {
+      const c = it.category || {}; const o = it.ocr || {};
+      const r0 = (it.receipts || [])[0] || null;
+      const attached = r0 && (!r0.status || r0.status === 'attached');
+      return `<div class="history-item exd-item" data-item-id="${exdEsc(it.expense_item_id)}" data-document-id="${exdEsc(r0 ? r0.document_id : '')}">
+        <div class="row1"><span>明細${idx + 1}: ${exdText(it.vendor)}</span><span>${yen(it.amount)}</span></div>
+        <div class="field-group">
+          ${exdRow('利用日', dOnly(it.usage_date))}
+          ${exdRowText('支払先', it.vendor)}
+          ${exdRowText('現場', it.site_name)}
+          ${exdRowText('何に使ったか(社員の記入)', it.detail || o.content_description)}
+          ${exdRowText('支払方法', it.payment_method)}
+          ${exdRowText('消費税額', o.tax_amount != null ? yen(o.tax_amount) : null)}
+          ${exdRowText('インボイス番号', o.invoice_registration_number)}
+          ${exdRowText('OCR読取の確信度', o.item_ocr_confidence ? (EXD_CONFIDENCE_LABEL[o.item_ocr_confidence] || o.item_ocr_confidence) : null)}
+        </div>
+        <div class="exd-category">
+          <div class="hint-inline"><strong>勘定科目(社員入力 / AI推定 / 経理確定)</strong></div>
+          <div class="field-group">
+            ${exdRowText('社員入力', c.employee_input)}
+            ${exdRowText('AI推定(確信度)', c.ai_candidate ? `${c.ai_candidate}(確信度: ${EXD_CONFIDENCE_LABEL[c.ai_confidence] || c.ai_confidence || '不明'})` : 'AIは提案できていません')}
+            ${exdRowText('経理確定', c.final ? `${c.final}${c.final_by ? `(確定者: ${c.final_by})` : ''}${c.final_at ? `・${new Date(c.final_at).toLocaleString('ja-JP')}` : ''}` : '未確定')}
+            ${exdRowText('確認状態', c.review_reason || EXD_CATEGORY_STATUS_LABEL[c.status] || null)}
+            ${c.final_reason ? exdRowText('確定の理由', c.final_reason) : ''}
+          </div>
+          ${isAdmin ? `<div class="exd-category-form">
+            <input type="text" class="exd-category-input" list="category-suggest-list" placeholder="正しい勘定科目を入力" value="${exdEsc(c.final || c.ai_candidate || '')}">
+            <button type="button" class="secondary exd-category-confirm">この科目で確定する</button>
+          </div>` : ''}
+        </div>
+        <div class="field-group">
+          ${exdRow('この明細の承認', `<span class="status-badge ${it.approval_status === 'approved' ? 'done' : (it.approval_status === 'rejected' ? 'rejected' : '')}">${exdEsc(EXD_APPROVAL_STATUS_LABEL[it.approval_status] || it.approval_status || '承認待ち')}</span>`)}
+          ${exdRowText('この明細の承認者', it.approved_by)}
+          ${exdRow('この明細の承認日時', dt(it.approved_at))}
+          ${isAdmin && it.approval_status !== 'rejected'
+    ? `<div style="margin-top:6px;"><button type="button" class="secondary danger exd-item-exclude">この明細を除外する（金額から差し引く）</button></div>` : ''}
+          ${it.approval_status === 'rejected'
+    ? '<div class="hint-inline">この明細は除外されています。合計金額にも税理士へ出す用紙にも含まれません。</div>' : ''}
+          ${it.approval_reason ? exdRowText('承認・却下の理由', it.approval_reason) : ''}
+        </div>
+        ${attached
+    ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb exd-receipt-thumb" data-secure-kind="receipt" data-secure-id="${exdEsc(r0.document_id)}" alt="領収書" loading="lazy"><div class="hint-inline">領収書(書類ID ${exdEsc(r0.document_id)})・タップで拡大</div></div>`
+    : '<div class="hint-inline"><span class="mini-tag warn">領収書なし</span> この明細には領収書の原本が添付されていません(税理士へ出す証拠がありません)。</div>'}
+      </div>`;
+    }).join('');
+  }
+  html += '</div>';
+
+  // 6. 経費精算書(まとめ精算の表紙)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経費精算書(まとめ精算の表紙)</div>
+    <div class="field-group">
+      ${exdRowText('経費精算書に書かれた合計', cover.declared_total != null ? yen(cover.declared_total) : null)}
+      ${exdRowText('申請者名(経費精算書の記載)', cover.applicant_name)}
+    </div>
+    <div class="exd-cover-sheet-box">${cover.file_id || full.source === 'fallback'
+    ? `<img class="secure-proxy-thumb exd-cover-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${exdEsc(h.employee_request_id)}" alt="経費精算書" loading="lazy">`
+    : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
+
+  // 7. 支払(承認とは別の状態)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">支払(承認とは別の状態です)</div>
+    <div class="field-group">
+      ${exdRowText('支払の状態', EXD_PAYMENT_STATUS_LABEL[pay.status] || pay.status)}
+      ${exdRow('支払予定日', dOnly(pay.scheduled_payment_date))}
+      ${exdRowText('支払予定を入れた人', pay.scheduled_payment_by)}
+      ${exdRow('支払日(実際に払った日)', dOnly(pay.paid_at))}
+      ${exdRow('支払済み金額', yen(pay.paid_amount))}
+      ${exdRowText('支払方法', pay.payment_method)}
+      ${exdRowText('支払処理をした人', pay.paid_by_name)}
+      ${exdRow('未払い残額', yen(a.remaining))}
+    </div>`;
+  const payments = Array.isArray(pay.payments) ? pay.payments : [];
+  html += `<div class="hint-inline"><strong>支払の記録</strong>(取消した支払も履歴として残ります)</div>`;
+  // 2026-09-06追加: 取消(voided)と反対仕訳(赤伝 reversal)を区別して出す。
+  // 金額の訂正は「取消 → 正しい金額で再登録」の2手順。元の行は消さない(監査のため)。
+  html += payments.length === 0
+    ? '<div class="hint-inline">支払の記録はまだありません。</div>'
+    : payments.map((p) => {
+      const tag = p.is_reversal ? '<span class="mini-tag warn">取消(赤伝)</span>'
+        : (p.is_voided ? '<span class="mini-tag warn">取消済み</span>' : '');
+      const voidLine = p.is_voided
+        ? `<div class="row2">取消: ${exdText(p.voided_by)}・理由: ${exdEsc(p.void_reason || '')}</div>` : '';
+      const btn = (isAdmin && p.can_void)
+        ? `<button type="button" class="secondary danger exd-void-pay-btn" data-payment-id="${exdEsc(p.payment_id)}" style="margin-top:6px;">この支払を取り消す</button>` : '';
+      return `<div class="change-request-item"><div class="row1"><span>${dOnly(p.paid_at)}　${yen(p.paid_amount)}${tag}</span><span>${exdText(p.payment_method)}</span></div><div class="row2">処理者: ${exdText(p.processed_by)}${p.note ? `・備考: ${exdEsc(p.note)}` : ''}</div>${voidLine}${btn}</div>`;
+    }).join('');
+  if (isAdmin) {
+    const ok = payable.ok === true;
+    html += `<div class="exd-pay-form">
+      ${ok ? '' : `<div class="hint-inline exd-payable-missing"><span class="mini-tag warn">支払を記録できません</span> 不足: ${(payable.missing || []).map((m) => exdEsc(m)).join(' / ') || '(理由不明)'}</div>`}
+      ${(payable.warnings || []).length ? `<div class="hint-inline">注意: ${(payable.warnings || []).map((m) => exdEsc(m)).join(' / ')}</div>` : ''}
+      <label for="exd-schedule-date">支払予定日</label>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <input type="date" id="exd-schedule-date" style="width:160px;" value="${exdEsc(pay.scheduled_payment_date ? String(pay.scheduled_payment_date).slice(0, 10) : '')}">
+        <button type="button" class="secondary" id="exd-schedule-save">支払予定日を記録する</button>
+      </div>
+      <label for="exd-paid-date">支払日<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">銀行振込の予約など、これから振り込む日(未来の日付)も入れられます。</div>
+      <input type="date" id="exd-paid-date" value="${exdEsc(pay.scheduled_payment_date
+    ? String(pay.scheduled_payment_date).slice(0, 10)
+    : (typeof todayJST === 'function' ? todayJST() : ''))}">
+      <label for="exd-paid-amount">支払金額<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">申請額 ${yen(a.requested)} ／ 承認額 ${yen(a.approved)} ／ <strong>未払い残額 ${yen(a.remaining)}</strong>（この欄には未払い残額を最初から入れています。減らす場合だけ書き換えてください）</div>
+      <input type="number" id="exd-paid-amount" min="1" step="1" value="${Number(a.remaining) > 0 ? Number(a.remaining) : ''}">
+      <label for="exd-paid-method">支払方法</label>
+      <select id="exd-paid-method">
+        <option value="">選択してください</option><option value="現金">現金</option>
+        <option value="銀行振込">銀行振込</option><option value="その他">その他</option>
+      </select>
+      <label for="exd-paid-note">備考</label>
+      <input type="text" id="exd-paid-note" placeholder="例: 8月分まとめて振込">
+      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
+      <div class="error" id="exd-pay-error"></div>
+      <button type="button" id="exd-pay-submit"${ok ? '' : ' disabled'}>支払を記録する</button>
+    </div>`;
+  }
+  html += '</div>';
+
+  // 8. 経理・税理士への提出
+  // 2026-09-06 独立レビュー指摘(重大5): 契約RPCの category.status は confirmed_by_accounting / confirmed_by_ai_high /
+  // needs_review_* を返し、'confirmed' は組み立て経路(expense_ledger_rows)だけが返す。両経路の「確定」を同じ扱いにする。
+  const CATEGORY_CONFIRMED = new Set(['confirmed', 'confirmed_by_accounting', 'confirmed_by_ai_high']);
+  const catUnconfirmed = full.items.filter((i) => i.category && i.category.status && !CATEGORY_CONFIRMED.has(i.category.status)).length;
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経理処理と税理士への提出</div>
+    <div class="field-group">
+      ${exdRowText('経理処理', EXD_ACCOUNTING_LABEL[acc.status] || acc.status)}
+      ${exdRow('経理処理日', dt(acc.processed_at))}
+      ${exdRowText('経理処理をした人', acc.processed_by)}
+      ${exdRowText('税理士への提出状態', TAX_SUBMISSION_STATE_LABEL[tax.state] || tax.state)}
+      ${exdRow('税理士 初回送信日', dt(tax.first_sent_at))}
+      ${exdRow('税理士 最終送信日', dt(tax.last_sent_at))}
+      ${exdRowText('追送回数', tax.send_count != null ? `${tax.send_count}回` : null)}
+      ${exdRowText('送信バッチID', tax.batch_id)}
+      ${exdRowText('勘定科目の確定状況', `${full.items.length - catUnconfirmed}/${full.items.length}件が確定済み`)}
+    </div>
+    ${catUnconfirmed > 0
+    ? '<div class="hint-inline"><span class="mini-tag warn">税理士へ出す前に経理の確定が必要です</span> 上の明細で勘定科目を確定してください。</div>'
+    : '<div class="hint-inline">勘定科目はすべて確定済みです。</div>'}
+  </div>`;
+
+  // 9. 変更履歴(いつ・誰が・何をしたか)
+  const hist = (ap.history || []).concat(pay.history || []);
+  html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">変更履歴(いつ・誰が・何をしたか)</div>';
+  html += hist.length === 0
+    ? '<div class="hint">この申請の変更履歴はまだありません。</div>'
+    : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}</span></div><div class="row2">${exdText(x.actor || x.actor_name)}・${(x.at || x.created_at) ? new Date(x.at || x.created_at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
+  html += '</div>';
+
+  if (full.source === 'fallback') {
+    html += '<div class="hint-inline">※ この環境には経費申請の統合RPC(admin_get_expense_request_full)がまだ無いため、既存データから組み立てて表示しています。支払方法・支払処理者・経理処理日などが「-」になります。</div>';
+  }
+  return html;
+}
+
+// すべての入口(承認待ち / 承認済み / 履歴 / 台帳 / 要確認 / 本人の申請履歴)がこの関数を呼ぶ。
+async function renderExpenseRequestDetailInto(containerId, requestId, opts) {
+  const el = document.getElementById(containerId);
+  if (!el) return null;
+  const mode = (opts && opts.mode) || 'admin';
+  const session = getSession();
+  el.innerHTML = '<div class="hint">経費申請の内容を読み込み中...</div>';
+  let full;
+  try {
+    full = mode === 'employee'
+      ? await buildExpenseFullFromEmployeeRpcs(session, requestId)
+      : await fetchExpenseRequestFullAdmin(session, requestId);
+  } catch (e) {
+    el.innerHTML = `<div class="hint">経費申請の内容を読み込めませんでした: ${exdEsc(e.message || '')}</div>`;
+    return null;
+  }
+  el.innerHTML = renderExpenseRequestDetailHtml(full, { mode });
+  wireExpenseRequestDetail(el, full, { mode, requestId, onChanged: opts && opts.onChanged });
+  return full;
+}
+
+function wireExpenseRequestDetail(el, full, ctx) {
+  const session = getSession();
+  const requestId = Number(ctx.requestId);
+  const reload = async () => {
+    await renderExpenseRequestDetailInto(el.id, requestId, { mode: ctx.mode, onChanged: ctx.onChanged });
+    if (ctx.onChanged) { try { ctx.onChanged(); } catch (e) { /* 呼び出し元の再読み込み失敗で詳細表示を壊さない */ } }
+  };
+
+  // 領収書・経費精算書は認証プロキシ(receipt-image)経由で読み込み、タップで拡大する。
+  // Google Drive の生URL・公開URLは一切使わない(Google未ログイン端末でも見えるようにするため)。
+  hydrateSecureImages(el);
+  hydrateIcons(el);
+  // 経費精算書の開閉(長い明細のときに畳めるようにする)
+  const sheetToggle = el.querySelector('.exd-sheet-toggle');
+  const sheetBody = el.querySelector('.exd-sheet-body');
+  if (sheetToggle && sheetBody) {
+    sheetToggle.addEventListener('click', () => {
+      const hidden = sheetBody.style.display === 'none';
+      sheetBody.style.display = hidden ? '' : 'none';
+      sheetToggle.textContent = hidden ? '閉じる' : '開く';
+    });
+  }
+  // 社員側と管理者側の両方がこのHTMLを使うため、id ではなくこの描画コンテナの中だけを探す。
+  const cover = el.querySelector('.exd-cover-thumb');
+  if (cover) {
+    const box = el.querySelector('.exd-cover-sheet-box');
+    const noAttach = '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>';
+    if (box) {
+      cover.addEventListener('error', () => { box.innerHTML = noAttach; });
+      setTimeout(() => { if (!box.querySelector('img[src]')) box.innerHTML = noAttach; }, 6000);
+    }
+  }
+
+  if (ctx.mode !== 'admin') return;
+
+  // 勘定科目をまとめて確定する。人が押すのは例外(除外)のときだけにするための入口。
+  const bulkBtn = el.querySelector('#exd-bulk-confirm-cats');
+  if (bulkBtn) {
+    bulkBtn.addEventListener('click', async () => {
+      hideError('exd-bulk-error');
+      bulkBtn.disabled = true;
+      const original = bulkBtn.textContent;
+      bulkBtn.textContent = '確定しています...';
+      try {
+        const res = await rpc('admin_bulk_confirm_account_categories', {
+          p_admin_employee_code: session.employeeCode, p_employee_request_id: requestId, p_reason: null,
+        });
+        const r = Array.isArray(res) ? res[0] : res;
+        if (r && Number(r.skipped) > 0) {
+          showError('exd-bulk-error', `${r.confirmed}件を確定しました。${r.skipped}件は社員入力もAI推定も無いため、下の明細で科目を入れてください。`);
+        }
+        await reload();
+      } catch (e) {
+        showError('exd-bulk-error', e.message || 'まとめて確定できませんでした。');
+        bulkBtn.disabled = false; bulkBtn.textContent = original;
+      }
+    });
+  }
+
+  // 明細を除外する(却下扱い)。除外したものは合計金額からも税理士へ出す用紙からも外れる。
+  el.querySelectorAll('.exd-item').forEach((itemEl) => {
+    const ex = itemEl.querySelector('.exd-item-exclude');
+    if (!ex) return;
+    ex.addEventListener('click', async () => {
+      const reason = window.prompt('この明細を除外する理由を入力してください（任意）', '');
+      if (reason === null) return;
+      ex.disabled = true;
+      try {
+        await rpc('admin_decide_expense_items', {
+          p_admin_employee_code: session.employeeCode,
+          p_item_ids: [Number(itemEl.dataset.itemId)],
+          p_decision: 'rejected', p_reason: reason || '経理確認により除外',
+        });
+        await reload();
+      } catch (e) { ex.disabled = false; alert(e.message || '除外できませんでした。'); }
+    });
+  });
+
+  // 勘定科目の経理確定(明細ごと)。契約RPCがあれば expense_item 単位で確定する。
+  el.querySelectorAll('.exd-item').forEach((itemEl) => {
+    const btn = itemEl.querySelector('.exd-category-confirm');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const value = itemEl.querySelector('.exd-category-input').value.trim();
+      if (!value) return;
+      btn.disabled = true;
+      try {
+        if (expenseSetFinalCategoryRpcAvailable !== false) {
+          try {
+            await rpc('admin_set_final_account_category', {
+              p_admin_employee_code: session.employeeCode,
+              p_expense_item_id: Number(itemEl.dataset.itemId), p_account_category: value, p_reason: null,
+            });
+            expenseSetFinalCategoryRpcAvailable = true;
+            await reload(); return;
+          } catch (e) {
+            if (/PGRST202|Could not find the function|does not exist/i.test(e.message || '')) expenseSetFinalCategoryRpcAvailable = false;
+            else throw e;
+          }
+        }
+        await rpc('admin_set_account_category', {
+          p_admin_employee_code: session.employeeCode,
+          p_document_id: Number(itemEl.dataset.documentId), p_category: value, p_note: null,
+        });
+        await reload();
+      } catch (e) {
+        alert(e.message || '勘定科目を確定できませんでした。');
+      } finally { btn.disabled = false; }
+    });
+  });
+
+  // 支払予定日(承認 → 支払予定 → 支払完了 の中間状態。承認だけで残高は動かさない)。
+  const schedBtn = el.querySelector('#exd-schedule-save');
+  if (schedBtn) {
+    schedBtn.addEventListener('click', async () => {
+      const v = el.querySelector('#exd-schedule-date').value;
+      if (!v) { showError('exd-pay-error', '支払予定日を入力してください。'); return; }
+      schedBtn.disabled = true;
+      try {
+        await rpc('admin_set_expense_payment_schedule', {
+          p_admin_employee_code: session.employeeCode, p_employee_request_id: requestId, p_scheduled_payment_date: v,
+        });
+        await reload();
+      } catch (e) { showError('exd-pay-error', e.message || '支払予定日を記録できませんでした。'); }
+      finally { schedBtn.disabled = false; }
+    });
+  }
+
+  // 支払の取消・訂正(2026-09-06追加)。元の支払行は消さず、反対仕訳(赤伝)を足して打ち消す。
+  el.querySelectorAll('.exd-void-pay-btn').forEach((vb) => {
+    vb.addEventListener('click', async () => {
+      const paymentId = Number(vb.getAttribute('data-payment-id'));
+      const reason = prompt('この支払を取り消す理由を入力してください(監査に残ります)。例: 金額を誤って登録したため');
+      if (reason === null) return;
+      if (!reason.trim()) { alert('取消の理由を入力してください。'); return; }
+      if (!confirm('この支払を取り消します。記録は削除されず、取消として残ります。よろしいですか？')) return;
+      vb.disabled = true;
+      try {
+        const r = await rpc('admin_void_expense_payment', {
+          p_admin_employee_code: session.employeeCode, p_payment_id: paymentId, p_reason: reason.trim(),
+        });
+        if (r && r.ok === false) { alert(r.message || 'この支払は取り消せませんでした。'); }
+        await reload();
+      } catch (e) {
+        alert(e.message || '支払を取り消せませんでした。');
+      } finally { vb.disabled = false; }
+    });
+  });
+
+  // 支払予定日を入れたら、支払日の欄も同じ日付に合わせる(二度入力させない。
+  // 2026-09-07ユーザー指摘「支払予定日8、支払日8、これ合わせてくれな。勝手に合うようにしといて欲しい」)。
+  const schedInput = el.querySelector('#exd-schedule-date');
+  const paidDateInput = el.querySelector('#exd-paid-date');
+  if (schedInput && paidDateInput) {
+    schedInput.addEventListener('change', () => {
+      if (schedInput.value) paidDateInput.value = schedInput.value;
+    });
+  }
+
+  // 支払記録(支払日 / 金額 / 方法 / 処理者)。
+  const payBtn = el.querySelector('#exd-pay-submit');
+  if (payBtn && !payBtn.disabled) {
+    payBtn.addEventListener('click', async () => {
+      hideError('exd-pay-error');
+      const amount = Number(el.querySelector('#exd-paid-amount').value);
+      const date = el.querySelector('#exd-paid-date').value;
+      const method = el.querySelector('#exd-paid-method').value || null;
+      const note = el.querySelector('#exd-paid-note').value.trim() || null;
+      if (!amount || amount <= 0) { showError('exd-pay-error', '支払金額を入力してください。'); return; }
+      if (!date) { showError('exd-pay-error', '支払日を入力してください。'); return; }
+      payBtn.disabled = true;
+      try {
+        if (expenseRecordPaymentRpcAvailable !== false) {
+          try {
+            const payRes = await rpc('admin_record_expense_payment', {
+              p_admin_employee_code: session.employeeCode, p_employee_request_id: requestId,
+              p_paid_at: date, p_paid_amount: amount, p_payment_method: method, p_note: note,
+            });
+            expenseRecordPaymentRpcAvailable = true;
+            // 2026-09-06 独立レビュー指摘(中1): DB が支払不可(不足項目あり / 承認額超過)を返した場合は握りつぶさず表示する。
+            const pr = Array.isArray(payRes) ? payRes[0] : payRes;
+            if (pr && pr.ok === false) {
+              const missing = Array.isArray(pr.missing) ? pr.missing.join(' / ') : '';
+              showError('exd-pay-error', `支払を記録できません: ${pr.reason_label || pr.reason || '支払可能条件を満たしていません'}${missing ? '(不足: ' + missing + ')' : ''}`);
+              payBtn.disabled = false; return;
+            }
+            await reload(); return;
+          } catch (e) {
+            if (/PGRST202|Could not find the function|does not exist/i.test(e.message || '')) expenseRecordPaymentRpcAvailable = false;
+            else throw e;
+          }
+        }
+        await rpc('admin_register_expense_payment', {
+          p_admin_employee_code: session.employeeCode, p_employee_request_id: requestId,
+          p_paid_amount: amount, p_paid_at: date, p_payment_method: method, p_note: note,
+        });
+        await reload();
+      } catch (e) {
+        showError('exd-pay-error', e.message || '支払を記録できませんでした。');
+      } finally { payBtn.disabled = false; }
+    });
+  }
+}
+
 // ---------- 勘定科目確認(管理者) ----------
 
 async function loadCategoryReview() {
@@ -5659,9 +7068,13 @@ async function loadCategoryReview() {
       <div class="category-review-item" data-document-id="${r.document_id}">
         <div class="row1"><span>${r.employee_name}・${r.store_name || ''}</span><span>${r.amount != null ? `${Number(r.amount).toLocaleString()}円` : ''}</span></div>
         <div class="row2">${r.document_date ? new Date(r.document_date).toLocaleDateString('ja-JP') : ''}　現場: ${r.site_name || '-'}　用途: ${r.purpose || '-'}</div>
+        <div class="row2">${expenseApprovalBadgeHtml(r.item_approval_status, r.approval_method, r.approval_method_label, r.approver_name, r.approved_at)}</div>
+        ${approvalMethodNoteHtml(r.approval_method)}
+        <div class="row2">この一覧に出ている理由: ${r.review_reason_label || '勘定科目が未確定です'}(承認済みかどうかとは別の確認です)</div>
         <div class="ai-suggest">AI提案: ${r.category_candidate || '(候補なし)'}${r.category_confidence ? `(確信度: ${r.category_confidence === 'medium' ? '中' : '低'})` : '(未提案)'}</div>
         <input type="text" class="category-input" list="category-suggest-list" placeholder="正しい勘定科目を入力" value="${r.category_candidate || ''}">
         <button type="button" class="confirm-btn">この科目で確定する</button>
+        <button type="button" class="secondary category-review-detail-btn" data-request-id="${r.employee_request_id}" style="margin-top:6px;">この経費の全体を見る</button>
       </div>
     `).join('');
     listEl.querySelectorAll('.category-review-item').forEach((el) => {
@@ -5669,6 +7082,13 @@ async function loadCategoryReview() {
         const value = el.querySelector('.category-input').value.trim();
         if (!value) return;
         doConfirmCategory(el.dataset.documentId, value);
+      });
+    });
+    // 要確認一覧からも、承認画面・台帳とまったく同じ「経費の全体」を開ける(共通の1関数)。
+    listEl.querySelectorAll('.category-review-detail-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openRequestDetail('expense_reimbursement', btn.dataset.requestId);
       });
     });
   } catch (e) {
@@ -5936,6 +7356,189 @@ async function doSubmitPinChange() {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// ホーム画面ウィジェットの設定(本人が自分で取り付け用コードを作る)
+//
+// 2026-09-08 Shota 指摘:「コードこっちで作って渡すのはめんどくさい」。
+// それまでは担当者が scripts/build-widget-install-page.js で1人ずつ発行し、
+// 個別に渡していたため全社員へ配れなかった。発行RPC(issue_widget_token)は
+// 以前から「ポータルにログイン中の本人」しか呼べない作りなので、ここでは
+// 画面を足しただけで権限の範囲は一切変えていない。
+//
+// 本体(500行超)は貼らせない。実機で1文字欠けて動かなかったことがあるため、
+// 社員が貼るのは「設定+読み込み」だけの短いコードにして、本体は同じ配信元の
+// widget/jinshou-home-core.js から取らせる。配信元を document.baseURI から
+// 作るので、更新先行版で開けば更新先行版の本体を、本番で開けば本番の本体を読む。
+// ---------------------------------------------------------------------------
+
+function widgetCoreUrl() {
+  return new URL('widget/jinshou-home-core.js', document.baseURI).href;
+}
+
+function widgetLoaderScript(token) {
+  const session = getSession();
+  const cfg = {
+    url: SUPABASE_URL,
+    anon: SUPABASE_ANON_KEY,
+    code: session.employeeCode,
+    token,
+    portal: new URL('.', document.baseURI).href,
+  };
+  return [
+    '// 迅翔興業 社員ホームウィジェット / 読み込み用',
+    '// 本体はネット上にあります。ここが持つのは設定と読み込みだけです。',
+    '// 直したいところが出ても、あなたはこれを貼り直さなくて大丈夫です。',
+    '',
+    'const CONFIG = {',
+    '  url: "' + cfg.url + '",',
+    '  anon: "' + cfg.anon + '",',
+    '  code: "' + cfg.code + '",',
+    '  token: "' + cfg.token + '",',
+    '  portal: "' + cfg.portal + '"',
+    '};',
+    '',
+    '// 貼り付けの途中で文字が欠けていないかを、ここで気づけるようにする',
+    'if (CONFIG.anon.length !== ' + cfg.anon.length + ' || CONFIG.token.length !== ' + cfg.token.length + ') {',
+    '  throw new Error("設定が途中で欠けています。もう一度コピーして貼り直してください。");',
+    '}',
+    '',
+    'const CORE_URL = "' + widgetCoreUrl() + '";',
+    '',
+    'async function start() {',
+    '  const fm = FileManager.local();',
+    '  const dest = fm.joinPath(fm.documentsDirectory(), "jinshou-home-core.js");',
+    '  try {',
+    '    const req = new Request(CORE_URL);',
+    '    req.timeoutInterval = 20;',
+    '    const code = await req.loadString();',
+    '    if (code && code.indexOf("module.exports") > 0) {',
+    '      fm.writeString(dest, code);',
+    '    }',
+    '  } catch (err) {',
+    '    console.log("本体を取り直せませんでした: " + err.message);',
+    '  }',
+    '  if (!fm.fileExists(dest)) {',
+    '    throw new Error("本体を取得できませんでした。通信できる場所でもう一度お試しください。");',
+    '  }',
+    '  const core = importModule(dest);',
+    '  await core.run(CONFIG);',
+    '}',
+    '',
+    'start()',
+    '  .catch(function (e) { console.error(String(e && e.message ? e.message : e)); })',
+    '  .then(function () { Script.complete(); });',
+    '',
+  ].join('\n');
+}
+
+function resetWidgetSetupScreen() {
+  hideError('widget-setup-error');
+  document.getElementById('widget-setup-result').style.display = 'none';
+  document.getElementById('widget-setup-code').value = '';
+  document.getElementById('widget-setup-copy-status').textContent = '';
+  document.getElementById('widget-setup-expires').textContent = '';
+  loadMyWidgetTokens();
+}
+
+async function doIssueWidgetToken() {
+  const session = getSession();
+  const btn = document.getElementById('widget-setup-issue-btn');
+  hideError('widget-setup-error');
+  btn.disabled = true;
+  try {
+    const r = await rpc('issue_widget_token', { p_employee_code: session.employeeCode, p_label: 'ホームウィジェット' });
+    const info = Array.isArray(r) ? r[0] : r;
+    if (!info || !info.token) throw new Error('コードを作れませんでした。もう一度お試しください。');
+    document.getElementById('widget-setup-code').value = widgetLoaderScript(info.token);
+    document.getElementById('widget-setup-expires').textContent = 'このコードは ' + info.expires_at + ' まで使えます。期限が近づいたら、この画面でもう一度作ってください。';
+    document.getElementById('widget-setup-result').style.display = '';
+    document.getElementById('widget-setup-copy-status').textContent = '';
+    document.getElementById('widget-setup-result').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    await loadMyWidgetTokens();
+  } catch (e) {
+    showError('widget-setup-error', e.message || 'コードを作れませんでした。');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+async function doCopyWidgetLoader() {
+  const ta = document.getElementById('widget-setup-code');
+  const statusEl = document.getElementById('widget-setup-copy-status');
+  if (!ta.value) return;
+  try {
+    await navigator.clipboard.writeText(ta.value);
+    statusEl.textContent = 'コピーしました。Scriptable を開いて貼り付けてください。';
+  } catch (e) {
+    // クリップボードが使えない端末では、選択状態にして手でコピーしてもらう
+    ta.focus();
+    ta.select();
+    statusEl.textContent = '自動でコピーできませんでした。選択されている文字をそのままコピーしてください。';
+  }
+}
+
+function widgetTokenDateLabel(value) {
+  if (!value) return '-';
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.getFullYear() + '/' + (d.getMonth() + 1) + '/' + d.getDate();
+}
+
+async function loadMyWidgetTokens() {
+  const session = getSession();
+  const listEl = document.getElementById('widget-setup-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('list_my_widget_tokens', { p_employee_code: session.employeeCode });
+    const active = (rows || []).filter((r) => r.is_active);
+    if (!active.length) {
+      listEl.innerHTML = '<div class="hint">まだ取り付けていません。上の「取り付け用のコードを作る」から始めてください。</div>';
+      return;
+    }
+    listEl.innerHTML = '';
+    for (const row of active) {
+      const item = document.createElement('div');
+      item.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #e5e5e5;';
+      const body = document.createElement('div');
+      body.style.flex = '1';
+      const title = document.createElement('div');
+      title.textContent = row.device_label || 'ホームウィジェット';
+      const sub = document.createElement('div');
+      sub.className = 'hint';
+      sub.textContent = widgetTokenDateLabel(row.created_at) + ' に作成　／　最後に表示 '
+        + widgetTokenDateLabel(row.last_seen_at) + '　／　' + widgetTokenDateLabel(row.expires_at) + ' まで';
+      body.appendChild(title);
+      body.appendChild(sub);
+      const stop = document.createElement('button');
+      stop.type = 'button';
+      stop.className = 'secondary';
+      stop.style.cssText = 'width:auto;padding:6px 12px;margin:0;';
+      stop.textContent = '止める';
+      stop.addEventListener('click', () => doRevokeWidgetToken(row.device_id, stop));
+      item.appendChild(body);
+      item.appendChild(stop);
+      listEl.appendChild(item);
+    }
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込めませんでした。通信できる場所でもう一度お試しください。</div>';
+  }
+}
+
+async function doRevokeWidgetToken(deviceId, btn) {
+  if (!confirm('このウィジェットを止めますか?その端末のホーム画面では表示されなくなります。')) return;
+  const session = getSession();
+  btn.disabled = true;
+  try {
+    await rpc('revoke_widget_token', { p_employee_code: session.employeeCode, p_device_id: deviceId });
+    await loadMyWidgetTokens();
+  } catch (e) {
+    alert(e.message || '止められませんでした。');
+    btn.disabled = false;
+  }
+}
+
+
 const CHANGE_STATUS_LABEL = { pending: '確認待ち', approved: '承認済み', rejected: '却下' };
 
 async function loadMyChangeRequests() {
@@ -6173,31 +7776,15 @@ async function loadEmployeeDetailPortalAccess() {
     };
 
     renderEmploymentSection(e, code, session);
-    renderApprovalExemptCard(code, session);
   } catch (e) { /* 読み込み失敗時は静かに諦める(端末一覧は別途表示されるため) */ }
 }
 
-// 経費等の承認免除(self_approval_exempt)。代表取締役のみ表示・設定可能。
-async function renderApprovalExemptCard(code, session) {
-  const card = document.getElementById('employee-detail-approval-exempt-card');
-  if (!card) return;
-  if (session.requestRole !== 'executive') { card.style.display = 'none'; return; }
-  const statusEl = document.getElementById('employee-detail-approval-exempt-status');
-  const btn = document.getElementById('employee-detail-approval-exempt-toggle-btn');
-  try {
-    const exempt = await rpc('admin_get_self_approval_exempt', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
-    card.style.display = '';
-    statusEl.textContent = exempt ? '承認免除' : '通常(承認必要)';
-    statusEl.className = 'mini-tag ' + (exempt ? 'info' : '');
-    btn.textContent = exempt ? '承認免除を解除する' : '承認免除にする';
-    btn.onclick = async () => {
-      if (!confirm(exempt ? 'この社員の承認免除を解除します。以後の申請は通常の承認フローに戻ります。よろしいですか？' : 'この社員を承認免除にします。以後の経費等は本人登録時点で自動承認され、承認待ちに入りません。よろしいですか？')) return;
-      btn.disabled = true;
-      try { await rpc('admin_set_self_approval_exempt', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code, p_exempt: !exempt }); await renderApprovalExemptCard(code, session); } catch (e2) { alert(e2.message); }
-      btn.disabled = false;
-    };
-  } catch (e) { card.style.display = 'none'; }
-}
+// 【撤去 2026-09-06】経費等の承認免除(self_approval_exempt)の管理者トグル。
+// Shota 指示: 「社員ポータルに社長専用の承認免除・自動承認を持たせない。全員同じ通常フロー。」
+// DB 側でも自動承認トリガ・関数を DROP し、admin_set_self_approval_exempt は廃止エラーを返す
+// (202609060825 / 0910 / 202609061030_expense-p0-finalize.sql)。
+// 画面から設定できないだけでなく、設定 UI 自体を残さない。
+// 過去に自動承認された申請の表示(approval.method='auto_self_approval_exempt')は履歴として残す。
 
 // 雇用状態(退職処理)。アカウント停止(portal_access)とは別概念として明確に分けて扱う。
 function renderEmploymentSection(e, code, session) {
@@ -6852,6 +8439,86 @@ async function loadLeaveAdmin() {
   }
 }
 
+// ---------- 休暇履歴(管理者、全社員・人別/月別・全種別) ----------
+// 2026-09-06の実機指摘「承認した休暇の履歴が見えない。どこにあるのか分からない」への出口。
+// 有給管理(残日数の元帳)は有給しか扱えないため、有給以外の休暇は承認しても行き先が無かった。
+// 新しいテーブルは作らず、既存の employee_requests × paid_leave_requests を
+// admin_get_leave_history で人別・月別に読み出すだけの画面。
+
+let alhFilters = { month: '', employeeCode: '', category: '', status: '' };
+let alhRows = [];
+
+async function loadAdminLeaveHistoryEmployeeOptions() {
+  const session = getSession();
+  const sel = document.getElementById('alh-employee');
+  if (!sel || sel.dataset.loaded === '1') return;
+  try {
+    const rows = await rpc('admin_list_leave_summary', { p_admin_employee_code: session.employeeCode, p_search: null });
+    sel.innerHTML = '<option value="">全員</option>'
+      + (rows || []).map((r) => `<option value="${r.employee_code}">${r.employee_name}(${r.employee_code})</option>`).join('');
+    sel.dataset.loaded = '1';
+  } catch (e) { /* 選択肢が出せなくても「全員」で一覧は見られるので致命ではない */ }
+}
+
+function renderAdminLeaveHistory() {
+  const listEl = document.getElementById('alh-list');
+  const tbodyEl = document.getElementById('alh-table-body');
+  document.getElementById('alh-count').textContent = `${alhRows.length}件`;
+  if (alhRows.length === 0) {
+    listEl.innerHTML = '<div class="hint">該当する休暇はありません。</div>';
+    tbodyEl.innerHTML = '<tr><td colspan="11"><div class="hint">該当する休暇はありません。</div></td></tr>';
+    return;
+  }
+  const statusBadge = (r) => {
+    const cls = r.status_group === 'approved' ? 'done' : (['rejected', 'cancelled'].includes(r.status_group) ? 'rejected' : '');
+    return `<span class="status-badge ${cls}">${LEAVE_STATUS_GROUP_LABEL[r.status_group] || r.status}</span>`;
+  };
+  const period = leavePeriodText;
+  listEl.innerHTML = alhRows.map((r) => `
+    <div class="admin-result-item">
+      <div class="row1"><span>${r.employee_name}(${r.employee_code})</span><span>${r.leave_category_label}${r.is_half_day ? '(半休)' : ''}</span></div>
+      <div class="row2">${period(r)}・${r.requested_days}日${r.reason ? `・${r.reason}` : ''}</div>
+      ${r.approver_name ? `<div class="row2">承認者: ${r.approver_name}${r.decided_at ? `・${new Date(r.decided_at).toLocaleString('ja-JP')}` : ''}</div>` : ''}
+      ${r.status_group === 'approved' && !r.reflected_in_calendar ? '<div class="row2"><span class="mini-tag danger">配置カレンダー未反映</span></div>' : ''}
+      ${statusBadge(r)}
+    </div>
+  `).join('');
+  tbodyEl.innerHTML = alhRows.map((r) => `
+    <tr>
+      <td>${fmtLeaveDate(r.start_date)}</td><td>${fmtLeaveDate(r.end_date)}</td>
+      <td>${r.employee_code}</td><td>${r.employee_name}</td>
+      <td>${r.leave_category_label}${r.is_half_day ? '(半休)' : ''}</td>
+      <td>${r.requested_days}日</td>
+      <td>${r.reason || '-'}</td>
+      <td>${statusBadge(r)}</td>
+      <td>${r.approver_name || '-'}</td>
+      <td>${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : '-'}</td>
+      <td>${r.status_group === 'approved' ? (r.reflected_in_calendar ? '反映済み' : '<span class="mini-tag danger">未反映</span>') : '-'}</td>
+    </tr>
+  `).join('');
+}
+
+async function loadAdminLeaveHistory() {
+  const session = getSession();
+  const listEl = document.getElementById('alh-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  hideError('alh-error');
+  await loadAdminLeaveHistoryEmployeeOptions();
+  try {
+    alhRows = (await rpc('admin_get_leave_history', {
+      p_admin_employee_code: session.employeeCode,
+      p_employee_code: alhFilters.employeeCode || null,
+      p_year_month: alhFilters.month || null,
+      p_leave_category: alhFilters.category || null,
+      p_status_group: alhFilters.status || null,
+    })) || [];
+    renderAdminLeaveHistory();
+  } catch (e) {
+    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+    showError('alh-error', e.message || '読み込みに失敗しました。');
+  }
+}
+
 // ---------- 社員別集計(管理者、月次で全社員比較) ----------
 
 async function loadEmployeeSummary() {
@@ -7072,7 +8739,31 @@ async function doSubmitExpensePayment() {
   const btn = document.getElementById('ep-submit');
   btn.disabled = true;
   try {
-    await rpc('admin_register_expense_payment', {
+    // 2026-09-06 独立レビュー指摘(重大4): この旧「支払登録」画面は支払可能条件を見ない admin_register_expense_payment を
+    // 呼んでいたため、未承認・領収書なしでも支払を記録できた。新 RPC(admin_record_expense_payment、支払可能条件と
+    // 承認額超過を DB で判定、申請額/承認額のスナップショットと処理者を記録)へ切り替え、旧 RPC は新 RPC が
+    // 無い環境(本番へ 202609060930 が入る前)だけの後方互換にする。
+    let recorded = false;
+    if (expenseRecordPaymentRpcAvailable !== false) {
+      try {
+        const payRes = await rpc('admin_record_expense_payment', {
+          p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(expensePaymentTarget.requestId),
+          p_paid_at: date, p_paid_amount: amount, p_payment_method: method, p_note: note,
+        });
+        expenseRecordPaymentRpcAvailable = true;
+        const pr = Array.isArray(payRes) ? payRes[0] : payRes;
+        if (pr && pr.ok === false) {
+          const missing = Array.isArray(pr.missing) ? pr.missing.join(' / ') : '';
+          showError('ep-error', `支払を記録できません: ${pr.reason_label || pr.reason || '支払可能条件を満たしていません'}${missing ? '(不足: ' + missing + ')' : ''}`);
+          btn.disabled = false; return;
+        }
+        recorded = true;
+      } catch (e) {
+        if (/PGRST202|Could not find the function|does not exist/i.test(e.message || '')) expenseRecordPaymentRpcAvailable = false;
+        else throw e;
+      }
+    }
+    if (!recorded) await rpc('admin_register_expense_payment', {
       p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(expensePaymentTarget.requestId),
       p_paid_amount: amount, p_paid_at: date, p_payment_method: method, p_note: note,
     });
@@ -8626,6 +10317,21 @@ async function doDecideEntertainment(id, action, exceptionReason) {
 
 // ---------- 現場管理(管理者・日報担当) ----------
 
+// 承認待ち新規現場の「申請者」表示。2026-09-06 実機報告:「小松島西高校 / 申請者: 申請者不明」。
+// 現場が見つからず日報等の自由入力で自動作成された現場は、作成した12個のRPCのうち11個が
+// sites.proposed_by_employee_id を記録していなかった(修正はDB側の単一トリガで実施)。
+// 画面側は次の3段階で必ず「誰が出したか」を出す。どれで分かったのかも隠さずに書く。
+//   1. 記録された申請者(employees)                 → 「氏名(社員番号)」
+//   2. employees に無い実行者(外注作業員など)      → proposed_by_label をそのまま
+//   3. 記録が無い過去分 → 実績(日報・常用伝票・経費)から推定した氏名 + 出所
+// どれも取れないときだけ「申請者不明」と出す(推定を確定として見せない、が原則)。
+function siteProposerText(s) {
+  if (!s) return '申請者不明';
+  const named = s.proposed_by_name ? `${s.proposed_by_name}(${s.proposed_by_code || '—'})` : (s.proposed_by_label || '');
+  if (!named) return '申請者不明';
+  return s.origin_hint ? `${named}〔${s.origin_hint}〕` : named;
+}
+
 async function loadSiteAdminList() {
   const session = getSession();
   const listEl = document.getElementById('site-admin-list');
@@ -8651,7 +10357,7 @@ async function loadSiteAdminList() {
       return `
       <div class="qual-item" data-id="${s.id}">
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"></div>
-        <div class="row2">申請者: ${s.proposed_by_name ? `${s.proposed_by_name}(${s.proposed_by_code || '—'})` : '申請者不明'}</div>
+        <div class="row2">申請者: ${siteProposerText(s)}</div>
         <div class="row2">申請日時: ${new Date(s.created_at).toLocaleString('ja-JP')}</div>
         ${candidatesHtml}
         <div class="qual-verify-btns">
@@ -9625,12 +11331,39 @@ function resetVehicleForm() {
   hideError('vehicle-error');
 }
 
+// 車両種別マスター(vehicle_types)。コードへ埋め込まず、常にサーバーから読む。
+async function loadVehicleTypeOptions(selectedCode) {
+  const session = getSession();
+  const sel = document.getElementById('vehicle-type-code');
+  if (!sel) return [];
+  let types = [];
+  try { types = await rpc('portal_list_vehicle_types', { p_employee_code: session.employeeCode, p_include_inactive: false }) || []; } catch (e) { types = []; }
+  sel.innerHTML = '<option value="">(未設定)</option>' + types.map((t) => `<option value="${vehEsc(t.code)}">${vehEsc(t.label)}</option>`).join('');
+  if (selectedCode) sel.value = selectedCode;
+  return types;
+}
+async function doAddVehicleType() {
+  const session = getSession();
+  const code = (document.getElementById('vehicle-type-new-code').value || '').trim().toLowerCase();
+  const label = (document.getElementById('vehicle-type-new-label').value || '').trim() || code;
+  hideError('vehicle-type-error');
+  if (!code) { showError('vehicle-type-error', '種別のコード(例: 8t)を入力してください。'); return; }
+  try {
+    await rpc('portal_upsert_vehicle_type', { p_employee_code: session.employeeCode, p_code: code, p_label: label });
+    document.getElementById('vehicle-type-new-code').value = ''; document.getElementById('vehicle-type-new-label').value = '';
+    await loadVehicleTypeOptions(code);
+  } catch (e) { showError('vehicle-type-error', e.message || '種別を追加できませんでした。'); }
+}
+// 車両マスターが変わったことを、同じ画面内で動く配置カレンダー(assignment-calendar.js のキャッシュ)へ知らせる。
+function notifyVehiclesChanged() { try { document.dispatchEvent(new CustomEvent('jinshou:vehicles-changed')); } catch (e) { } }
+
 async function loadVehicleAdminList() {
   const session = getSession();
   const listEl = document.getElementById('vehicle-admin-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   resetVehicleForm();
   try {
+    await loadVehicleTypeOptions('');
     const rows = await rpc('portal_list_vehicles', { p_employee_code: session.employeeCode, p_include_inactive: true });
     if (!rows.length) {
       listEl.innerHTML = '<div class="hint">まだ1台も登録されていません。</div>';
@@ -9639,7 +11372,7 @@ async function loadVehicleAdminList() {
     listEl.innerHTML = rows.map((v) => `
       <div class="supply-item" data-id="${v.id}" style="${v.is_active ? '' : 'opacity:.5;'}">
         <div class="row1"><span>${vehEsc(v.name)}</span><span>${v.is_active ? '使用中' : '使用停止'}</span></div>
-        <div class="row2">${v.ownership === 'lease' ? 'リース' : '自社'}${v.vehicle_type ? ' / ' + vehEsc(v.vehicle_type) : ''}${v.size_class ? ' / ' + vehEsc(v.size_class) : ''} / ${v.plate_number ? vehEsc(v.plate_number) : 'ナンバー未登録（使う日に入力）'}</div>
+        <div class="row2">${v.ownership === 'lease' ? 'リース' : '自社'}${v.vehicle_type_label ? ' / ' + vehEsc(v.vehicle_type_label) : ''}${v.vehicle_type ? ' / ' + vehEsc(v.vehicle_type) : ''}${v.size_class ? ' / ' + vehEsc(v.size_class) : ''} / ${v.plate_number ? vehEsc(v.plate_number) : 'ナンバー未登録（使う日に入力）'}</div>
         ${v.note ? `<div class="row2">${vehEsc(v.note)}</div>` : ''}
         <div class="qual-verify-btns">
           <button type="button" class="edit-vehicle-btn">編集</button>
@@ -9657,6 +11390,7 @@ async function loadVehicleAdminList() {
         document.getElementById('vehicle-plate').value = v.plate_number || '';
         document.getElementById('vehicle-ownership').value = v.ownership === 'lease' ? 'lease' : 'own';
         document.getElementById('vehicle-type').value = v.vehicle_type || '';
+        const tc = document.getElementById('vehicle-type-code'); if (tc) tc.value = v.vehicle_type_code || '';
         document.getElementById('vehicle-size').value = v.size_class || '';
         document.getElementById('vehicle-note').value = v.note || '';
         document.getElementById('vehicle-submit').textContent = 'この車両を更新する';
@@ -9672,6 +11406,7 @@ async function loadVehicleAdminList() {
             p_vehicle_id: Number(item.dataset.id),
             p_active: btn.dataset.active !== 'true',
           });
+          notifyVehiclesChanged();
         } catch (e) { showError('vehicle-error', e.message || '変更できませんでした。'); }
         loadVehicleAdminList();
       });
@@ -9700,7 +11435,9 @@ async function doSaveVehicle() {
       p_size_class: document.getElementById('vehicle-size').value.trim(),
       p_is_active: true,
       p_note: document.getElementById('vehicle-note').value.trim(),
+      p_vehicle_type_code: (document.getElementById('vehicle-type-code') || {}).value || null,
     });
+    notifyVehiclesChanged();
     await loadVehicleAdminList();
   } catch (e) {
     showError('vehicle-error', e.message || '保存に失敗しました。');
@@ -11184,6 +12921,42 @@ let areqFilters = { type: '', category: '', status: '', name: '', dateFrom: '', 
 let areqRows = [];
 let areqSort = { col: 'requested_at', dir: 'desc' };
 
+
+// 経費の支払待ち。承認が済んで未払いのものを1か所に集める。
+// 承認すると承認待ちの一覧からは消えるため、その行き先をはっきりさせるための画面
+// (2026-09-07ユーザー指摘「支払待ちが簡単なところにないので分かりにくい・見えにくい」)。
+async function loadExpensePaymentPending() {
+  const session = getSession();
+  const listEl = document.getElementById('epp-list');
+  const yen = (n) => `${Number(n || 0).toLocaleString('ja-JP')}円`;
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    // 「まとめて精算」だけでなく1件ずつの申請も対象にする。以前は
+    // admin_get_bulk_expense_requests を使っていたため、まとめ精算以外が1件も出ず
+    // 「0件」になっていた(2026-09-07ユーザー報告)。
+    const rows = await rpc('admin_list_expense_payment_pending', {
+      p_admin_employee_code: session.employeeCode,
+    });
+    const pending = rows || [];
+    const total = pending.reduce((a, r) => a + Number(r.remaining_amount || 0), 0);
+    document.getElementById('epp-count').textContent = `${pending.length}件`;
+    document.getElementById('epp-total').textContent = yen(total);
+    if (pending.length === 0) { listEl.innerHTML = '<div class="hint">支払待ちの経費はありません。</div>'; return; }
+    listEl.innerHTML = pending.map((r) => `
+      <div class="history-item" data-id="${exdEsc(r.employee_request_id)}" style="cursor:pointer;">
+        <div class="row1"><span>${exdEsc(r.employee_name)}</span><span>${yen(r.remaining_amount)}</span></div>
+        <div class="row2">${r.requested_at ? new Date(r.requested_at).toLocaleDateString('ja-JP') : ''}　明細${Number(r.item_count || 0)}件${r.batch_title ? `・${exdEsc(r.batch_title)}` : ''}</div>
+        <span class="status-badge">${r.scheduled_payment_date ? `支払予定 ${new Date(r.scheduled_payment_date).toLocaleDateString('ja-JP')}` : '支払予定日 未設定'}</span>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('.history-item').forEach((el) => {
+      el.addEventListener('click', () => openRequestDetail('expense_reimbursement', el.dataset.id));
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="hint">読み込みに失敗しました: ${exdEsc(e.message || '')}</div>`;
+  }
+}
+
 async function loadAdminAllRequests() {
   const session = getSession();
   const listEl = document.getElementById('areq-list');
@@ -11206,11 +12979,56 @@ async function loadAdminAllRequests() {
       p_keyword: null,
     });
     countEl.textContent = `${areqRows.length}件`;
+    // 先に一覧を出す。以前はこの後の「承認方式」の追加取得を待ってから描いていたため、
+    // その1回が返ってこないと一覧が「読み込み中...」のまま永久に出なかった
+    // (2026-09-07、実機の画面録画で「件数は出ているのに一覧が出ない」状態を確認)。
+    // 承認方式は一覧の見た目を補う情報でしかないので、後から差し替える。
     renderAreqAll();
+    // 「承認済み」の中に、人の承認と承認免除ルールによる自動承認が混ざる。区別が付かないと
+    // 「承認していないのに承認になっている」と読めてしまうため、方式を引いて併記する。
+    loadApprovalMethodMap(
+      session.employeeCode,
+      areqRows.filter((r) => r.source_type !== 'entertainment_preapproval' && r.source_type !== 'qualification').map((r) => r.source_id),
+    ).then((map) => {
+      areqApprovalMethods = map;
+      renderAreqAll();
+    }).catch(() => { /* 取れなくても一覧は出したままにする */ });
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
     document.getElementById('areq-table-body').innerHTML = '';
   }
+}
+
+// source_id -> 承認方式。renderAreqCards/renderAreqTable が参照する。
+let areqApprovalMethods = new Map();
+
+// 変更履歴に英語のaction名がそのまま出ていて、何が起きたのか読めなかった。
+// 特に request_auto_approved_executive が「承認していないのに承認済みになっている」ように
+// 見える原因の記録そのものなので、日本語で意味が分かるようにする。
+const AUDIT_ACTION_LABEL = {
+  request_auto_approved_executive: '自動承認(代表者本人の申請・承認免除ルール)',
+  expense_item_auto_approved_exempt: '経費明細の自動承認(承認免除ルール)',
+  expense_item_approval_decided: '経費明細の承認・却下を決定',
+  expense_payment_recorded: '支払いを記録',
+  expense_payment_scheduled: '支払予定日を記録',
+  expense_account_category_finalized: '勘定科目を確定',
+  entertainment_auto_approved_executive: '接待事前申請の自動承認(承認免除ルール)',
+  request_cancelled_by_applicant: '申請者本人による取消',
+  paid_leave_request_cancelled_by_employee: '有給申請の本人取消',
+  expense_request_completed: '経費申請の受付処理が完了',
+  entertainment_preapproval_discrepancy: '接待事前申請との差異を検出',
+  entertainment_expense_without_preapproval_override: '事前申請なしの接待交際費を役員判断で受理',
+  expense_payment_voided: '支払の取消(赤伝を追加。元の記録は残ります)',
+  expense_items_decided_with_request: '申請の承認/差戻しに合わせて経費明細も同じ状態にした',
+  self_approval_exempt_granted: '承認免除の付与(廃止済みの旧機能)',
+  self_approval_exempt_revoked: '承認免除の解除(廃止済みの旧機能)',
+};
+
+// 一覧の「承認済み」バッジの右に付ける自動承認タグ(該当しなければ空文字)。
+function areqAutoApprovalTag(row) {
+  const m = areqApprovalMethods.get(String(row.source_id));
+  if (!m || m.approval_method !== 'auto_self_approval_exempt') return '';
+  return ` <span class="mini-tag info">${m.approval_method_label || '自動承認'}</span>`;
 }
 
 // スマホはカード一覧(#areq-list)、PC(768px以上)はCSSで表形式(#areq-table-wrap)に
@@ -11250,7 +13068,7 @@ function renderAreqCards(rows) {
       <div class="history-item" data-type="${r.source_type}" data-id="${r.source_id}">
         <div class="row1"><span>${r.employee_name}・${REQUEST_TYPE_LABEL[r.source_type] || r.source_type}</span><span>${amountStr}</span></div>
         <div class="row2">${new Date(r.requested_at).toLocaleDateString('ja-JP')}　${r.summary || ''}</div>
-        <span class="status-badge ${statusClass}">${STATUS_GROUP_LABEL[r.status_group] || r.status}</span>
+        <span class="status-badge ${statusClass}">${STATUS_GROUP_LABEL[r.status_group] || r.status}</span>${areqAutoApprovalTag(r)}
         ${r.requires_special_review ? '<span class="mini-tag danger">事前申請なし</span>' : ''}
       </div>
     `;
@@ -11278,7 +13096,7 @@ function renderAreqTable(rows) {
         <td>${r.site_name || '-'}</td>
         <td>${amountStr}</td>
         <td>${STATUS_LABEL[r.status] || r.status}</td>
-        <td><span class="status-badge ${statusClass}">${STATUS_GROUP_LABEL[r.status_group] || r.status_group}</span></td>
+        <td><span class="status-badge ${statusClass}">${STATUS_GROUP_LABEL[r.status_group] || r.status_group}</span>${areqAutoApprovalTag(r)}</td>
         <td>${r.updated_at ? new Date(r.updated_at).toLocaleString('ja-JP') : '-'}</td>
         <td><button type="button" class="areq-table-detail-btn">詳細</button></td>
       </tr>
@@ -11306,7 +13124,15 @@ async function loadRequestDetailContent() {
   document.getElementById('rdetail-fields').innerHTML = '<div class="hint">読み込み中...</div>';
   document.getElementById('rdetail-history').innerHTML = '';
   document.getElementById('rdetail-actions').innerHTML = '';
+  document.getElementById('rdetail-receipts').innerHTML = '';
+  document.getElementById('rdetail-receipt-title').style.display = 'none';
   hideError('rdetail-error');
+  // 経費以外の申請では従来どおりの表示に戻す(経費のときだけ共通の全体表示へ差し替える)。
+  const fieldsCard = document.getElementById('rdetail-fields-card');
+  const histTitle = document.getElementById('rdetail-history-title');
+  if (fieldsCard) fieldsCard.style.display = '';
+  if (histTitle) histTitle.style.display = '';
+  document.getElementById('rdetail-history').style.display = '';
 
   try {
     const rows = await rpc('admin_search_requests', {
@@ -11316,25 +13142,87 @@ async function loadRequestDetailContent() {
     const r = rows.find((x) => String(x.source_id) === String(sourceId));
     if (!r) { document.getElementById('rdetail-fields').innerHTML = '<div class="hint">見つかりませんでした。</div>'; return; }
 
+    // 【2026-09-06・X2】経費立替申請は、承認待ちでも承認済みでも履歴からでも台帳からでも
+    // まったく同じ項目が出るように、共通の1関数(renderExpenseRequestDetailInto)へ完全に
+    // 委譲する。承認後に「この申請は既に処理済みです。」だけになって領収書も日付も
+    // 消えていた状態を作らないため、状態による項目の出し分けをここではしない。
+    if (sourceType === 'expense_reimbursement') {
+      document.getElementById('rdetail-title').textContent = '経費立替申請の詳細';
+      if (fieldsCard) fieldsCard.style.display = 'none';
+      if (histTitle) histTitle.style.display = 'none';
+      document.getElementById('rdetail-history').style.display = 'none';
+      document.getElementById('rdetail-receipt-title').style.display = 'none';
+      await renderExpenseRequestDetailInto('rdetail-receipts', sourceId, { mode: 'admin' });
+      renderRequestDetailActions(sourceType, r);
+      return;
+    }
+
+    // 承認方式(人の承認 / 承認免除ルールによる自動承認)を必ず1行で出す。
+    const isRequestBacked = sourceType !== 'entertainment_preapproval' && sourceType !== 'qualification';
+    const methodMap = isRequestBacked ? await loadApprovalMethodMap(session.employeeCode, [sourceId]) : new Map();
+    const method = methodMap.get(String(sourceId));
+
     document.getElementById('rdetail-fields').innerHTML = [
       ['申請者', r.employee_name], ['申請日時', new Date(r.requested_at).toLocaleString('ja-JP')],
       ['対象日', r.target_date || '-'], ['現在のステータス', STATUS_GROUP_LABEL[r.status_group] || r.status],
       ['現場', r.site_name || '-'], ['取引先', r.partner_name || '-'], ['金額', r.amount != null ? `${Number(r.amount).toLocaleString()}円` : '-'],
       ['内容', r.summary || '-'],
       ...(r.approver_name ? [['承認者', r.approver_name], ['承認日時', r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : '-']] : []),
+      ...(method && method.approval_method !== 'none' ? [['承認方式', method.approval_method_label || method.approval_method]] : []),
+      ...(method && method.approval_method_note ? [['承認方式の説明', method.approval_method_note]] : []),
     ].map(([label, value]) => `<div class="field-row"><span class="field-label">${label}</span><span class="field-value">${value}</span></div>`).join('');
+
+    // 承認判断の前に領収書原本を出す(2026-09-06追加)。金額だけ見て承認できてしまう状態を無くす。
+    await renderRequestDetailReceipts(sourceType, sourceId, session);
 
     const targetTable = sourceType === 'entertainment_preapproval' ? 'entertainment_preapprovals'
       : sourceType === 'qualification' ? 'employee_qualifications' : 'employee_requests';
     const history = await rpc('admin_get_request_audit_log', { p_admin_employee_code: session.employeeCode, p_target_table: targetTable, p_target_id: Number(sourceId) }).catch(() => []);
     const historyEl = document.getElementById('rdetail-history');
     historyEl.innerHTML = history.length === 0 ? '<div class="hint">変更履歴はありません。</div>' : history.map((h) => `
-      <div class="change-request-item"><div class="row1"><span>${h.action}</span></div><div class="row2">${h.actor_name}・${new Date(h.created_at).toLocaleString('ja-JP')}</div></div>
+      <div class="change-request-item"><div class="row1"><span>${AUDIT_ACTION_LABEL[h.action] || h.action}</span></div><div class="row2">${h.actor_name}・${new Date(h.created_at).toLocaleString('ja-JP')}</div></div>
     `).join('');
 
     renderRequestDetailActions(sourceType, r);
   } catch (e) {
     document.getElementById('rdetail-fields').innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+// 管理者の申請詳細(申請管理→承認画面)に領収書の原本を表示する(2026-09-06追加)。
+// 【なぜ追加したか】2026-09-06、社長の本番iPhone実機確認で「管理側でも領収書が見えない。
+// 見えないと承認しただけになり税理士に出せない」と報告された。調査の結果、この承認画面には
+// 領収書の<img>そのものが存在せず、金額・現場・内容の文字情報だけで承認できる状態だった。
+// 画像は認証付きEdge Functionプロキシ(receipt-image → resolve_secure_file)経由で取得し、
+// Google Driveの生URLや公開URLは一切使わない(まとめ精算詳細と同じ唯一の経路)。
+async function renderRequestDetailReceipts(sourceType, sourceId, session) {
+  const titleEl = document.getElementById('rdetail-receipt-title');
+  const boxEl = document.getElementById('rdetail-receipts');
+  if (!titleEl || !boxEl) return;
+  if (sourceType !== 'expense_reimbursement') { titleEl.style.display = 'none'; boxEl.innerHTML = ''; return; }
+  titleEl.style.display = '';
+  boxEl.innerHTML = '<div class="hint">領収書を読み込み中...</div>';
+  const yen = (n) => (n != null ? `${Number(n).toLocaleString('ja-JP')}円` : '');
+  try {
+    // まとめ申請(submission_mode='bulk')専用のRPCではなく、employee_request_id単位で
+    // 明細+document_idを返す既存RPCをそのまま再利用する(単発申請にもそのまま効く)。
+    const items = await rpc('admin_get_bulk_expense_request_items', {
+      p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(sourceId),
+    });
+    if (!items || items.length === 0) { boxEl.innerHTML = '<div class="hint">この申請には経費明細がありません。</div>'; return; }
+    const withImage = items.filter((it) => it.document_id).length;
+    boxEl.innerHTML = `<div class="hint-inline">明細${items.length}件・領収書画像${withImage}枚</div>` + items.map((it) => `
+      <div class="history-item">
+        <div class="row1"><span>${it.document_date || ''}　${it.vendor_name || ''}</span><span>${yen(it.amount)}</span></div>
+        <div class="row2">${it.site_name || '-'}・${it.purpose_category || '-'}</div>
+        ${it.document_id
+          ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb" data-secure-kind="receipt" data-secure-id="${it.document_id}" alt="領収書" loading="lazy"></div>`
+          : '<div class="hint-inline">この明細には領収書画像が添付されていません</div>'}
+      </div>
+    `).join('');
+    hydrateSecureImages(boxEl);
+  } catch (e) {
+    boxEl.innerHTML = `<div class="hint">領収書を読み込めませんでした: ${e.message || ''}</div>`;
   }
 }
 
@@ -11457,11 +13345,56 @@ function renderRequestDetailActions(sourceType, r) {
   }
 }
 
+// 承認・差戻しの直後に「次はどこを見ればよいか」をその場に出す。
+// html はこのファイル内で組み立てた固定の文言のみを渡すこと(利用者やDB由来の値は
+// そのまま入れない。入れる場合は exdEsc() を通す)。
+function showRequestDetailNotice(html) {
+  const host = document.getElementById('rdetail-receipts');
+  if (!host) return;
+  const old = document.getElementById('rdetail-notice');
+  if (old) old.remove();
+  const box = document.createElement('div');
+  box.id = 'rdetail-notice';
+  box.className = 'card';
+  box.style.cssText = 'border-left:4px solid #2e7d32;';
+  box.innerHTML = `<div style="font-weight:700;margin-bottom:4px;">処理が完了しました</div><div>${html}</div>`;
+  host.prepend(box);
+  box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
 async function doRequestDetailDecide(action, reason) {
   const session = getSession();
   hideError('rdetail-error');
+  const isExpense = currentRequestDetail && currentRequestDetail.sourceType === 'expense_reimbursement';
+  // 【2026-09-06・X2】経費の「お金の承認単位」は申請ではなく明細(expense_items)である。
+  // 申請管理から承認しても admin_decide_request は employee_requests しか更新しないため、
+  // 明細が未承認のまま残り、支払可能条件(expense_payable_check)が
+  // 「承認済みの支払対象明細がありません」で永久に満たされなかった。
+  // 承認免除ルールの自動承認は明細まで届くよう2026-09-06に是正済みなので、
+  // 人が押す承認も同じ単位まで届かせて、承認方式によって結果が変わらないようにする。
+  const itemIds = isExpense
+    ? Array.from(document.querySelectorAll('#rdetail-receipts .exd-item'))
+      .map((el) => Number(el.dataset.itemId)).filter((n) => Number.isFinite(n) && n > 0)
+    : [];
   try {
     await rpc('admin_decide_request', { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_rejection_reason: reason });
+    if (isExpense && itemIds.length && (action === 'approved' || action === 'rejected')) {
+      await rpc('admin_decide_expense_items', {
+        p_admin_employee_code: session.employeeCode, p_item_ids: itemIds,
+        p_decision: action, p_reason: reason || null,
+      }).catch((e2) => { showError('rdetail-error', `申請は承認しましたが、明細の承認に失敗しました: ${e2.message || ''}`); });
+    }
+    if (isExpense) {
+      // 承認後は一覧へ飛ばさず、同じ詳細をその場で再表示する
+      // (承認したら項目が消える、という状態を作らないため)。
+      await loadRequestDetailContent();
+      // 承認すると承認待ちの一覧からは消える。どこへ行ったのかが分からないと不安なので、
+      // 次にどこで続きを見るのかをその場で伝える
+      // (2026-09-07ユーザー指摘「あっ消えた。支払日決めてないのに消えたよ、大丈夫？どこ行ったん」)。
+      if (action === 'approved') showRequestDetailNotice('承認しました。この申請は「承認待ち」から外れて<strong>支払待ち</strong>になりました。下の「支払」の欄で支払予定日・支払日を記録できます。あとから探すときは<strong>管理メニュー →「経費の支払待ち」</strong>に集まっています。');
+      if (action === 'rejected') showRequestDetailNotice('差し戻しました。申請者に修正をお願いする状態になっています。');
+      return;
+    }
     navReturn('admin-all-requests');
   } catch (e) {
     showError('rdetail-error', e.message || '処理に失敗しました。');
@@ -12020,8 +13953,10 @@ function applyDrmCardFilter(cardKey) {
   drmFilters.dateFrom = drmSelectedDate; drmFilters.dateTo = drmSelectedDate;
   document.getElementById('drm-date-from').value = drmSelectedDate;
   document.getElementById('drm-date-to').value = drmSelectedDate;
-  drmFilters.workerType = '';
-  document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b, i) => b.classList.toggle('active', i === 0));
+  // 2026-09-07: 提出済みカードは社員の人数(admin_daily_report_day_summary.employee_submitted)なので、一覧も社員だけに絞る。
+  // 以前は社員・外注を混ぜた一覧を開いていたため「提出済み 0 → 一覧 2 件」の食い違いが出た(外注は下の外注未提出バナーで別管理)。
+  drmFilters.workerType = 'employee';
+  document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.workerType || b.dataset.type || '') === 'employee'));
   drmFilters.status = 'submitted';
   document.querySelectorAll('#drm-status-filter .filter-chip').forEach((b) => {
     b.classList.toggle('active', (b.dataset.status || '') === 'submitted');
@@ -13860,6 +15795,9 @@ function applyStagingIndicator() {
 }
 
 function init() {
+  // 登録済みの外注さんは、入口の選択画面を見せずにそのまま外注ポータルへ送る(2026-09-06)。
+  // 画面を描く前に判定するため、選択画面が一瞬映ることもない。
+  if (maybeRedirectToSubPortal()) return;
   applyStagingIndicator();
   hydrateIcons(document);
   // 演出プレビュー・ラッキー賞管理はテスト環境(先行更新版)の管理者だけに見せる(本番の一般社員には公開しない)。
@@ -14318,6 +16256,9 @@ function init() {
   document.getElementById('profile-edit-submit').addEventListener('click', doSubmitProfileEdit);
   document.getElementById('pin-change-submit').addEventListener('click', doSubmitPinChange);
   SCREEN_ENTER_HOOKS['pin-change'] = resetPinChangeForm;
+  document.getElementById('widget-setup-issue-btn').addEventListener('click', doIssueWidgetToken);
+  document.getElementById('widget-setup-copy-btn').addEventListener('click', doCopyWidgetLoader);
+  SCREEN_ENTER_HOOKS['widget-setup'] = resetWidgetSetupScreen;
   document.getElementById('info-change-filter').addEventListener('change', loadInfoChangeAdmin);
   document.getElementById('supply-master-submit').addEventListener('click', doSaveSupplyMasterItem);
   document.getElementById('employee-detail-edit-basic-btn').addEventListener('click', openEmployeeEditBasic);
@@ -14450,6 +16391,7 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadAdminDashboard();
   };
+  SCREEN_ENTER_HOOKS['expense-payment-pending'] = () => { loadExpensePaymentPending(); };
   SCREEN_ENTER_HOOKS['admin-request-list'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     loadAdminRequestList();
@@ -14485,6 +16427,100 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadCategoryReview();
   };
+
+  // 経費の履歴台帳(社員本人)。既定は「すべての月」。月を選ぶと帰属月で絞る。
+  SCREEN_ENTER_HOOKS['my-expense-ledger'] = () => {
+    const monthEl = document.getElementById('mel-month');
+    if (monthEl) monthEl.value = myExpenseLedgerMonth;
+    loadMyExpenseLedger();
+  };
+  const melMonthEl = document.getElementById('mel-month');
+  if (melMonthEl) {
+    melMonthEl.addEventListener('change', () => { myExpenseLedgerMonth = melMonthEl.value || ''; loadMyExpenseLedger(); });
+  }
+  const melClearEl = document.getElementById('mel-clear-month');
+  if (melClearEl) {
+    melClearEl.addEventListener('click', () => {
+      myExpenseLedgerMonth = '';
+      if (melMonthEl) melMonthEl.value = '';
+      loadMyExpenseLedger();
+    });
+  }
+
+  // 経費の履歴台帳(管理者)。人別・月別・状態別。
+  SCREEN_ENTER_HOOKS['expense-ledger-admin'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    // 台帳本体を先に読む(社員絞り込み用の名簿取得を待たせない。名簿が取れなくても
+    // 「全員」のまま台帳は使えるようにする)。
+    loadExpenseLedgerAdmin();
+    const sel = document.getElementById('ela-employee');
+    if (sel && sel.options.length <= 1) {
+      rpc('list_active_employees', { p_admin_employee_code: getSession().employeeCode })
+        .then((emps) => {
+          sel.innerHTML = '<option value="">全員</option>'
+            + (emps || []).map((e) => `<option value="${e.employee_code}">${e.employee_code} ${e.employee_name}</option>`).join('');
+          sel.value = expenseLedgerAdminFilters.employeeCode || '';
+        })
+        .catch(() => { /* 名簿が取れなくても台帳は使える */ });
+    }
+  };
+  const elaMonthEl = document.getElementById('ela-month');
+  if (elaMonthEl) {
+    elaMonthEl.addEventListener('change', () => { expenseLedgerAdminFilters.yearMonth = elaMonthEl.value || ''; loadExpenseLedgerAdmin(); });
+  }
+  const elaEmpEl = document.getElementById('ela-employee');
+  if (elaEmpEl) {
+    elaEmpEl.addEventListener('change', () => { expenseLedgerAdminFilters.employeeCode = elaEmpEl.value || ''; loadExpenseLedgerAdmin(); });
+  }
+  const elaStatusEl = document.getElementById('ela-status-filter');
+  if (elaStatusEl) {
+    elaStatusEl.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.filter-chip');
+      if (!chip) return;
+      elaStatusEl.querySelectorAll('.filter-chip').forEach((c) => c.classList.toggle('active', c === chip));
+      expenseLedgerAdminFilters.statusGroup = chip.dataset.status || '';
+      loadExpenseLedgerAdmin();
+    });
+  }
+  const elaCsvEl = document.getElementById('ela-export-csv');
+  if (elaCsvEl) elaCsvEl.addEventListener('click', downloadExpenseLedgerCsv);
+
+  // 休暇履歴(管理者)の絞り込み: 月・社員・種別・状態。
+  const alhMonthEl = document.getElementById('alh-month');
+  if (alhMonthEl) alhMonthEl.addEventListener('change', () => { alhFilters.month = alhMonthEl.value || ''; loadAdminLeaveHistory(); });
+  const alhEmpEl = document.getElementById('alh-employee');
+  if (alhEmpEl) alhEmpEl.addEventListener('change', () => { alhFilters.employeeCode = alhEmpEl.value || ''; loadAdminLeaveHistory(); });
+  const alhCatEl = document.getElementById('alh-category-filter');
+  if (alhCatEl) {
+    alhCatEl.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.filter-chip');
+      if (!chip) return;
+      alhCatEl.querySelectorAll('.filter-chip').forEach((c) => c.classList.toggle('active', c === chip));
+      alhFilters.category = chip.dataset.category || '';
+      loadAdminLeaveHistory();
+    });
+  }
+  const alhStatusEl = document.getElementById('alh-status-filter');
+  if (alhStatusEl) {
+    alhStatusEl.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.filter-chip');
+      if (!chip) return;
+      alhStatusEl.querySelectorAll('.filter-chip').forEach((c) => c.classList.toggle('active', c === chip));
+      alhFilters.status = chip.dataset.status || '';
+      loadAdminLeaveHistory();
+    });
+  }
+  // 休暇履歴(本人)の状態絞り込み。取得済みの一覧をクライアント側で絞るだけ(再取得しない)。
+  const lhStatusEl = document.getElementById('lh-status-filter');
+  if (lhStatusEl) {
+    lhStatusEl.addEventListener('click', (ev) => {
+      const chip = ev.target.closest('.filter-chip');
+      if (!chip) return;
+      lhStatusEl.querySelectorAll('.filter-chip').forEach((c) => c.classList.toggle('active', c === chip));
+      leaveHistoryStatusFilter = chip.dataset.status || '';
+      renderLeaveHistory();
+    });
+  }
   SCREEN_ENTER_HOOKS['employee-directory'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
     document.getElementById('employee-search-input').value = '';
@@ -14556,6 +16592,12 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     document.getElementById('la-search').value = '';
     loadLeaveAdmin();
+  };
+  // 休暇履歴(管理者、全社員・全種別)。既定は「対象月なし=全期間」で開く。
+  // 承認済みの休暇がどこにも見当たらない、という状態にしないため、絞り込みは既定でかけない。
+  SCREEN_ENTER_HOOKS['admin-leave-history'] = () => {
+    if (!isAdmin()) { enterMenu(); return; }
+    loadAdminLeaveHistory();
   };
   SCREEN_ENTER_HOOKS['employee-summary'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
@@ -14880,8 +16922,11 @@ function init() {
     loadLicenseTypeAdminList();
   };
   document.getElementById('vehicle-submit').addEventListener('click', doSaveVehicle);
-  SCREEN_ENTER_HOOKS['vehicle-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  const vtAdd = document.getElementById('vehicle-type-add-btn'); if (vtAdd) vtAdd.addEventListener('click', doAddVehicleType);
+  // 2026-09-07: トラックマスターは 管理者 or 日報管理権限(nippo_admin)が管理できる(DB の require_vehicle_admin と同じ判定)。
+  // 以前は isAdmin()(executive のみ)で、DB/RPC は通るのに画面に入れない未反映状態だった。
+  SCREEN_ENTER_HOOKS['vehicle-admin'] = async () => {
+    if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadVehicleAdminList();
   };
   SCREEN_ENTER_HOOKS['health-admin'] = () => {
@@ -14902,8 +16947,14 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadPurposeAdminList();
   };
-  SCREEN_ENTER_HOOKS['admin-all-requests'] = () => {
+  SCREEN_ENTER_HOOKS['admin-all-requests'] = (opts) => {
     if (!isAdmin()) { enterMenu(); return; }
+    // 2026-09-06 最終完成監査で発覚: 「今日やること」の休暇カードで入った後、下部ナビの申請管理を開くと
+    // チップは「すべて」なのに一覧は休暇だけ(カード由来の p_category が state に残っていた)。
+    // 条件付きの入場(setAreqFilters 直後)と「戻る」(popstate / replace)以外は既定の全件表示へ戻す。
+    const o = opts || {};
+    if (!areqFiltersPrimed && !o.fromPopstate && !o.replace) setAreqFilters(null);
+    areqFiltersPrimed = false;
     loadAdminAllRequests();
   };
   SCREEN_ENTER_HOOKS['admin-role-management'] = () => {
