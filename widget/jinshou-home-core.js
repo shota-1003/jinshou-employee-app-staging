@@ -47,7 +47,11 @@ const FAMILY_DAYS = {
 // 画面に出す版番号。iPhoneへ届いたのが古い版かどうかを、実機を見ただけで判別するため。
 // 見た目を変えたら必ず1つ上げる(2026-09-05、届いていた版が古く「変わっていない」と
 // 見えた実例があったため)。
-const WIDGET_VERSION = 'v6';
+const WIDGET_VERSION = 'v7';
+
+// 次にいつ取り直してほしいかをiOSへ伝える間隔(分)。
+// 短くしすぎると電池を食い、iOS側で無視されやすくなる。15分を既定にする。
+const REFRESH_MINUTES = 15;
 
 function isLockScreen(family) {
     return String(family || '').startsWith('accessory');
@@ -516,6 +520,13 @@ async function run(cfg) {
     }
 
     const w = paintWidget(view, cfg.portal);
+    // 次にいつ取り直してほしいかをiOSへ伝える。指定しないとiOS任せになり、
+    // 配置を登録した3分後に見ても古いままだった(2026-09-06 実機指摘)。
+    // これは「お願い」であって約束ではない(iOSが電池等の都合で遅らせることはある)。
+    // 見出しの「更新 HH:MM」がいつ時点の内容かを示すので、ずれても人が判断できる。
+    try {
+        w.refreshAfterDate = new Date(Date.now() + REFRESH_MINUTES * 60 * 1000);
+    } catch (e) { /* 指定できない環境でも表示は続ける */ }
     if (inWidget) Script.setWidget(w);
     else await w.presentMedium();
     return w;
