@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v157-staging';
-const BUILD_DEPLOYED_AT = '2026-09-08T06:50:41.189Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v158-staging';
+const BUILD_DEPLOYED_AT = '2026-09-09T17:02:34.272Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -3517,6 +3517,10 @@ function renderBeaActiveFilterChip() {
 
 let bulkExpenseDetailRequestId = null;
 const bulkExpenseSelectedItems = new Set();
+// 選択中の合計金額を出すために、明細IDごとの金額を覚えておく(2026-09-09: 全件選択しても金額が出ない、の修正)。
+const bulkExpenseItemAmounts = new Map();
+// 承認する明細が残っているか(0 件なら承認の操作を隠して支払の導線を出す)。
+let bulkExpenseHeadCache = null;
 
 async function openBulkExpenseDetail(requestId) {
   const session = getSession();
@@ -3548,6 +3552,10 @@ async function loadBulkExpenseDetail() {
         : head.reconciliation_status === 'mismatch' ? '経費精算書との照合: 金額不一致・要確認' : '';
     }
 
+    bulkExpenseHeadCache = head || null;
+    bulkExpenseItemAmounts.clear();
+    (items || []).forEach((it) => bulkExpenseItemAmounts.set(String(it.expense_item_id), Number(it.amount || 0)));
+    renderBulkExpenseActions(head, items || []);
     const STATUS_LABEL_ITEM = { pending: '未処理', approved: '承認済み', rejected: '却下', on_hold: '保留(差戻し)' };
     document.getElementById('bed-item-list').innerHTML = (items || []).map((it) => `
       <div class="history-item bed-item-row" data-id="${it.expense_item_id}">
@@ -3701,7 +3709,40 @@ function wireSettlementSheetToggle() {
 }
 
 function updateBulkExpenseSelectedCount() {
-  document.getElementById('bed-selected-count').textContent = `${bulkExpenseSelectedItems.size}件選択中`;
+  // 2026-09-09: 件数だけでなく選択した金額の合計も出す(いくら承認しようとしているのかが分からなかった)。
+  let sum = 0;
+  bulkExpenseSelectedItems.forEach((id) => { sum += Number(bulkExpenseItemAmounts.get(String(id)) || 0); });
+  document.getElementById('bed-selected-count').textContent = bulkExpenseSelectedItems.size === 0
+    ? '0件選択中'
+    : `${bulkExpenseSelectedItems.size}件選択中・合計${Number(sum).toLocaleString('ja-JP')}円`;
+}
+
+// 承認する明細が残っているかで、この画面の操作を切り替える。
+// 残っていない(全部承認/却下済み)場合、この申請でやることは「支払(精算)の記録」なので、
+// 承認の操作を隠し、支払予定日・未払い額と支払画面への導線を出す。
+function renderBulkExpenseActions(head, items) {
+  const decisionCard = document.getElementById('bed-decision-card');
+  const payCard = document.getElementById('bed-payment-card');
+  const selectRow = document.getElementById('bed-select-all') ? document.getElementById('bed-select-all').parentElement : null;
+  if (!decisionCard || !payCard) return;
+  const pending = (items || []).filter((it) => it.approval_status === 'pending' || it.approval_status === 'on_hold').length;
+  const yen = (n) => `${Number(n || 0).toLocaleString('ja-JP')}円`;
+  decisionCard.style.display = pending > 0 ? '' : 'none';
+  if (selectRow) selectRow.style.display = pending > 0 ? '' : 'none';
+  if (pending > 0) { payCard.style.display = 'none'; payCard.innerHTML = ''; return; }
+  if (!head) { payCard.style.display = 'none'; payCard.innerHTML = ''; return; }
+  const paid = head.payment_status === 'paid';
+  const overdue = !paid && head.scheduled_payment_date && String(head.scheduled_payment_date).slice(0, 10) < todayJST();
+  payCard.style.display = '';
+  payCard.innerHTML = `
+    <div class="form-title" style="font-size:15px;">${paid ? 'この申請は精算済みです' : 'この申請は承認済みです。あとは精算(支払)の記録だけです'}</div>
+    <div class="row2">承認額 ${yen(head.approved_amount)}${head.scheduled_payment_date ? `　精算予定日: ${new Date(head.scheduled_payment_date).toLocaleDateString('ja-JP')}` : ''}</div>
+    ${overdue ? `<div class="mini-tag warn" style="margin:6px 0;">精算予定日を過ぎています</div>` : ''}
+    <div class="hint-inline">承認はすでに終わっているため、この画面に承認の操作は出しません。金額を直したい場合は経費の全体から差し戻してください。</div>
+    ${paid ? '' : '<button type="button" id="bed-goto-payment" style="margin-top:8px;">支払を記録する</button>'}
+  `;
+  const btn = document.getElementById('bed-goto-payment');
+  if (btn) btn.addEventListener('click', () => openRequestDetail('expense_reimbursement', bulkExpenseDetailRequestId));
 }
 
 let bulkExpensePendingDecision = null;
@@ -3709,6 +3750,14 @@ let bulkExpensePendingDecision = null;
 async function doDecideBulkExpenseSelected(decision) {
   hideError('bed-error');
   if (bulkExpenseSelectedItems.size === 0) { showError('bed-error', '明細を選択してください。'); return; }
+  // 2026-09-09: すでに承認済みの明細だけを選んで承認を押しても何も変わらず、「承認できない」ように見えていた。
+  if (decision === 'approved') {
+    const stillPending = Array.from(bulkExpenseSelectedItems).some((id) => {
+      const row = document.querySelector(`.bed-item-row[data-id="${id}"]`);
+      return row && /未処理|保留/.test(row.innerText);
+    });
+    if (!stillPending) { showError('bed-error', '選んだ明細はすべて処理済みです(承認・却下が終わっています)。精算(支払)の記録は下の「支払を記録する」から行ってください。'); return; }
+  }
   if (decision === 'approved') {
     await submitBulkExpenseDecision('approved', null);
     return;

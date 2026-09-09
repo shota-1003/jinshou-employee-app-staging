@@ -1286,7 +1286,10 @@
   <section id="screen-category-review" class="screen">
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">経費の勘定科目 要確認</div>
-    <div class="hint" style="margin-bottom:12px;">AIによる勘定科目の提案のうち、確信度が高くないものだけを表示しています。内容を確認し、正しい科目を確定してください。</div>
+    <!-- 2026-09-09 Shota 指示: 承認したものは後から訂正できないので、ここには承認前のものだけを出す。
+         承認済みの勘定科目は承認時に確定し、履歴は経費台帳で見る。 -->
+    <div class="hint" style="margin-bottom:12px;">まだ承認していない経費のうち、勘定科目が確定していないものだけを表示しています。承認済みのものはここには出ません(承認したときに、その内容で勘定科目も確定します)。</div>
+    <button type="button" class="secondary" data-nav="expense-ledger-admin" style="margin-bottom:12px;">確定済み・承認済みの履歴を見る(経費台帳)</button>
     <div id="category-review-list"></div>
     <datalist id="category-suggest-list">
       <option value="旅費交通費"></option>
@@ -3183,7 +3186,12 @@
     </div>
     <div id="bed-item-list"></div>
 
-    <div class="card total-card" style="position:sticky; bottom:8px;">
+    <!-- 2026-09-09 Shota 指摘: 「精算予定日を過ぎた未精算」から入ると、承認はもう済んでいるのに
+         この画面には承認/却下しか無く、全件選択しても金額が出ず、承認を押しても何も起きなかった。
+         承認する明細が残っていない申請では、承認の操作を隠して支払(精算)の導線を出す。 -->
+    <div class="card" id="bed-payment-card" style="display:none;"></div>
+
+    <div class="card total-card" id="bed-decision-card" style="position:sticky; bottom:8px;">
       <div class="hint-inline" id="bed-selected-count">0件選択中</div>
       <button type="button" id="bed-approve-selected">選択した明細を承認</button>
       <button type="button" class="secondary" id="bed-reject-selected">選択した明細を却下</button>
