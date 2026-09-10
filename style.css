@@ -945,26 +945,31 @@ button.link {
 .change-request-item .row1 { display: flex; justify-content: space-between; font-weight: 700; }
 .change-request-item .row2 { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
 
-/* ===== 貸付金台帳: 帳簿(ノート)形式の履歴表。返済は赤字にする伝統的な出納帳の配色にならう ===== */
+/* ===== 貸付金台帳: 紙の貸付台帳(日付・貸付・返済・合計・備考の5列)と同じ並びの帳簿形式。
+   返済は赤字にする伝統的な出納帳の配色にならう。2026-09-11 Shota指摘「ノートみたいにして
+   って言ったじゃん、こんなちっちゃいんで」を受けて、実物の紙台帳の列構成に合わせて作り直した
+   (それまでは金額を1列にまとめていたが、紙は貸付・返済が別列)。 ===== */
 .ledger-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border); }
-.ledger-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
 .ledger-table th {
-  text-align: left; padding: 9px 10px; font-size: 11px; font-weight: 800; letter-spacing: 0.03em;
-  color: var(--text-faint); text-transform: uppercase; background: oklch(1 0 0 / 4%);
+  text-align: right; padding: 10px 12px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.03em;
+  color: var(--text-faint); background: oklch(1 0 0 / 4%);
   border-bottom: 1px solid var(--border-strong); white-space: nowrap;
 }
-.ledger-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ledger-table th:first-child, .ledger-table th.lt-col-remark { text-align: left; }
+.ledger-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
 .ledger-table tbody tr:last-child td { border-bottom: none; }
-.ledger-table .lt-date { white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.ledger-table .lt-desc { font-weight: 600; }
-.ledger-table .lt-desc .lt-note { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
-.ledger-table .lt-amount { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ledger-table .lt-date { white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13.5px; }
+.ledger-table .lt-amount { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 84px; }
 .ledger-table .lt-amount.lend { color: var(--text); }
 .ledger-table .lt-amount.repay { color: var(--danger); }
-.ledger-table .lt-balance { text-align: right; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.ledger-table .lt-balance { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
+.ledger-table .lt-remark { color: var(--text-muted); font-size: 13px; min-width: 120px; }
+.ledger-table .lt-remark .lt-remark-type { display: block; color: var(--text); font-weight: 700; font-size: 13.5px; }
+.ledger-table .lt-remark .lt-note { display: block; margin-top: 2px; }
 .ledger-table tr.lt-voided td { opacity: 0.5; }
 .ledger-table tr.lt-voided .lt-amount { text-decoration: line-through; }
-.ledger-table .lt-void-btn { margin-top: 4px; font-size: 11.5px; padding: 3px 8px; }
+.ledger-table .lt-void-btn { margin-top: 6px; font-size: 12px; padding: 4px 9px; }
 
 /* ===== 管理者トップの社員管理カードなど汎用の一覧行 ===== */
 .plain-list-row {

@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v169-staging';
-const BUILD_DEPLOYED_AT = '2026-09-10T23:16:10.961Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v170-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T23:35:58.050Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10538,6 +10538,11 @@ const LOAN_PAYMENT_STATUS_LABEL = { not_started: '未着手', waiting_payment: '
 // 貸付金台帳(loan_ledger_entries)用ラベル。申請(loan_requests)とは別の「実際にお金が動いた記録」の画面で使う。
 const LOAN_ENTRY_TYPE_LABEL = { disbursement: '貸付実行', fee: '手数料', repayment: '返済', adjustment: '調整', opening_balance: '繰越残高' };
 const LOAN_BALANCE_STATE_LABEL = { no_debt: '借入はありません', outstanding: '返済中(未返済)', repaying: '返済中(一部返済済み)', repaid: '完済' };
+// 貸付金台帳の帳簿表示は、紙の台帳(例:「5/2」「9/25」)と同じ月/日の短い表記にする。
+function loanLedgerShortDate(dateStr) {
+  const m = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${Number(m[2])}/${Number(m[3])}` : String(dateStr || '');
+}
 const yen = (n) => (Number(n) || 0).toLocaleString('ja-JP') + '円';
 function formatJpDate(dateStr) { const m = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日` : String(dateStr); }
 let loanEditingId = null; // 編集中の申請id(nullは新規)
@@ -10705,19 +10710,20 @@ async function loadMyLoanBalance() {
         ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
         <div class="ledger-table-wrap">
           <table class="ledger-table">
-            <thead><tr><th>日付</th><th>内容</th><th>金額</th><th>残高</th></tr></thead>
+            <thead><tr><th>日付</th><th>貸付</th><th>返済</th><th>残高</th><th class="lt-col-remark">備考</th></tr></thead>
             <tbody>
               ${(entries || []).map((e) => `
               <tr class="${e.voided_at ? 'lt-voided' : ''}">
-                <td class="lt-date">${e.entry_date}</td>
-                <td class="lt-desc">
-                  ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}
+                <td class="lt-date">${loanLedgerShortDate(e.entry_date)}</td>
+                <td class="lt-amount lend">${Number(e.amount) >= 0 ? yen(Number(e.amount)) : ''}</td>
+                <td class="lt-amount repay">${Number(e.amount) < 0 ? yen(Math.abs(Number(e.amount))) : ''}</td>
+                <td class="lt-balance">${yen(e.running_balance)}</td>
+                <td class="lt-remark">
+                  <span class="lt-remark-type">${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span>
                   ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
                   ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
                   ${e.voided_at ? '<span class="lt-note">取消済み</span>' : ''}
                 </td>
-                <td class="lt-amount ${Number(e.amount) < 0 ? 'repay' : 'lend'}">${Number(e.amount) < 0 ? '−' : '+'}${yen(Math.abs(Number(e.amount)))}</td>
-                <td class="lt-balance">${yen(e.running_balance)}</td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -11246,20 +11252,21 @@ async function loadLoanLedgerDetail() {
           ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
           <div class="ledger-table-wrap">
             <table class="ledger-table">
-              <thead><tr><th>日付</th><th>内容</th><th>金額</th><th>残高</th></tr></thead>
+              <thead><tr><th>日付</th><th>貸付</th><th>返済</th><th>残高</th><th class="lt-col-remark">備考</th></tr></thead>
               <tbody>
                 ${(entries || []).map((e) => `
                 <tr class="${e.voided_at ? 'lt-voided' : ''}" data-entry-id="${e.id}">
-                  <td class="lt-date">${e.entry_date}</td>
-                  <td class="lt-desc">
-                    ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}${e.payment_method ? `(${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method})` : ''}
+                  <td class="lt-date">${loanLedgerShortDate(e.entry_date)}</td>
+                  <td class="lt-amount lend">${Number(e.amount) >= 0 ? yen(Number(e.amount)) : ''}</td>
+                  <td class="lt-amount repay">${Number(e.amount) < 0 ? yen(Math.abs(Number(e.amount))) : ''}</td>
+                  <td class="lt-balance">${yen(e.running_balance)}</td>
+                  <td class="lt-remark">
+                    <span class="lt-remark-type">${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}${e.payment_method ? `(${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method})` : ''}</span>
                     ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
                     ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
                     ${e.voided_at ? `<span class="lt-note">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</span>` : ''}
                     ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn lt-void-btn" data-entry-id="${e.id}">この記録を取り消す</button>` : ''}
                   </td>
-                  <td class="lt-amount ${Number(e.amount) < 0 ? 'repay' : 'lend'}">${Number(e.amount) < 0 ? '−' : '+'}${yen(Math.abs(Number(e.amount)))}</td>
-                  <td class="lt-balance">${yen(e.running_balance)}</td>
                 </tr>`).join('')}
               </tbody>
             </table>
