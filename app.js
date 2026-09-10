@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v167-staging';
-const BUILD_DEPLOYED_AT = '2026-09-10T07:08:05.824Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v168-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T08:18:46.965Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10705,9 +10705,11 @@ async function loadMyLoanBalance() {
           <div class="history-item">
             <div class="row1"><span style="font-weight:700;">${e.entry_date} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span><span>${Number(e.amount) > 0 ? '+' : ''}${yen(e.amount)}</span></div>
             <div class="row2">残高 ${yen(e.running_balance)}${e.note ? `　${(e.note || '').replace(/</g, '&lt;')}` : ''}</div>
+            ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
             ${e.voided_at ? '<div class="mini-tag warn">取消済み</div>' : ''}
           </div>`).join('')}
       </div>`;
+    hydrateSecureImages(body);
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
 let loanDetailData = null;
@@ -11159,6 +11161,10 @@ async function loadLoanLedgerDetail() {
     const totalRepaid = -all.filter((e) => e.entry_type === 'repayment').reduce((a, e) => a + Number(e.amount), 0);
     const totalFees = all.filter((e) => e.entry_type === 'fee').reduce((a, e) => a + Number(e.amount), 0);
 
+    // 紙台帳の繰越残高は同一社員に1件しか登録できない(backend側でも二重登録を拒否する)。
+    // すでに登録済みなら新規登録フォームではなく登録済みである旨だけを表示する。
+    const hasOpeningBalance = all.some((e) => e.entry_type === 'opening_balance' && !e.voided_at && !e.reversal_of_entry_id);
+
     body.innerHTML = `
       <div class="card summary-card">
         <div class="row1" style="margin-bottom:8px;"><span style="font-weight:700;font-size:16px;">${(loanLedgerDetailEmployee.name || '').replace(/</g, '&lt;')}</span></div>
@@ -11167,6 +11173,23 @@ async function loadLoanLedgerDetail() {
         <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(totalRepaid)}</span></div>
         <div class="summary-row"><span>手数料累計</span><span class="summary-value">${yen(totalFees)}</span></div>
       </div>
+      ${hasOpeningBalance ? '' : `
+      <div class="card" style="margin-top:14px;">
+        <div class="form-title" style="font-size:14px;margin-top:0;">繰越残高を登録する(紙台帳から)</div>
+        <div class="hint-inline">紙の貸付台帳に書かれている今の残高を、写真を証拠として貼りながら登録します。写真は任意ですが、あとで見返せるので貼っておくことをおすすめします。</div>
+        <div class="exd-pay-form">
+          <label>基準日<span class="required-mark">(必須)</span></label>
+          <input type="date" class="ll-ob-date" value="${todayJST()}">
+          <label>残高<span class="required-mark">(必須)</span></label>
+          <input type="number" class="ll-ob-amount" min="1" step="1" placeholder="例: 56000">
+          <label>紙台帳の写真(任意)</label>
+          <input type="file" class="ll-ob-photo" accept="image/*">
+          <label>備考</label>
+          <input type="text" class="ll-ob-note" placeholder="任意">
+          <div class="error ll-ob-error"></div>
+          <button type="button" class="ll-ob-save">登録する</button>
+        </div>
+      </div>`}
       <div class="card" style="margin-top:14px;">
         <div class="form-title" style="font-size:14px;margin-top:0;">返済を記録する</div>
         <div class="exd-pay-form">
@@ -11213,6 +11236,7 @@ async function loadLoanLedgerDetail() {
               </div>
               <div class="row2">残高 ${yen(e.running_balance)}${e.payment_method ? `　方法 ${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method}` : ''}</div>
               ${e.note ? `<div class="row2">${(e.note || '').replace(/</g, '&lt;')}</div>` : ''}
+              ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
               ${e.voided_at ? `<div class="mini-tag warn">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</div>` : ''}
               ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn" data-entry-id="${e.id}" style="margin-top:6px;">この記録を取り消す</button>` : ''}
             </div>`).join('')}
@@ -11220,11 +11244,44 @@ async function loadLoanLedgerDetail() {
       </div>`;
 
     wireLoanLedgerActions(body, session, () => loadLoanLedgerDetail());
+    hydrateSecureImages(body);
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
 
 function wireLoanLedgerActions(containerEl, session, reload) {
   const empCode = loanLedgerDetailEmployee && loanLedgerDetailEmployee.code;
+  const obBtn = containerEl.querySelector('.ll-ob-save');
+  if (obBtn) {
+    obBtn.addEventListener('click', async () => {
+      const errEl = containerEl.querySelector('.ll-ob-error');
+      const date = containerEl.querySelector('.ll-ob-date').value;
+      const amount = Number(containerEl.querySelector('.ll-ob-amount').value || 0);
+      const note = containerEl.querySelector('.ll-ob-note').value;
+      const fileInput = containerEl.querySelector('.ll-ob-photo');
+      const file = fileInput && fileInput.files && fileInput.files[0];
+      if (errEl) errEl.textContent = '';
+      if (!date || !amount) { if (errEl) errEl.textContent = '基準日と残高を入力してください。'; return; }
+      if (!confirm(`${yen(amount)}を繰越残高として登録します。よろしいですか?`)) return;
+      obBtn.disabled = true;
+      try {
+        let photo = null;
+        if (file) {
+          try { photo = await uploadReceiptPhoto(session.employeeCode, file); }
+          catch (e) { if (errEl) errEl.textContent = `写真のアップロードに失敗しました: ${e.message || ''}`; obBtn.disabled = false; return; }
+        }
+        const result = await rpc('admin_record_loan_opening_balance', {
+          p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_as_of_date: date,
+          p_amount: amount, p_note: note || null,
+          p_photo_drive_file_id: (photo && photo.driveFileId) || null,
+          p_photo_drive_file_url: (photo && photo.driveFileUrl) || null,
+          p_photo_file_name: file ? file.name : null,
+          p_photo_mime_type: file ? file.type : null,
+        });
+        if (result && result.ok === false) { if (errEl) errEl.textContent = result.message || 'すでに登録されています。'; obBtn.disabled = false; return; }
+        reload();
+      } catch (e) { obBtn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  }
   const repayBtn = containerEl.querySelector('.ll-repay-save');
   if (repayBtn) {
     repayBtn.addEventListener('click', async () => {
