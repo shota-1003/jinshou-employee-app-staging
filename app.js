@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v170-staging';
-const BUILD_DEPLOYED_AT = '2026-09-10T23:35:58.050Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v171-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T23:48:10.554Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10704,32 +10704,21 @@ async function loadMyLoanBalance() {
         <div class="summary-row"><span>借入累計</span><span class="summary-value">${yen(bal.total_disbursed)}</span></div>
         <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(bal.total_repaid)}</span></div>
       </div>
-      <div class="form-title" style="font-size:14px;">履歴(帳簿)</div>
-      <div class="hint-inline" style="margin-bottom:8px;">借入は黒字、返済は赤字で表示します。</div>
-      <div id="loan-balance-history-list">
-        ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
-        <div class="ledger-table-wrap">
-          <table class="ledger-table">
-            <thead><tr><th>日付</th><th>貸付</th><th>返済</th><th>残高</th><th class="lt-col-remark">備考</th></tr></thead>
-            <tbody>
-              ${(entries || []).map((e) => `
-              <tr class="${e.voided_at ? 'lt-voided' : ''}">
-                <td class="lt-date">${loanLedgerShortDate(e.entry_date)}</td>
-                <td class="lt-amount lend">${Number(e.amount) >= 0 ? yen(Number(e.amount)) : ''}</td>
-                <td class="lt-amount repay">${Number(e.amount) < 0 ? yen(Math.abs(Number(e.amount))) : ''}</td>
-                <td class="lt-balance">${yen(e.running_balance)}</td>
-                <td class="lt-remark">
-                  <span class="lt-remark-type">${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span>
-                  ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
-                  ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
-                  ${e.voided_at ? '<span class="lt-note">取消済み</span>' : ''}
-                </td>
-              </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>`}
+      <div class="settlement-sheet-wrap" style="margin-top:14px;">
+        <div class="settlement-sheet-head">
+          <span>貸付金台帳</span>
+          <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
+        </div>
+        <div class="settlement-sheet-scroll loan-sheet-box">${loanLedgerRenderSheetHtml(session.employeeName, entries)}</div>
       </div>`;
-    hydrateSecureImages(body);
+    body.querySelectorAll('.loan-sheet-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const box = btn.closest('.settlement-sheet-wrap').querySelector('.loan-sheet-box');
+        const hidden = box.style.display === 'none';
+        box.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '閉じる' : '開く';
+      });
+    });
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
 let loanDetailData = null;
@@ -11164,6 +11153,43 @@ function openLoanLedgerDetail(employee) {
   showScreen('loan-ledger-detail');
 }
 
+// 貸付金台帳を「紙」として表示する(借入申請書・経費精算書と同じ様式・大きさ)。
+// 2026-09-11 Shota指摘(原文要旨)「帳簿の表示サイズが小さすぎてこれじゃ見えない、
+// 経費とか借り入れの時の紙ぐらいの大きさにして」を受けて、ダーク基調の小さい表ではなく
+// 既存のsettlement-sheet(紙)と同じ構造・フォントサイズで作り直した。列は実際の紙の
+// 貸付台帳(日付・貸付・返済・合計・備考)と同じ並びにする。
+function loanLedgerRenderSheetHtml(employeeName, entries) {
+  const esc = (v) => String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const yenFmt = (n) => (n === null || n === undefined || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const rows = entries || [];
+  const MIN_ROWS = 10;
+  const blanks = Math.max(0, MIN_ROWS - rows.length);
+  return `
+    <div class="settlement-sheet ll-sheet">
+      <div class="ss-title">貸 付 金 台 帳</div>
+      <div class="ss-meta">氏　名：<b>${esc(employeeName)}</b></div>
+      <table>
+        <tr><th style="width:60px;">日付</th><th style="width:110px;">貸付</th><th style="width:110px;">返済</th><th style="width:120px;">合計</th><th>備考</th></tr>
+        ${rows.map((e) => {
+          const isRepay = Number(e.amount) < 0;
+          const remarkType = LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type;
+          const remarkParts = [remarkType, e.payment_method ? (LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method) : '', e.note, e.voided_at ? '取消済み' : ''].filter(Boolean);
+          return `<tr>
+            <td class="small">${loanLedgerShortDate(e.entry_date)}</td>
+            <td class="num">${!isRepay ? yenFmt(Math.abs(Number(e.amount))) : ''}</td>
+            <td class="num ll-sheet-repay">${isRepay ? yenFmt(Math.abs(Number(e.amount))) : ''}</td>
+            <td class="num">${yenFmt(e.running_balance)}</td>
+            <td class="small">${esc(remarkParts.join(' '))}</td>
+          </tr>`;
+        }).join('')}
+        ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+      </table>
+      <div class="ss-company">株式会社　迅翔興業</div>
+    </div>`;
+}
+
 async function loadLoanLedgerDetail() {
   const session = getSession();
   const body = document.getElementById('loan-ledger-detail-body');
@@ -11185,95 +11211,100 @@ async function loadLoanLedgerDetail() {
     // すでに登録済みなら新規登録フォームではなく登録済みである旨だけを表示する。
     const hasOpeningBalance = all.some((e) => e.entry_type === 'opening_balance' && !e.voided_at && !e.reversal_of_entry_id);
 
+    const voidableOrPhoto = all.filter((e) => (!e.voided_at && !e.reversal_of_entry_id) || e.photo_file_id);
+
     body.innerHTML = `
-      <div class="card summary-card">
-        <div class="row1" style="margin-bottom:8px;"><span style="font-weight:700;font-size:16px;">${(loanLedgerDetailEmployee.name || '').replace(/</g, '&lt;')}</span></div>
-        <div class="summary-row"><span>現在の貸付残高</span><span class="summary-value">${yen(balance)}</span></div>
-        <div class="summary-row"><span>貸付累計</span><span class="summary-value">${yen(totalDisbursed)}</span></div>
-        <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(totalRepaid)}</span></div>
-        <div class="summary-row"><span>手数料累計</span><span class="summary-value">${yen(totalFees)}</span></div>
-      </div>
-      ${hasOpeningBalance ? '' : `
-      <div class="card" style="margin-top:14px;">
-        <div class="form-title" style="font-size:14px;margin-top:0;">繰越残高を登録する(紙台帳から)</div>
-        <div class="hint-inline">紙の貸付台帳に書かれている今の残高を、写真を証拠として貼りながら登録します。写真は任意ですが、あとで見返せるので貼っておくことをおすすめします。</div>
-        <div class="exd-pay-form">
-          <label>基準日<span class="required-mark">(必須)</span></label>
-          <input type="date" class="ll-ob-date" value="${todayJST()}">
-          <label>残高<span class="required-mark">(必須)</span></label>
-          <input type="number" class="ll-ob-amount" min="1" step="1" placeholder="例: 56000">
-          <label>紙台帳の写真(任意)</label>
-          <input type="file" class="ll-ob-photo" accept="image/*">
-          <label>備考</label>
-          <input type="text" class="ll-ob-note" placeholder="任意">
-          <div class="error ll-ob-error"></div>
-          <button type="button" class="ll-ob-save">登録する</button>
+      <div class="ll-detail-layout">
+        <div class="ll-detail-left">
+          <div class="card summary-card">
+            <div class="row1" style="margin-bottom:8px;"><span style="font-weight:700;font-size:16px;">${(loanLedgerDetailEmployee.name || '').replace(/</g, '&lt;')}</span></div>
+            <div class="summary-row"><span>現在の貸付残高</span><span class="summary-value">${yen(balance)}</span></div>
+            <div class="summary-row"><span>貸付累計</span><span class="summary-value">${yen(totalDisbursed)}</span></div>
+            <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(totalRepaid)}</span></div>
+            <div class="summary-row"><span>手数料累計</span><span class="summary-value">${yen(totalFees)}</span></div>
+          </div>
+          ${hasOpeningBalance ? '' : `
+          <div class="card" style="margin-top:14px;">
+            <div class="form-title" style="font-size:14px;margin-top:0;">繰越残高を登録する(紙台帳から)</div>
+            <div class="hint-inline">紙の貸付台帳に書かれている今の残高を、写真を証拠として貼りながら登録します。写真は任意ですが、あとで見返せるので貼っておくことをおすすめします。</div>
+            <div class="exd-pay-form">
+              <label>基準日<span class="required-mark">(必須)</span></label>
+              <input type="date" class="ll-ob-date" value="${todayJST()}">
+              <label>残高<span class="required-mark">(必須)</span></label>
+              <input type="number" class="ll-ob-amount" min="1" step="1" placeholder="例: 56000">
+              <label>紙台帳の写真(任意)</label>
+              <input type="file" class="ll-ob-photo" accept="image/*">
+              <label>備考</label>
+              <input type="text" class="ll-ob-note" placeholder="任意">
+              <div class="error ll-ob-error"></div>
+              <button type="button" class="ll-ob-save">登録する</button>
+            </div>
+          </div>`}
+          <div class="card" style="margin-top:14px;">
+            <div class="form-title" style="font-size:14px;margin-top:0;">返済を記録する</div>
+            <div class="exd-pay-form">
+              <label>返済日<span class="required-mark">(必須)</span></label>
+              <input type="date" class="ll-repay-date" value="${todayJST()}">
+              <label>返済額<span class="required-mark">(必須)</span></label>
+              <input type="number" class="ll-repay-amount" min="1" step="1" placeholder="例: 10000">
+              <label>返済方法</label>
+              <select class="ll-repay-method">
+                <option value="">選択してください</option>
+                <option value="bank_transfer">銀行振込</option>
+                <option value="cash">現金</option>
+                <option value="payroll_deduction">給与天引き</option>
+                <option value="other">その他</option>
+              </select>
+              <label>備考</label>
+              <input type="text" class="ll-repay-note" placeholder="任意">
+              <div class="error ll-repay-error"></div>
+              <button type="button" class="ll-repay-save">返済を記録する</button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:14px;">
+            <div class="form-title" style="font-size:14px;margin-top:0;">調整(残高補正)</div>
+            <div class="hint-inline">入力ミスの訂正など、貸付・返済以外の理由で残高を補正するときに使います。理由は必須です。</div>
+            <div class="exd-pay-form">
+              <label>調整日<span class="required-mark">(必須)</span></label>
+              <input type="date" class="ll-adj-date" value="${todayJST()}">
+              <label>調整額<span class="required-mark">(必須、残高を減らす場合はマイナスの数字)</span></label>
+              <input type="number" class="ll-adj-amount" step="1" placeholder="例: -5000">
+              <label>理由<span class="required-mark">(必須)</span></label>
+              <input type="text" class="ll-adj-reason" placeholder="例: 入力ミスの訂正">
+              <div class="error ll-adj-error"></div>
+              <button type="button" class="ll-adj-save">調整を記録する</button>
+            </div>
+          </div>
         </div>
-      </div>`}
-      <div class="card" style="margin-top:14px;">
-        <div class="form-title" style="font-size:14px;margin-top:0;">返済を記録する</div>
-        <div class="exd-pay-form">
-          <label>返済日<span class="required-mark">(必須)</span></label>
-          <input type="date" class="ll-repay-date" value="${todayJST()}">
-          <label>返済額<span class="required-mark">(必須)</span></label>
-          <input type="number" class="ll-repay-amount" min="1" step="1" placeholder="例: 10000">
-          <label>返済方法</label>
-          <select class="ll-repay-method">
-            <option value="">選択してください</option>
-            <option value="bank_transfer">銀行振込</option>
-            <option value="cash">現金</option>
-            <option value="payroll_deduction">給与天引き</option>
-            <option value="other">その他</option>
-          </select>
-          <label>備考</label>
-          <input type="text" class="ll-repay-note" placeholder="任意">
-          <div class="error ll-repay-error"></div>
-          <button type="button" class="ll-repay-save">返済を記録する</button>
-        </div>
-      </div>
-      <div class="card" style="margin-top:14px;">
-        <div class="form-title" style="font-size:14px;margin-top:0;">調整(残高補正)</div>
-        <div class="hint-inline">入力ミスの訂正など、貸付・返済以外の理由で残高を補正するときに使います。理由は必須です。</div>
-        <div class="exd-pay-form">
-          <label>調整日<span class="required-mark">(必須)</span></label>
-          <input type="date" class="ll-adj-date" value="${todayJST()}">
-          <label>調整額<span class="required-mark">(必須、残高を減らす場合はマイナスの数字)</span></label>
-          <input type="number" class="ll-adj-amount" step="1" placeholder="例: -5000">
-          <label>理由<span class="required-mark">(必須)</span></label>
-          <input type="text" class="ll-adj-reason" placeholder="例: 入力ミスの訂正">
-          <div class="error ll-adj-error"></div>
-          <button type="button" class="ll-adj-save">調整を記録する</button>
-        </div>
-      </div>
-      <div class="card" style="margin-top:14px;">
-        <div class="form-title" style="font-size:14px;margin-top:0;">履歴(帳簿)</div>
-        <div class="hint-inline" style="margin-bottom:8px;">貸付は黒字、返済は赤字で表示します。取消済みの行は薄く表示されます。</div>
-        <div id="ll-history-list">
-          ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
-          <div class="ledger-table-wrap">
-            <table class="ledger-table">
-              <thead><tr><th>日付</th><th>貸付</th><th>返済</th><th>残高</th><th class="lt-col-remark">備考</th></tr></thead>
-              <tbody>
-                ${(entries || []).map((e) => `
-                <tr class="${e.voided_at ? 'lt-voided' : ''}" data-entry-id="${e.id}">
-                  <td class="lt-date">${loanLedgerShortDate(e.entry_date)}</td>
-                  <td class="lt-amount lend">${Number(e.amount) >= 0 ? yen(Number(e.amount)) : ''}</td>
-                  <td class="lt-amount repay">${Number(e.amount) < 0 ? yen(Math.abs(Number(e.amount))) : ''}</td>
-                  <td class="lt-balance">${yen(e.running_balance)}</td>
-                  <td class="lt-remark">
-                    <span class="lt-remark-type">${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}${e.payment_method ? `(${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method})` : ''}</span>
-                    ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
-                    ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
-                    ${e.voided_at ? `<span class="lt-note">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</span>` : ''}
-                    ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn lt-void-btn" data-entry-id="${e.id}">この記録を取り消す</button>` : ''}
-                  </td>
-                </tr>`).join('')}
-              </tbody>
-            </table>
+        <div class="ll-detail-right">
+          <div class="settlement-sheet-wrap">
+            <div class="settlement-sheet-head">
+              <span>貸付金台帳</span>
+              <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
+            </div>
+            <div class="settlement-sheet-scroll loan-sheet-box">${loanLedgerRenderSheetHtml(loanLedgerDetailEmployee.name, entries)}</div>
+          </div>
+          ${voidableOrPhoto.length === 0 ? '' : `
+          <div class="ll-actions">
+            ${voidableOrPhoto.map((e) => `
+            <div class="ll-action-row" data-entry-id="${e.id}">
+              <div class="row1"><span>${loanLedgerShortDate(e.entry_date)} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span><span>${yen(Math.abs(Number(e.amount)))}</span></div>
+              ${e.voided_at ? `<div class="row2">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})</div>` : ''}
+              ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
+              ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn" data-entry-id="${e.id}" style="margin-top:8px;">この記録を取り消す</button>` : ''}
+            </div>`).join('')}
           </div>`}
         </div>
       </div>`;
 
+    body.querySelectorAll('.loan-sheet-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const box = btn.closest('.settlement-sheet-wrap').querySelector('.loan-sheet-box');
+        const hidden = box.style.display === 'none';
+        box.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '閉じる' : '開く';
+      });
+    });
     wireLoanLedgerActions(body, session, () => loadLoanLedgerDetail());
     hydrateSecureImages(body);
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }

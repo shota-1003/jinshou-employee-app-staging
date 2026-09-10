@@ -945,31 +945,32 @@ button.link {
 .change-request-item .row1 { display: flex; justify-content: space-between; font-weight: 700; }
 .change-request-item .row2 { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
 
-/* ===== 貸付金台帳: 紙の貸付台帳(日付・貸付・返済・合計・備考の5列)と同じ並びの帳簿形式。
-   返済は赤字にする伝統的な出納帳の配色にならう。2026-09-11 Shota指摘「ノートみたいにして
-   って言ったじゃん、こんなちっちゃいんで」を受けて、実物の紙台帳の列構成に合わせて作り直した
-   (それまでは金額を1列にまとめていたが、紙は貸付・返済が別列)。 ===== */
-.ledger-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border); }
-.ledger-table { width: 100%; border-collapse: collapse; font-size: 14.5px; }
-.ledger-table th {
-  text-align: right; padding: 10px 12px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.03em;
-  color: var(--text-faint); background: oklch(1 0 0 / 4%);
-  border-bottom: 1px solid var(--border-strong); white-space: nowrap;
+/* ===== 貸付金台帳: 履歴は借入申請書・経費精算書と同じ「紙」(settlement-sheet)で表示する。
+   2026-09-11 Shota指摘(原文要旨)「帳簿の表示サイズが小さすぎてこれじゃ見えない、経費とか
+   借り入れの時の紙ぐらいの大きさにして」を受けて、ダーク基調の小さい表(旧ledger-table)を
+   廃止し、既存の紙の様式(.settlement-sheet、loanRenderRequestSheetHtmlと同じ構造)へ統一した。
+   紙は読み取り専用の記録なので、取消・写真等の操作は紙の外(.ll-actions)に分離する。 ===== */
+.ll-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
+.ll-action-row {
+  padding: 12px 14px; border-radius: var(--radius-md); background: var(--card-bg); border: 1px solid var(--border);
+  font-size: 13.5px; box-shadow: var(--shadow-sm);
 }
-.ledger-table th:first-child, .ledger-table th.lt-col-remark { text-align: left; }
-.ledger-table td { padding: 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
-.ledger-table tbody tr:last-child td { border-bottom: none; }
-.ledger-table .lt-date { white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; font-size: 13.5px; }
-.ledger-table .lt-amount { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; min-width: 84px; }
-.ledger-table .lt-amount.lend { color: var(--text); }
-.ledger-table .lt-amount.repay { color: var(--danger); }
-.ledger-table .lt-balance { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--text); }
-.ledger-table .lt-remark { color: var(--text-muted); font-size: 13px; min-width: 120px; }
-.ledger-table .lt-remark .lt-remark-type { display: block; color: var(--text); font-weight: 700; font-size: 13.5px; }
-.ledger-table .lt-remark .lt-note { display: block; margin-top: 2px; }
-.ledger-table tr.lt-voided td { opacity: 0.5; }
-.ledger-table tr.lt-voided .lt-amount { text-decoration: line-through; }
-.ledger-table .lt-void-btn { margin-top: 6px; font-size: 12px; padding: 4px 9px; }
+.ll-action-row .row1 { display: flex; justify-content: space-between; font-weight: 700; }
+.ll-action-row .row2 { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
+
+/* 管理者の貸付金台帳詳細: PCの横幅がある画面では、左(残高・登録フォーム)と右(紙・操作)を
+   横に並べる(2026-09-11 Shota指示「パソコンだから左の詳細の横に来るようにしたらええ」)。
+   モバイルでは従来どおり縦積み。既存のmain最大幅切替と同じ1280pxをしきい値にする。 */
+/* モバイル(縦積み)側はalign-items: stretch(既定)のままにする。flex-startにすると
+   子要素が幅いっぱいまで広がらず、中の720px幅の紙(.settlement-sheet)がそのまま
+   ページ全体をはみ出させてしまう(2026-09-11実機確認で発覚、要修正点)。 */
+.ll-detail-layout { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.ll-detail-left, .ll-detail-right { min-width: 0; }
+@media (min-width: 1280px) {
+  .ll-detail-layout { flex-direction: row; align-items: flex-start; }
+  .ll-detail-left { flex: 0 0 380px; }
+  .ll-detail-right { flex: 1; }
+}
 
 /* ===== 管理者トップの社員管理カードなど汎用の一覧行 ===== */
 .plain-list-row {
@@ -1598,6 +1599,9 @@ body.assignment-calendar-open .app-header { display: none; }
    紙と同じ「白地に黒」で見えないと、承認する人が読めない(2026-09-07、実機確認で判明)。 */
 .settlement-sheet, .settlement-sheet * { color: #111 !important; background: #fff !important; }
 .settlement-sheet th, .settlement-sheet td { border-color: #111 !important; }
+/* 貸付金台帳の紙だけ、返済の金額を伝統的な出納帳と同じ赤字にする(2026-09-11 Shota指示)。
+   上の全称ルールより詳しいセレクタ+!importantで、この行だけ上書きする。 */
+.settlement-sheet .ll-sheet-repay { color: #b3261e !important; }
 .settlement-sheet .ss-title {
   text-align: center; font-size: 20px; font-weight: 700; letter-spacing: 6px; margin: 4px 0 14px;
 }
