@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v168-staging';
-const BUILD_DEPLOYED_AT = '2026-09-10T08:18:46.965Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v169-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T23:16:10.961Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10699,15 +10699,29 @@ async function loadMyLoanBalance() {
         <div class="summary-row"><span>借入累計</span><span class="summary-value">${yen(bal.total_disbursed)}</span></div>
         <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(bal.total_repaid)}</span></div>
       </div>
-      <div class="form-title" style="font-size:14px;">履歴</div>
+      <div class="form-title" style="font-size:14px;">履歴(帳簿)</div>
+      <div class="hint-inline" style="margin-bottom:8px;">借入は黒字、返済は赤字で表示します。</div>
       <div id="loan-balance-history-list">
-        ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : (entries || []).map((e) => `
-          <div class="history-item">
-            <div class="row1"><span style="font-weight:700;">${e.entry_date} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span><span>${Number(e.amount) > 0 ? '+' : ''}${yen(e.amount)}</span></div>
-            <div class="row2">残高 ${yen(e.running_balance)}${e.note ? `　${(e.note || '').replace(/</g, '&lt;')}` : ''}</div>
-            ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
-            ${e.voided_at ? '<div class="mini-tag warn">取消済み</div>' : ''}
-          </div>`).join('')}
+        ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
+        <div class="ledger-table-wrap">
+          <table class="ledger-table">
+            <thead><tr><th>日付</th><th>内容</th><th>金額</th><th>残高</th></tr></thead>
+            <tbody>
+              ${(entries || []).map((e) => `
+              <tr class="${e.voided_at ? 'lt-voided' : ''}">
+                <td class="lt-date">${e.entry_date}</td>
+                <td class="lt-desc">
+                  ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}
+                  ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
+                  ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
+                  ${e.voided_at ? '<span class="lt-note">取消済み</span>' : ''}
+                </td>
+                <td class="lt-amount ${Number(e.amount) < 0 ? 'repay' : 'lend'}">${Number(e.amount) < 0 ? '−' : '+'}${yen(Math.abs(Number(e.amount)))}</td>
+                <td class="lt-balance">${yen(e.running_balance)}</td>
+              </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>`}
       </div>`;
     hydrateSecureImages(body);
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
@@ -11226,20 +11240,30 @@ async function loadLoanLedgerDetail() {
         </div>
       </div>
       <div class="card" style="margin-top:14px;">
-        <div class="form-title" style="font-size:14px;margin-top:0;">履歴</div>
+        <div class="form-title" style="font-size:14px;margin-top:0;">履歴(帳簿)</div>
+        <div class="hint-inline" style="margin-bottom:8px;">貸付は黒字、返済は赤字で表示します。取消済みの行は薄く表示されます。</div>
         <div id="ll-history-list">
-          ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : (entries || []).map((e) => `
-            <div class="change-request-item" data-entry-id="${e.id}">
-              <div class="row1">
-                <span style="font-weight:700;">${e.entry_date} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span>
-                <span>${Number(e.amount) > 0 ? '+' : ''}${yen(e.amount)}</span>
-              </div>
-              <div class="row2">残高 ${yen(e.running_balance)}${e.payment_method ? `　方法 ${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method}` : ''}</div>
-              ${e.note ? `<div class="row2">${(e.note || '').replace(/</g, '&lt;')}</div>` : ''}
-              ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
-              ${e.voided_at ? `<div class="mini-tag warn">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</div>` : ''}
-              ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn" data-entry-id="${e.id}" style="margin-top:6px;">この記録を取り消す</button>` : ''}
-            </div>`).join('')}
+          ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : `
+          <div class="ledger-table-wrap">
+            <table class="ledger-table">
+              <thead><tr><th>日付</th><th>内容</th><th>金額</th><th>残高</th></tr></thead>
+              <tbody>
+                ${(entries || []).map((e) => `
+                <tr class="${e.voided_at ? 'lt-voided' : ''}" data-entry-id="${e.id}">
+                  <td class="lt-date">${e.entry_date}</td>
+                  <td class="lt-desc">
+                    ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}${e.payment_method ? `(${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method})` : ''}
+                    ${e.note ? `<span class="lt-note">${(e.note || '').replace(/</g, '&lt;')}</span>` : ''}
+                    ${e.photo_file_id ? secureFileBlockHtml('loan_ledger_photo', null, e.id, true, false) : ''}
+                    ${e.voided_at ? `<span class="lt-note">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</span>` : ''}
+                    ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn lt-void-btn" data-entry-id="${e.id}">この記録を取り消す</button>` : ''}
+                  </td>
+                  <td class="lt-amount ${Number(e.amount) < 0 ? 'repay' : 'lend'}">${Number(e.amount) < 0 ? '−' : '+'}${yen(Math.abs(Number(e.amount)))}</td>
+                  <td class="lt-balance">${yen(e.running_balance)}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>`}
         </div>
       </div>`;
 

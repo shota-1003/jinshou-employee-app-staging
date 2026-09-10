@@ -945,6 +945,27 @@ button.link {
 .change-request-item .row1 { display: flex; justify-content: space-between; font-weight: 700; }
 .change-request-item .row2 { font-size: 12.5px; color: var(--text-muted); margin-top: 4px; }
 
+/* ===== 貸付金台帳: 帳簿(ノート)形式の履歴表。返済は赤字にする伝統的な出納帳の配色にならう ===== */
+.ledger-table-wrap { overflow-x: auto; border-radius: var(--radius-md); border: 1px solid var(--border); }
+.ledger-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ledger-table th {
+  text-align: left; padding: 9px 10px; font-size: 11px; font-weight: 800; letter-spacing: 0.03em;
+  color: var(--text-faint); text-transform: uppercase; background: oklch(1 0 0 / 4%);
+  border-bottom: 1px solid var(--border-strong); white-space: nowrap;
+}
+.ledger-table td { padding: 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.ledger-table tbody tr:last-child td { border-bottom: none; }
+.ledger-table .lt-date { white-space: nowrap; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.ledger-table .lt-desc { font-weight: 600; }
+.ledger-table .lt-desc .lt-note { display: block; font-weight: 400; color: var(--text-muted); font-size: 12px; margin-top: 2px; }
+.ledger-table .lt-amount { text-align: right; white-space: nowrap; font-weight: 800; font-variant-numeric: tabular-nums; }
+.ledger-table .lt-amount.lend { color: var(--text); }
+.ledger-table .lt-amount.repay { color: var(--danger); }
+.ledger-table .lt-balance { text-align: right; white-space: nowrap; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--text-muted); }
+.ledger-table tr.lt-voided td { opacity: 0.5; }
+.ledger-table tr.lt-voided .lt-amount { text-decoration: line-through; }
+.ledger-table .lt-void-btn { margin-top: 4px; font-size: 11.5px; padding: 3px 8px; }
+
 /* ===== 管理者トップの社員管理カードなど汎用の一覧行 ===== */
 .plain-list-row {
   display: flex; align-items: center; justify-content: space-between; padding: 13px 4px; border-bottom: 1px solid var(--border);
