@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v166-staging';
-const BUILD_DEPLOYED_AT = '2026-09-10T06:40:58.370Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v167-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T07:08:05.824Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -521,7 +521,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
-  'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'lucky-admin', 'lucky-preview',
+  'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
   'vehicle-admin', 'expense-ledger-admin',
 ]);
 let inAdminMode = false;
@@ -545,7 +545,7 @@ const PARENT_ROUTE = Object.freeze({
   'employee-summary': 'admin-dashboard', 'attendance-matrix': 'admin-dashboard', 'bulk-expense-admin': 'admin-dashboard',
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
   'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard',
-  'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
+  'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
   // 注: ADMIN_SCREENS にある 'master-management-hub' は index.html に画面が無い(死んだ定義)ため、ここには載せない。
@@ -554,7 +554,7 @@ const PARENT_ROUTE = Object.freeze({
   // 人員・台帳管理(名簿・資格・健診・常用伝票・支給品・初回コード・外注マスタ)
   'qual-admin': 'personnel-ledger-hub', 'employee-directory': 'personnel-ledger-hub', 'health-admin': 'personnel-ledger-hub',
   'joyo-denpyo-admin': 'personnel-ledger-hub', 'joyo-denpyo-summary': 'personnel-ledger-hub', 'supply-holdings-admin': 'personnel-ledger-hub',
-  'loan-monthly-ledger': 'personnel-ledger-hub', 'loan-admin-detail': 'loan-admin',
+  'loan-monthly-ledger': 'personnel-ledger-hub', 'loan-admin-detail': 'loan-admin', 'loan-ledger-detail': 'loan-ledger-admin',
   'first-login-codes-admin': 'personnel-ledger-hub', 'subcontractor-company-admin': 'personnel-ledger-hub', 'subcontractor-worker-admin': 'personnel-ledger-hub',
   // 社員名簿の下
   'employee-create': 'employee-directory', 'employee-detail': 'employee-directory',
@@ -10535,6 +10535,9 @@ function resetProposeSiteForm() {
 const LOAN_STATUS_LABEL = { applied: '申請中', approved: '承認', rejected: '却下', returned: '差し戻し', cancelled: '取消' };
 const LOAN_RECEIPT_LABEL = { cash: '現金', bank_transfer: '銀行振込' };
 const LOAN_PAYMENT_STATUS_LABEL = { not_started: '未着手', waiting_payment: '支払待ち', paid: '支払済み' };
+// 貸付金台帳(loan_ledger_entries)用ラベル。申請(loan_requests)とは別の「実際にお金が動いた記録」の画面で使う。
+const LOAN_ENTRY_TYPE_LABEL = { disbursement: '貸付実行', fee: '手数料', repayment: '返済', adjustment: '調整', opening_balance: '繰越残高' };
+const LOAN_BALANCE_STATE_LABEL = { no_debt: '借入はありません', outstanding: '返済中(未返済)', repaying: '返済中(一部返済済み)', repaid: '完済' };
 const yen = (n) => (Number(n) || 0).toLocaleString('ja-JP') + '円';
 function formatJpDate(dateStr) { const m = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日` : String(dateStr); }
 let loanEditingId = null; // 編集中の申請id(nullは新規)
@@ -10674,6 +10677,38 @@ async function loadLoanHistory() {
       </button>`).join('');
     listEl.querySelectorAll('.loan-hist').forEach((b) => b.addEventListener('click', () => openLoanDetail(Number(b.dataset.id))));
   } catch (e) { listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
+}
+
+// 貸付金台帳(残高・履歴、本人)。loan_requests(申請・承認)とは別に、実際にお金が動いた
+// 記録(loan_ledger_entries)から現在残高・全履歴を表示する(貸付金台帳機能 Phase 2)。
+async function loadMyLoanBalance() {
+  const session = getSession();
+  const body = document.getElementById('loan-balance-body');
+  body.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const [balRows, entries] = await Promise.all([
+      rpc('get_my_loan_balance', { p_employee_code: session.employeeCode }),
+      rpc('get_my_loan_ledger', { p_employee_code: session.employeeCode }),
+    ]);
+    const bal = (balRows || [])[0] || { current_balance: 0, total_disbursed: 0, total_repaid: 0, total_fees: 0, balance_state: 'no_debt' };
+    const stateLabel = LOAN_BALANCE_STATE_LABEL[bal.balance_state] || bal.balance_state;
+    body.innerHTML = `
+      <div class="card summary-card">
+        <div class="summary-row"><span>現在の借入残高</span><span class="summary-value">${yen(bal.current_balance)}</span></div>
+        <div class="summary-row"><span>状態</span><span class="summary-value">${stateLabel}</span></div>
+        <div class="summary-row"><span>借入累計</span><span class="summary-value">${yen(bal.total_disbursed)}</span></div>
+        <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(bal.total_repaid)}</span></div>
+      </div>
+      <div class="form-title" style="font-size:14px;">履歴</div>
+      <div id="loan-balance-history-list">
+        ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : (entries || []).map((e) => `
+          <div class="history-item">
+            <div class="row1"><span style="font-weight:700;">${e.entry_date} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span><span>${Number(e.amount) > 0 ? '+' : ''}${yen(e.amount)}</span></div>
+            <div class="row2">残高 ${yen(e.running_balance)}${e.note ? `　${(e.note || '').replace(/</g, '&lt;')}` : ''}</div>
+            ${e.voided_at ? '<div class="mini-tag warn">取消済み</div>' : ''}
+          </div>`).join('')}
+      </div>`;
+  } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
 let loanDetailData = null;
 async function openLoanDetail(id) {
@@ -10906,9 +10941,16 @@ function loanBuildPaymentSectionHtml(r) {
         <option value="bank_transfer">銀行振込</option>
         <option value="cash">現金</option>
       </select>
+      <label>振込手数料(任意)</label>
+      <div class="hint-inline">貸付金台帳(残高・履歴)にも記録されます。手数料を残高に加算するかは下のチェックで選べます。</div>
+      <input type="number" class="loan-paid-fee" min="0" step="1" value="0">
+      <label style="display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" class="loan-paid-fee-counts" checked style="width:auto;margin:0;">
+        <span>手数料を貸付残高に加算する</span>
+      </label>
       <label>備考</label>
       <input type="text" class="loan-paid-note" placeholder="例: 9月分まとめて振込">
-      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
+      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。この操作で貸付金台帳(残高・履歴)へも記録されます。</div>
       <div class="error loan-payment-error"></div>
       <button type="button" class="loan-paid-save">支払を記録する</button>
     </div>`;
@@ -11025,14 +11067,213 @@ function wireLoanPaymentSection(containerEl, session, onDone) {
       const v = item.querySelector('.loan-paid-date').value;
       const method = item.querySelector('.loan-paid-method').value;
       const note = item.querySelector('.loan-paid-note').value;
+      const feeInput = item.querySelector('.loan-paid-fee');
+      const feeCountsInput = item.querySelector('.loan-paid-fee-counts');
+      const fee = feeInput ? Number(feeInput.value || 0) : 0;
+      const feeCounts = feeCountsInput ? feeCountsInput.checked : true;
       if (errEl) errEl.textContent = '';
       if (!v) { if (errEl) errEl.textContent = '支払日を入力してください。'; return; }
       if (!confirm('支払を記録します。よろしいですか?')) return;
       btn.disabled = true;
       try {
-        await rpc('admin_record_loan_payment', { p_admin_employee_code: session.employeeCode, p_id: id, p_paid_at: v, p_payment_method: method || null, p_note: note || null });
+        // 貸付実行の正本はadmin_disburse_loan(貸付金台帳loan_ledger_entriesへ記録)。
+        // admin_record_loan_paymentは既存シグネチャ互換のための薄い委譲のみに使う。
+        const result = await rpc('admin_disburse_loan', {
+          p_admin_employee_code: session.employeeCode, p_loan_request_id: id, p_disbursed_on: v,
+          p_payment_method: method || null, p_fee_amount: fee || 0, p_fee_counts_toward_balance: feeCounts, p_note: note || null,
+        });
+        if (result && result.ok === false) {
+          btn.disabled = false;
+          if (errEl) errEl.textContent = result.message || '既に貸付実行済みです。';
+          return;
+        }
         reload();
       } catch (e) { btn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  });
+}
+
+// ==================== 貸付金管理(残高・返済・訂正) ====================
+// loan_requests(申請・承認)とは別に、実際にお金が動いた記録(loan_ledger_entries)を
+// 社員別に管理する画面(貸付金台帳機能 Phase 2)。貸付実行そのものはこの画面ではなく、
+// 既存の「借入申請の管理」詳細画面(screen-loan-admin-detail)で行う(計画書§7、
+// loanBuildPaymentSectionHtmlの拡張・admin_disburse_loanを参照)。
+let loanLedgerIncludeZero = false;
+let loanLedgerDetailEmployee = null; // { id, code, name }
+
+function wireLoanLedgerAdminFilter() {
+  const row = document.getElementById('loan-ledger-admin-filter');
+  if (!row || row.dataset.wired) return;
+  row.dataset.wired = '1';
+  const chk = row.querySelector('.loan-ledger-include-zero');
+  if (chk) {
+    chk.addEventListener('change', () => {
+      loanLedgerIncludeZero = chk.checked;
+      loadLoanLedgerAdminList();
+    });
+  }
+}
+
+async function loadLoanLedgerAdminList() {
+  wireLoanLedgerAdminFilter();
+  const session = getSession();
+  const listEl = document.getElementById('loan-ledger-admin-list');
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_loan_balances', { p_admin_employee_code: session.employeeCode, p_include_zero: loanLedgerIncludeZero });
+    if (!rows || !rows.length) {
+      listEl.innerHTML = `<div class="hint">${loanLedgerIncludeZero ? '貸付の記録がありません。' : '現在、貸付残高がある社員はいません。'}</div>`;
+      return;
+    }
+    listEl.innerHTML = rows.map((r) => `
+      <div class="history-item loan-ledger-row" data-id="${r.employee_id}" data-code="${(r.employee_code || '').replace(/"/g, '&quot;')}" data-name="${(r.employee_name || '').replace(/"/g, '&quot;')}" style="cursor:pointer;">
+        <div class="row1"><span style="font-weight:700;">${(r.employee_name || '').replace(/</g, '&lt;')}</span><span class="status-badge ${Number(r.current_balance) > 0 ? '' : 'done'}">${Number(r.current_balance) > 0 ? '残高あり' : '完済'}</span></div>
+        <div class="row2">現在残高 ${yen(r.current_balance)}　貸付累計 ${yen(r.total_disbursed)}　返済累計 ${yen(r.total_repaid)}</div>
+        <div class="row2">最終貸付 ${r.last_disbursed_on || '-'}　最終返済 ${r.last_repaid_on || '-'}</div>
+      </div>`).join('');
+    listEl.querySelectorAll('.loan-ledger-row').forEach((el) => {
+      el.addEventListener('click', () => openLoanLedgerDetail({ id: Number(el.dataset.id), code: el.dataset.code, name: el.dataset.name }));
+    });
+  } catch (e) { listEl.innerHTML = '<div class="hint">この画面には貸付管理権限が必要です。</div>'; }
+}
+
+function openLoanLedgerDetail(employee) {
+  loanLedgerDetailEmployee = employee;
+  showScreen('loan-ledger-detail');
+}
+
+async function loadLoanLedgerDetail() {
+  const session = getSession();
+  const body = document.getElementById('loan-ledger-detail-body');
+  if (!loanLedgerDetailEmployee) { body.innerHTML = '<div class="hint">対象の社員が見つかりません。</div>'; return; }
+  body.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const entries = await rpc('admin_get_loan_ledger', { p_admin_employee_code: session.employeeCode, p_employee_id: loanLedgerDetailEmployee.id });
+    // 集計は「取消済みでない行だけ」を抜き出して合計してはならない。赤伝(反対仕訳)は
+    // 元行と同じentry_typeを持ち、元行はvoided_atが付いても金額は変わらないため、
+    // 元行を除いて赤伝だけを合計すると相殺されず二重にずれる(backendのloan_balance_summary
+    // VIEWと同じ考え方: 取消・訂正の特別扱いをせず全行をそのまま合計する)。
+    const all = entries || [];
+    const balance = all.length ? Number(all[all.length - 1].running_balance || 0) : 0;
+    const totalDisbursed = all.filter((e) => e.entry_type === 'disbursement' || e.entry_type === 'opening_balance').reduce((a, e) => a + Number(e.amount), 0);
+    const totalRepaid = -all.filter((e) => e.entry_type === 'repayment').reduce((a, e) => a + Number(e.amount), 0);
+    const totalFees = all.filter((e) => e.entry_type === 'fee').reduce((a, e) => a + Number(e.amount), 0);
+
+    body.innerHTML = `
+      <div class="card summary-card">
+        <div class="row1" style="margin-bottom:8px;"><span style="font-weight:700;font-size:16px;">${(loanLedgerDetailEmployee.name || '').replace(/</g, '&lt;')}</span></div>
+        <div class="summary-row"><span>現在の貸付残高</span><span class="summary-value">${yen(balance)}</span></div>
+        <div class="summary-row"><span>貸付累計</span><span class="summary-value">${yen(totalDisbursed)}</span></div>
+        <div class="summary-row"><span>返済累計</span><span class="summary-value">${yen(totalRepaid)}</span></div>
+        <div class="summary-row"><span>手数料累計</span><span class="summary-value">${yen(totalFees)}</span></div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="form-title" style="font-size:14px;margin-top:0;">返済を記録する</div>
+        <div class="exd-pay-form">
+          <label>返済日<span class="required-mark">(必須)</span></label>
+          <input type="date" class="ll-repay-date" value="${todayJST()}">
+          <label>返済額<span class="required-mark">(必須)</span></label>
+          <input type="number" class="ll-repay-amount" min="1" step="1" placeholder="例: 10000">
+          <label>返済方法</label>
+          <select class="ll-repay-method">
+            <option value="">選択してください</option>
+            <option value="bank_transfer">銀行振込</option>
+            <option value="cash">現金</option>
+            <option value="payroll_deduction">給与天引き</option>
+            <option value="other">その他</option>
+          </select>
+          <label>備考</label>
+          <input type="text" class="ll-repay-note" placeholder="任意">
+          <div class="error ll-repay-error"></div>
+          <button type="button" class="ll-repay-save">返済を記録する</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="form-title" style="font-size:14px;margin-top:0;">調整(残高補正)</div>
+        <div class="hint-inline">入力ミスの訂正など、貸付・返済以外の理由で残高を補正するときに使います。理由は必須です。</div>
+        <div class="exd-pay-form">
+          <label>調整日<span class="required-mark">(必須)</span></label>
+          <input type="date" class="ll-adj-date" value="${todayJST()}">
+          <label>調整額<span class="required-mark">(必須、残高を減らす場合はマイナスの数字)</span></label>
+          <input type="number" class="ll-adj-amount" step="1" placeholder="例: -5000">
+          <label>理由<span class="required-mark">(必須)</span></label>
+          <input type="text" class="ll-adj-reason" placeholder="例: 入力ミスの訂正">
+          <div class="error ll-adj-error"></div>
+          <button type="button" class="ll-adj-save">調整を記録する</button>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <div class="form-title" style="font-size:14px;margin-top:0;">履歴</div>
+        <div id="ll-history-list">
+          ${(entries || []).length === 0 ? '<div class="hint">記録はまだありません。</div>' : (entries || []).map((e) => `
+            <div class="change-request-item" data-entry-id="${e.id}">
+              <div class="row1">
+                <span style="font-weight:700;">${e.entry_date} ${LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type}</span>
+                <span>${Number(e.amount) > 0 ? '+' : ''}${yen(e.amount)}</span>
+              </div>
+              <div class="row2">残高 ${yen(e.running_balance)}${e.payment_method ? `　方法 ${LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method}` : ''}</div>
+              ${e.note ? `<div class="row2">${(e.note || '').replace(/</g, '&lt;')}</div>` : ''}
+              ${e.voided_at ? `<div class="mini-tag warn">取消済み(${(e.voided_by || '').replace(/</g, '&lt;')})${e.void_reason ? `: ${(e.void_reason || '').replace(/</g, '&lt;')}` : ''}</div>` : ''}
+              ${(!e.voided_at && !e.reversal_of_entry_id) ? `<button type="button" class="secondary danger ll-void-btn" data-entry-id="${e.id}" style="margin-top:6px;">この記録を取り消す</button>` : ''}
+            </div>`).join('')}
+        </div>
+      </div>`;
+
+    wireLoanLedgerActions(body, session, () => loadLoanLedgerDetail());
+  } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
+}
+
+function wireLoanLedgerActions(containerEl, session, reload) {
+  const empCode = loanLedgerDetailEmployee && loanLedgerDetailEmployee.code;
+  const repayBtn = containerEl.querySelector('.ll-repay-save');
+  if (repayBtn) {
+    repayBtn.addEventListener('click', async () => {
+      const errEl = containerEl.querySelector('.ll-repay-error');
+      const date = containerEl.querySelector('.ll-repay-date').value;
+      const amount = Number(containerEl.querySelector('.ll-repay-amount').value || 0);
+      const method = containerEl.querySelector('.ll-repay-method').value;
+      const note = containerEl.querySelector('.ll-repay-note').value;
+      if (errEl) errEl.textContent = '';
+      if (!date || !amount) { if (errEl) errEl.textContent = '返済日と返済額を入力してください。'; return; }
+      if (!confirm(`${yen(amount)}の返済を記録します。よろしいですか?`)) return;
+      repayBtn.disabled = true;
+      try {
+        await rpc('admin_record_loan_repayment', { p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_repaid_on: date, p_amount: amount, p_method: method || null, p_note: note || null });
+        reload();
+      } catch (e) { repayBtn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  }
+  const adjBtn = containerEl.querySelector('.ll-adj-save');
+  if (adjBtn) {
+    adjBtn.addEventListener('click', async () => {
+      const errEl = containerEl.querySelector('.ll-adj-error');
+      const date = containerEl.querySelector('.ll-adj-date').value;
+      const amount = Number(containerEl.querySelector('.ll-adj-amount').value || 0);
+      const reason = containerEl.querySelector('.ll-adj-reason').value;
+      if (errEl) errEl.textContent = '';
+      if (!date || !amount) { if (errEl) errEl.textContent = '調整日と調整額を入力してください。'; return; }
+      if (!reason || !reason.trim()) { if (errEl) errEl.textContent = '理由を入力してください。'; return; }
+      if (!confirm(`${yen(amount)}の調整を記録します。よろしいですか?`)) return;
+      adjBtn.disabled = true;
+      try {
+        await rpc('admin_add_loan_adjustment', { p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_entry_date: date, p_amount: amount, p_reason: reason.trim() });
+        reload();
+      } catch (e) { adjBtn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  }
+  containerEl.querySelectorAll('.ll-void-btn').forEach((vb) => {
+    vb.addEventListener('click', async () => {
+      const entryId = Number(vb.getAttribute('data-entry-id'));
+      const reason = prompt('この記録を取り消す理由を入力してください(監査に残ります)。');
+      if (reason === null) return;
+      if (!reason.trim()) { alert('取消の理由を入力してください。'); return; }
+      if (!confirm('この記録を取り消します。記録は削除されず、取消として残ります。よろしいですか？')) return;
+      vb.disabled = true;
+      try {
+        const r = await rpc('admin_void_loan_ledger_entry', { p_admin_employee_code: session.employeeCode, p_entry_id: entryId, p_reason: reason.trim() });
+        if (r && r.ok === false) { alert(r.message || 'この記録は取り消せませんでした。'); }
+        reload();
+      } catch (e) { alert(e.message || '取り消せませんでした。'); } finally { vb.disabled = false; }
     });
   });
 }
@@ -13923,7 +14164,7 @@ function renderAdminRoleCandidates(query) {
 const ADMIN_ROLE_LABEL = {
   general_admin: '全体管理者', nippo_admin: '日報担当', accounting_admin: '経理承認担当',
   hr_admin: '社員管理担当', subcontractor_admin: '外注管理担当', site_admin: '現場管理担当', device_admin: '端末承認担当',
-  expense_approval_exempt: '経費承認免除',
+  expense_approval_exempt: '経費承認免除', loan_admin: '貸付管理担当',
 };
 
 async function doGrantAdminRole(employeeCode, employeeName) {
@@ -16955,6 +17196,9 @@ function init() {
   SCREEN_ENTER_HOOKS['loan-admin'] = loadLoanAdminList;
   SCREEN_ENTER_HOOKS['loan-admin-detail'] = loadLoanAdminDetail;
   SCREEN_ENTER_HOOKS['loan-monthly-ledger'] = initLoanMonthlyLedger;
+  SCREEN_ENTER_HOOKS['loan-balance'] = loadMyLoanBalance;
+  SCREEN_ENTER_HOOKS['loan-ledger-admin'] = loadLoanLedgerAdminList;
+  SCREEN_ENTER_HOOKS['loan-ledger-detail'] = loadLoanLedgerDetail;
   SCREEN_ENTER_HOOKS['lucky-month'] = () => { wireLucky(); const now = todayJST(); luckyYM = { y: Number(now.slice(0, 4)), m: Number(now.slice(5, 7)) }; loadLuckyMonth(); };
   // 本番(IS_STAGING=false)ではラッキー賞管理を開かせない(直リンク・履歴復元でも RPC を呼ばずホームへ戻す)。
   // hook は showScreen の pushState 後に走るため、ホームへ戻す際は積まれた lucky 画面の履歴を置き換える(replace)。

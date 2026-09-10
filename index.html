@@ -431,6 +431,7 @@
   <section id="screen-loan-history" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="menu-apply">申請一覧に戻る</button>
     <div class="form-title">借入申請履歴</div>
+    <button type="button" class="link" data-nav="loan-balance" style="margin-bottom:8px;">貸付金の残高を見る ›</button>
     <div id="loan-history-list"><div class="hint">読み込み中...</div></div>
   </section>
 
@@ -440,6 +441,14 @@
     <div class="form-title">借入申請の詳細</div>
     <div class="card" id="loan-detail-body"></div>
     <button type="button" id="loan-detail-edit" style="display:none;">この申請を修正する</button>
+  </section>
+
+  <!-- 貸付金の残高・履歴(本人)。loan_requests(申請・承認)とは別に、実際にお金が動いた
+       記録(loan_ledger_entries)から現在残高・全履歴を表示する(貸付金台帳機能 Phase 2)。 -->
+  <section id="screen-loan-balance" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="loan-history">借入申請履歴に戻る</button>
+    <div class="form-title">貸付金の残高</div>
+    <div id="loan-balance-body"><div class="hint">読み込み中...</div></div>
   </section>
 
   <!-- 借入申請 管理(管理者) -->
@@ -459,6 +468,29 @@
     <button type="button" class="back-link back-to-origin" data-nav="loan-admin">借入申請の管理に戻る</button>
     <div class="form-title">借入申請の詳細</div>
     <div id="loan-admin-detail-body"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <!-- 貸付金管理(残高・返済・訂正、管理者)。loan_requests(申請・承認)とは別に、実際にお金が
+       動いた記録(loan_ledger_entries)を社員別に一覧表示する(貸付金台帳機能 Phase 2)。
+       貸付実行そのものは screen-loan-admin-detail で行う(既存の支払欄を拡張)。 -->
+  <section id="screen-loan-ledger-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">貸付金管理(残高・返済)</div>
+    <div class="hint" style="margin-bottom:10px;">貸付の実行(お金を貸す)は「借入申請の管理」の詳細画面から行います。この画面は現在の残高・返済・訂正の管理です。</div>
+    <div class="filter-row" id="loan-ledger-admin-filter">
+      <label class="checkbox-row" style="display:inline-flex;align-items:center;gap:6px;">
+        <input type="checkbox" class="loan-ledger-include-zero" style="width:auto;margin:0;">
+        <span>完済・残高0円の社員も表示</span>
+      </label>
+    </div>
+    <div id="loan-ledger-admin-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <!-- 貸付金台帳 詳細(社員別、管理者) -->
+  <section id="screen-loan-ledger-detail" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="loan-ledger-admin">貸付金管理に戻る</button>
+    <div class="form-title">貸付金台帳の詳細</div>
+    <div id="loan-ledger-detail-body"><div class="hint">読み込み中...</div></div>
   </section>
 
   <template id="loan-item-template">
@@ -914,6 +946,7 @@
         <option value="general_admin">全体管理者(general_admin)</option>
         <option value="nippo_admin">日報担当(nippo_admin)</option>
         <option value="accounting_admin">経理承認担当(accounting_admin、経費・接待の承認)</option>
+        <option value="loan_admin">貸付管理担当(loan_admin、貸付金台帳の残高・返済・訂正)</option>
         <option value="hr_admin">社員管理担当(hr_admin、社員情報の編集)</option>
         <option value="subcontractor_admin">外注管理担当(subcontractor_admin、外注会社・作業員の管理)</option>
         <option value="site_admin">現場管理担当(site_admin、現場の承認)</option>
@@ -2221,6 +2254,11 @@
       <button type="button" class="menu-item" data-nav="loan-admin">
         <span class="icon-slot" data-icon="banknote"></span>
         <div class="menu-item-body">借入申請の管理<span class="desc">社員からの借入申請を承認/却下/差し戻し</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="loan-ledger-admin">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <div class="menu-item-body">貸付金管理(残高・返済)<span class="desc">社員別の貸付残高・返済登録・取消訂正</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <!-- ラッキー賞は本番反映禁止(未完成)。管理入口も演出プレビューと同じく先行更新版(IS_STAGING)だけに出す。
