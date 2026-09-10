@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v158-staging';
-const BUILD_DEPLOYED_AT = '2026-09-09T17:02:34.272Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v166-staging';
+const BUILD_DEPLOYED_AT = '2026-09-10T06:40:58.370Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -554,6 +554,7 @@ const PARENT_ROUTE = Object.freeze({
   // 人員・台帳管理(名簿・資格・健診・常用伝票・支給品・初回コード・外注マスタ)
   'qual-admin': 'personnel-ledger-hub', 'employee-directory': 'personnel-ledger-hub', 'health-admin': 'personnel-ledger-hub',
   'joyo-denpyo-admin': 'personnel-ledger-hub', 'joyo-denpyo-summary': 'personnel-ledger-hub', 'supply-holdings-admin': 'personnel-ledger-hub',
+  'loan-monthly-ledger': 'personnel-ledger-hub', 'loan-admin-detail': 'loan-admin',
   'first-login-codes-admin': 'personnel-ledger-hub', 'subcontractor-company-admin': 'personnel-ledger-hub', 'subcontractor-worker-admin': 'personnel-ledger-hub',
   // 社員名簿の下
   'employee-create': 'employee-directory', 'employee-detail': 'employee-directory',
@@ -3537,9 +3538,14 @@ async function loadBulkExpenseDetail() {
   const session = getSession();
   const yen = (n) => `${Number(n).toLocaleString('ja-JP')}円`;
   try {
+    // ヘッダはこの画面が開いている1件をIDで直接取得する(2026-09-10修正)。
+    // 以前は「まとめ精算(submission_mode='bulk')」だけを対象にした一覧を取り、そこから
+    // .find() で探していたため、1件ずつ出された申請(まとめ精算以外)を開くと一覧に
+    // 出てこず head が null になり、承認額等が全部「-」・支払を記録する欄も消えていた
+    // (Shota報告「支払うボタンがない」「これ一生払えん」)。
     const [items, list] = await Promise.all([
       rpc('admin_get_bulk_expense_request_items', { p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(bulkExpenseDetailRequestId) }),
-      rpc('admin_get_bulk_expense_requests', { p_admin_employee_code: session.employeeCode, p_status_group: null }),
+      rpc('admin_get_bulk_expense_requests', { p_admin_employee_code: session.employeeCode, p_status_group: null, p_employee_request_id: Number(bulkExpenseDetailRequestId) }),
     ]);
     const head = (list || []).find((r) => String(r.employee_request_id) === String(bulkExpenseDetailRequestId));
     if (head) {
@@ -5321,6 +5327,7 @@ async function loadAnnouncements(includeArchived) {
 const DASH_CARDS = [
   { key: 'pending_expense_approvals', filter: 'expense', label: '経費立替 承認待ち', icon: 'receipt', status: 'pending' },
   { key: 'pending_leave_approvals', filter: 'leave', label: '有給申請 承認待ち', icon: 'calendar', status: 'pending' },
+  { key: 'pending_loan_requests', filter: null, label: '借入申請 承認待ち', icon: 'banknote', nav: 'loan-admin', status: 'pending' },
   { key: 'pending_meeting_approvals', filter: 'meeting', label: '会議申請 承認待ち', icon: 'users-round', status: 'pending' },
   { key: 'pending_supply_requests', filter: 'supply', label: '支給品申請 確認待ち', icon: 'package', status: 'pending' },
   { key: 'needs_correction_count', filter: 'needs_correction', label: '確認・修正が必要な申請', icon: 'edit', status: 'pending' },
@@ -6635,6 +6642,73 @@ function exdSettlementSheetHtml(full) {
   </div>`;
 }
 
+// 「支払(承認とは別の状態)」節の中身(タイトル・現在の支払状態・支払の記録・支払記録フォーム)。
+// renderExpenseRequestDetailHtmlから、通常位置(明細の下)と画面上部の強調表示の両方で
+// 同じidのフォームを二重に出さないよう、1回だけ組み立てて呼び出し側が配置場所を決める。
+function exdBuildPaymentSectionHtml(full, opts) {
+  const isAdmin = !!(opts && opts.isAdmin);
+  const a = full.amounts || {}; const pay = full.payment || {}; const payable = full.payable || {};
+  const yen = (n) => (n == null || n === '' ? '-' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const dOnly = (v) => (v ? (/^\d{4}-\d{2}-\d{2}$/.test(String(v)) ? new Date(`${v}T00:00:00`).toLocaleDateString('ja-JP') : new Date(v).toLocaleDateString('ja-JP')) : '未実施');
+  let html = `<div class="form-title" style="font-size:15px;">支払(承認とは別の状態です)</div>
+    <div class="field-group">
+      ${exdRowText('支払の状態', EXD_PAYMENT_STATUS_LABEL[pay.status] || pay.status)}
+      ${exdRow('支払予定日', dOnly(pay.scheduled_payment_date))}
+      ${exdRowText('支払予定を入れた人', pay.scheduled_payment_by)}
+      ${exdRow('支払日(実際に払った日)', dOnly(pay.paid_at))}
+      ${exdRow('支払済み金額', yen(pay.paid_amount))}
+      ${exdRowText('支払方法', pay.payment_method)}
+      ${exdRowText('支払処理をした人', pay.paid_by_name)}
+      ${exdRow('未払い残額', yen(a.remaining))}
+    </div>`;
+  const payments = Array.isArray(pay.payments) ? pay.payments : [];
+  html += `<div class="hint-inline"><strong>支払の記録</strong>(取消した支払も履歴として残ります)</div>`;
+  // 2026-09-06追加: 取消(voided)と反対仕訳(赤伝 reversal)を区別して出す。
+  // 金額の訂正は「取消 → 正しい金額で再登録」の2手順。元の行は消さない(監査のため)。
+  html += payments.length === 0
+    ? '<div class="hint-inline">支払の記録はまだありません。</div>'
+    : payments.map((p) => {
+      const tag = p.is_reversal ? '<span class="mini-tag warn">取消(赤伝)</span>'
+        : (p.is_voided ? '<span class="mini-tag warn">取消済み</span>' : '');
+      const voidLine = p.is_voided
+        ? `<div class="row2">取消: ${exdText(p.voided_by)}・理由: ${exdEsc(p.void_reason || '')}</div>` : '';
+      const btn = (isAdmin && p.can_void)
+        ? `<button type="button" class="secondary danger exd-void-pay-btn" data-payment-id="${exdEsc(p.payment_id)}" style="margin-top:6px;">この支払を取り消す</button>` : '';
+      return `<div class="change-request-item"><div class="row1"><span>${dOnly(p.paid_at)}　${yen(p.paid_amount)}${tag}</span><span>${exdText(p.payment_method)}</span></div><div class="row2">処理者: ${exdText(p.processed_by)}${p.note ? `・備考: ${exdEsc(p.note)}` : ''}</div>${voidLine}${btn}</div>`;
+    }).join('');
+  if (isAdmin) {
+    const ok = payable.ok === true;
+    html += `<div class="exd-pay-form">
+      ${ok ? '' : `<div class="hint-inline exd-payable-missing"><span class="mini-tag warn">支払を記録できません</span> 不足: ${(payable.missing || []).map((m) => exdEsc(m)).join(' / ') || '(理由不明)'}</div>`}
+      ${(payable.warnings || []).length ? `<div class="hint-inline">注意: ${(payable.warnings || []).map((m) => exdEsc(m)).join(' / ')}</div>` : ''}
+      <label for="exd-schedule-date">支払予定日</label>
+      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
+        <input type="date" id="exd-schedule-date" style="width:160px;" value="${exdEsc(pay.scheduled_payment_date ? String(pay.scheduled_payment_date).slice(0, 10) : '')}">
+        <button type="button" class="secondary" id="exd-schedule-save">支払予定日を記録する</button>
+      </div>
+      <label for="exd-paid-date">支払日<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">銀行振込の予約など、これから振り込む日(未来の日付)も入れられます。</div>
+      <input type="date" id="exd-paid-date" value="${exdEsc(pay.scheduled_payment_date
+    ? String(pay.scheduled_payment_date).slice(0, 10)
+    : (typeof todayJST === 'function' ? todayJST() : ''))}">
+      <label for="exd-paid-amount">支払金額<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">申請額 ${yen(a.requested)} ／ 承認額 ${yen(a.approved)} ／ <strong>未払い残額 ${yen(a.remaining)}</strong>（この欄には未払い残額を最初から入れています。減らす場合だけ書き換えてください）</div>
+      <input type="number" id="exd-paid-amount" min="1" step="1" value="${Number(a.remaining) > 0 ? Number(a.remaining) : ''}">
+      <label for="exd-paid-method">支払方法</label>
+      <select id="exd-paid-method">
+        <option value="">選択してください</option><option value="現金">現金</option>
+        <option value="銀行振込">銀行振込</option><option value="その他">その他</option>
+      </select>
+      <label for="exd-paid-note">備考</label>
+      <input type="text" id="exd-paid-note" placeholder="例: 8月分まとめて振込">
+      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
+      <div class="error" id="exd-pay-error"></div>
+      <button type="button" id="exd-pay-submit"${ok ? '' : ' disabled'}>支払を記録する</button>
+    </div>`;
+  }
+  return html;
+}
+
 function renderExpenseRequestDetailHtml(full, opts) {
   const isAdmin = ((opts && opts.mode) || 'admin') === 'admin';
   // 明細は利用日順に並べる。申請された順のままだと日付が前後して確認しづらい
@@ -6658,8 +6732,32 @@ function renderExpenseRequestDetailHtml(full, opts) {
     ? (d.usage_date_last && d.usage_date_last !== d.usage_date ? `${dOnly(d.usage_date)} 〜 ${dOnly(d.usage_date_last)}` : dOnly(d.usage_date))
     : '未実施';
 
+  // 2026-09-10 Shota指摘(原文)「支払うボタンなくないえどう対応するの…支払うボタンなかったら
+  // これもう解消できんやん」への対応。支払ボタン自体(#exd-pay-submit)は実在・有効だったが、
+  // 明細9件を含む15,000px超の画面の一番下に埋もれていて実質発見できなかった
+  // (scripts/tmp-probe-payment-screen.jsでの実機確認で判明)。承認済みで未払いの間は、
+  // 支払の節(元は7番目)を経費精算書より前、画面のいちばん上に差し込んで表示する
+  // (経費精算書は承認前の確認用の参考資料であり、承認済みで未払いのものを開いたときに
+  // 今すぐ必要な操作より先に出す理由がない)。支払済みになった後・社員本人の閲覧では、
+  // 従来どおり元の位置(下の方、経費精算書・明細等の後)に表示する
+  // (支払済みの申請まで毎回一番上に出して画面を乱すことはしない)。
+  const paymentSectionHtml = exdBuildPaymentSectionHtml(full, { isAdmin });
+  const payUnpaidAmount = Number(a.remaining) > 0;
+  const payTodayStr = typeof todayJST === 'function' ? todayJST() : new Date().toISOString().slice(0, 10);
+  const payIsOverdue = payUnpaidAmount && !!pay.scheduled_payment_date
+    && String(pay.scheduled_payment_date).slice(0, 10) < payTodayStr;
+  const payShowAtTop = isAdmin && payUnpaidAmount;
+
   // 0. 税理士へ提出する用紙。承認する人はまずこれを見て、その下の領収書・申請内容で裏を取る。
-  let html = exdSettlementSheetHtml(full);
+  let html = payShowAtTop
+    ? `<div class="card exd-card exd-pay-top-alert${payIsOverdue ? ' overdue' : ''}">
+      <div class="hint-inline" style="font-weight:800; margin-bottom:4px;">${payIsOverdue
+      ? '支払予定日を過ぎています。まだ支払が記録されていません。'
+      : 'この申請はまだ支払が記録されていません。'}</div>
+      ${paymentSectionHtml}
+    </div>`
+    : '';
+  html += exdSettlementSheetHtml(full);
 
   // 1. だれの・どの申請か
   html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">この経費申請の全体</div>
@@ -6784,64 +6882,13 @@ function renderExpenseRequestDetailHtml(full, opts) {
     ? `<img class="secure-proxy-thumb exd-cover-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${exdEsc(h.employee_request_id)}" alt="経費精算書" loading="lazy">`
     : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
 
-  // 7. 支払(承認とは別の状態)
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">支払(承認とは別の状態です)</div>
-    <div class="field-group">
-      ${exdRowText('支払の状態', EXD_PAYMENT_STATUS_LABEL[pay.status] || pay.status)}
-      ${exdRow('支払予定日', dOnly(pay.scheduled_payment_date))}
-      ${exdRowText('支払予定を入れた人', pay.scheduled_payment_by)}
-      ${exdRow('支払日(実際に払った日)', dOnly(pay.paid_at))}
-      ${exdRow('支払済み金額', yen(pay.paid_amount))}
-      ${exdRowText('支払方法', pay.payment_method)}
-      ${exdRowText('支払処理をした人', pay.paid_by_name)}
-      ${exdRow('未払い残額', yen(a.remaining))}
-    </div>`;
-  const payments = Array.isArray(pay.payments) ? pay.payments : [];
-  html += `<div class="hint-inline"><strong>支払の記録</strong>(取消した支払も履歴として残ります)</div>`;
-  // 2026-09-06追加: 取消(voided)と反対仕訳(赤伝 reversal)を区別して出す。
-  // 金額の訂正は「取消 → 正しい金額で再登録」の2手順。元の行は消さない(監査のため)。
-  html += payments.length === 0
-    ? '<div class="hint-inline">支払の記録はまだありません。</div>'
-    : payments.map((p) => {
-      const tag = p.is_reversal ? '<span class="mini-tag warn">取消(赤伝)</span>'
-        : (p.is_voided ? '<span class="mini-tag warn">取消済み</span>' : '');
-      const voidLine = p.is_voided
-        ? `<div class="row2">取消: ${exdText(p.voided_by)}・理由: ${exdEsc(p.void_reason || '')}</div>` : '';
-      const btn = (isAdmin && p.can_void)
-        ? `<button type="button" class="secondary danger exd-void-pay-btn" data-payment-id="${exdEsc(p.payment_id)}" style="margin-top:6px;">この支払を取り消す</button>` : '';
-      return `<div class="change-request-item"><div class="row1"><span>${dOnly(p.paid_at)}　${yen(p.paid_amount)}${tag}</span><span>${exdText(p.payment_method)}</span></div><div class="row2">処理者: ${exdText(p.processed_by)}${p.note ? `・備考: ${exdEsc(p.note)}` : ''}</div>${voidLine}${btn}</div>`;
-    }).join('');
-  if (isAdmin) {
-    const ok = payable.ok === true;
-    html += `<div class="exd-pay-form">
-      ${ok ? '' : `<div class="hint-inline exd-payable-missing"><span class="mini-tag warn">支払を記録できません</span> 不足: ${(payable.missing || []).map((m) => exdEsc(m)).join(' / ') || '(理由不明)'}</div>`}
-      ${(payable.warnings || []).length ? `<div class="hint-inline">注意: ${(payable.warnings || []).map((m) => exdEsc(m)).join(' / ')}</div>` : ''}
-      <label for="exd-schedule-date">支払予定日</label>
-      <div style="display:flex; gap:6px; align-items:center; flex-wrap:wrap;">
-        <input type="date" id="exd-schedule-date" style="width:160px;" value="${exdEsc(pay.scheduled_payment_date ? String(pay.scheduled_payment_date).slice(0, 10) : '')}">
-        <button type="button" class="secondary" id="exd-schedule-save">支払予定日を記録する</button>
-      </div>
-      <label for="exd-paid-date">支払日<span class="required-mark">(必須)</span></label>
-      <div class="hint-inline">銀行振込の予約など、これから振り込む日(未来の日付)も入れられます。</div>
-      <input type="date" id="exd-paid-date" value="${exdEsc(pay.scheduled_payment_date
-    ? String(pay.scheduled_payment_date).slice(0, 10)
-    : (typeof todayJST === 'function' ? todayJST() : ''))}">
-      <label for="exd-paid-amount">支払金額<span class="required-mark">(必須)</span></label>
-      <div class="hint-inline">申請額 ${yen(a.requested)} ／ 承認額 ${yen(a.approved)} ／ <strong>未払い残額 ${yen(a.remaining)}</strong>（この欄には未払い残額を最初から入れています。減らす場合だけ書き換えてください）</div>
-      <input type="number" id="exd-paid-amount" min="1" step="1" value="${Number(a.remaining) > 0 ? Number(a.remaining) : ''}">
-      <label for="exd-paid-method">支払方法</label>
-      <select id="exd-paid-method">
-        <option value="">選択してください</option><option value="現金">現金</option>
-        <option value="銀行振込">銀行振込</option><option value="その他">その他</option>
-      </select>
-      <label for="exd-paid-note">備考</label>
-      <input type="text" id="exd-paid-note" placeholder="例: 8月分まとめて振込">
-      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
-      <div class="error" id="exd-pay-error"></div>
-      <button type="button" id="exd-pay-submit"${ok ? '' : ' disabled'}>支払を記録する</button>
-    </div>`;
+  // 7. 支払(承認とは別の状態)。承認済みでまだ未払いの間は、この節を画面の一番上(概要の直後)へ
+  // 移動して表示済み(payShowAtTop、上記2.の直前を参照)。ここで重複させるとid="exd-pay-submit"等が
+  // ページ内に2つできてwireExpenseRequestDetailの配線が壊れるため、その場合はここでは出さない。
+  // 支払済み、または社員本人の閲覧(mode !== 'admin')のときだけ、従来どおりここに表示する。
+  if (!payShowAtTop) {
+    html += `<div class="card exd-card">${paymentSectionHtml}</div>`;
   }
-  html += '</div>';
 
   // 8. 経理・税理士への提出
   // 2026-09-06 独立レビュー指摘(重大5): 契約RPCの category.status は confirmed_by_accounting / confirmed_by_ai_high /
@@ -7157,9 +7204,10 @@ async function doConfirmCategory(documentId, category) {
 
 // 会社管理項目(社員番号・入社日等)は鍵アイコンつきで編集不可を明示。住所・電話番号等は
 // 「変更申請」ボタンを付け、タップすると本人が変更申請を出せる(即時反映はしない)。
-function fieldRow(label, value, editField) {
+function fieldRow(label, value, editField, editValue) {
   const displayValue = value ? String(value) : '未登録';
-  const editBtn = editField ? `<button type="button" class="field-edit-btn" data-edit-field="${editField}" data-current="${(value || '').replace(/"/g, '&quot;')}">変更申請</button>` : '';
+  const rawForEdit = editValue !== undefined ? editValue : value;
+  const editBtn = editField ? `<button type="button" class="field-edit-btn" data-edit-field="${editField}" data-current="${(rawForEdit || '').replace(/"/g, '&quot;')}">変更申請</button>` : '';
   return `
     <div class="field-row">
       <span class="field-label">${label}</span>
@@ -7184,6 +7232,7 @@ function lockedFieldRow(label, value) {
 const CHANGE_FIELD_LABEL = {
   phone: '電話番号', postal_code: '郵便番号', address: '住所', email: 'メールアドレス',
   emergency_contact_name: '緊急連絡先(氏名)', emergency_contact_relation: '緊急連絡先(続柄)', emergency_contact_phone: '緊急連絡先(電話番号)',
+  birth_date: '生年月日',
 };
 
 function renderAvatar(elId, name, photoUrl) {
@@ -7300,7 +7349,7 @@ async function loadMyInfo() {
       lockedFieldRow('社員番号', p.employee_code) +
       lockedFieldRow('氏名', p.employee_name) +
       lockedFieldRow('フリガナ', p.furigana) +
-      lockedFieldRow('生年月日', p.birth_date ? new Date(p.birth_date).toLocaleDateString('ja-JP') : null) +
+      fieldRow('生年月日', p.birth_date ? new Date(p.birth_date).toLocaleDateString('ja-JP') : null, 'birth_date', p.birth_date) +
       lockedFieldRow('入社日', p.hire_date ? new Date(p.hire_date).toLocaleDateString('ja-JP') : null) +
       lockedFieldRow('所属/役割', p.department);
     document.getElementById('myinfo-contact-fields').innerHTML =
@@ -7350,6 +7399,7 @@ function openProfileEdit(field, currentValue) {
   document.getElementById('profile-edit-title').textContent = `${CHANGE_FIELD_LABEL[field] || field}の変更申請`;
   document.getElementById('profile-edit-label').textContent = `新しい${CHANGE_FIELD_LABEL[field] || ''}`;
   const input = document.getElementById('profile-edit-value');
+  input.type = field === 'birth_date' ? 'date' : 'text';
   input.value = currentValue || '';
   hideError('profile-edit-error');
   showScreen('profile-edit');
@@ -10484,6 +10534,7 @@ function resetProposeSiteForm() {
 // ==================== 借入申請 ====================
 const LOAN_STATUS_LABEL = { applied: '申請中', approved: '承認', rejected: '却下', returned: '差し戻し', cancelled: '取消' };
 const LOAN_RECEIPT_LABEL = { cash: '現金', bank_transfer: '銀行振込' };
+const LOAN_PAYMENT_STATUS_LABEL = { not_started: '未着手', waiting_payment: '支払待ち', paid: '支払済み' };
 const yen = (n) => (Number(n) || 0).toLocaleString('ja-JP') + '円';
 function formatJpDate(dateStr) { const m = String(dateStr).match(/(\d{4})-(\d{2})-(\d{2})/); return m ? `${Number(m[1])}年${Number(m[2])}月${Number(m[3])}日` : String(dateStr); }
 let loanEditingId = null; // 編集中の申請id(nullは新規)
@@ -10650,44 +10701,340 @@ async function openLoanDetail(id) {
     document.getElementById('loan-detail-edit').style.display = (d.status === 'applied') ? 'block' : 'none';
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
+// 2026-09-10 Shota実機報告(要旨)「一つ一つがちっちゃすぎてクリックしても大きく見えない」
+// 「承認してるのに承認待ちの欄に残ってるのはおかしい」。すべての申請の決定ボタン・支払欄・
+// 紙を1つの平たいリストへ詰め込んでいたため、件数が増えるほど読みづらく、承認待ちと
+// 履歴も混ざっていた。一覧は小さい行(タップで詳細画面)だけにし、承認待ち/履歴を
+// フィルタチップで分け、決定・支払・紙は専用の詳細画面(screen-loan-admin-detail)で
+// 大きく表示するよう分離した(経費の一覧→詳細と同じ構成)。
+let loanAdminStatusFilter = 'applied';
+let loanAdminDetailId = null;
+
+function wireLoanAdminStatusFilter() {
+  const row = document.getElementById('loan-admin-status-filter');
+  if (!row || row.dataset.wired) return;
+  row.dataset.wired = '1';
+  row.querySelectorAll('.filter-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      row.querySelectorAll('.filter-chip').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loanAdminStatusFilter = btn.dataset.status;
+      loadLoanAdminList();
+    });
+  });
+}
+
 async function loadLoanAdminList() {
+  wireLoanAdminStatusFilter();
   const session = getSession();
   const listEl = document.getElementById('loan-admin-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('admin_list_loan_requests', { p_admin_employee_code: session.employeeCode, p_status: null });
-    if (!rows || !rows.length) { listEl.innerHTML = '<div class="hint">借入申請はありません。</div>'; return; }
-    listEl.innerHTML = rows.map((r) => `
-      <div class="supply-item" data-id="${r.id}">
-        <div class="row1"><span style="font-weight:700;">${r.employee_name}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${LOAN_STATUS_LABEL[r.status] || r.status}</span></div>
-        <div class="row2">申請日 ${r.request_date}　希望 ${yen(r.amount)}　先月給与(総支給額) ${yen(r.last_month_gross_salary)}</div>
-        <div class="row2">必要日 ${r.needed_by_date}　${LOAN_RECEIPT_LABEL[r.receipt_method] || ''}</div>
-        <div class="row2">理由: ${(r.reason || '').replace(/</g, '&lt;')}</div>
-        <div class="row2">内訳: ${(r.breakdown || []).map((x) => `${(x.purpose || '')} ${yen(x.amount)}`).join(' / ')}</div>
-        ${r.admin_comment ? `<div class="row2">コメント: ${r.admin_comment.replace(/</g, '&lt;')}</div>` : ''}
+    const filtered = (rows || []).filter((r) => (loanAdminStatusFilter === 'applied' ? r.status === 'applied' : r.status !== 'applied'));
+    if (!filtered.length) { listEl.innerHTML = `<div class="hint">${loanAdminStatusFilter === 'applied' ? '承認待ちの借入申請はありません。' : '履歴はありません。'}</div>`; return; }
+    listEl.innerHTML = filtered.map((r) => `
+      <div class="history-item" data-id="${r.id}" style="cursor:pointer;">
+        <div class="row1"><span style="font-weight:700;">${(r.employee_name || '').replace(/</g, '&lt;')}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${LOAN_STATUS_LABEL[r.status] || r.status}</span></div>
+        <div class="row2">申請日 ${r.request_date}　希望 ${yen(r.amount)}　必要日 ${r.needed_by_date}</div>
+        ${r.status === 'approved' ? `<div class="row2">支払状況: ${LOAN_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status}</div>` : ''}
+      </div>`).join('');
+    listEl.querySelectorAll('.history-item').forEach((el) => {
+      el.addEventListener('click', () => openLoanAdminDetail(Number(el.dataset.id)));
+    });
+  } catch (e) { listEl.innerHTML = '<div class="hint">この画面には経理承認権限が必要です。</div>'; }
+}
+
+function openLoanAdminDetail(id) {
+  loanAdminDetailId = id;
+  showScreen('loan-admin-detail');
+}
+
+async function loadLoanAdminDetail() {
+  const session = getSession();
+  const body = document.getElementById('loan-admin-detail-body');
+  body.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_loan_requests', { p_admin_employee_code: session.employeeCode, p_status: null });
+    const r = (rows || []).find((x) => Number(x.id) === Number(loanAdminDetailId));
+    if (!r) { body.innerHTML = '<div class="hint">対象の借入申請が見つかりません。</div>'; return; }
+    // 2026-09-10 Shota指摘(強め)「こういうふうにしないと見えないって言ってんじゃん」。
+    // .card の中に紙(settlement-sheet-wrap)をネストすると幅が潰れて小さくなる
+    // (経費の画面〔screen-bulk-expense-detail〕では settlement-sheet-wrap は .card の外、
+    // 画面直下の独立した要素になっている)。紙は必ず.cardの外・画面の一番上に置き、
+    // 経費とまったく同じ構造にする。
+    body.innerHTML = `
+      <div class="settlement-sheet-wrap">
+        <div class="settlement-sheet-head">
+          <span>借入申請書（税理士提出用）</span>
+          <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
+        </div>
+        <div class="settlement-sheet-scroll loan-sheet-box">${loanRenderRequestSheetHtml(r)}</div>
+      </div>
+      <div class="card" data-id="${r.id}" style="margin-top:14px;">
+        <div class="row1"><span style="font-weight:700;font-size:16px;">${(r.employee_name || '').replace(/</g, '&lt;')}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${LOAN_STATUS_LABEL[r.status] || r.status}</span></div>
+        <div class="field-group" style="margin-top:8px;">
+          ${exdRowText('申請日', r.request_date)}
+          ${exdRowText('借入希望金額', yen(r.amount))}
+          ${exdRowText('先月給与(総支給額)', yen(r.last_month_gross_salary))}
+          ${exdRowText('必要日', r.needed_by_date)}
+          ${exdRowText('受取方法', LOAN_RECEIPT_LABEL[r.receipt_method] || r.receipt_method)}
+          ${exdRowText('理由', r.reason)}
+          ${exdRowText('内訳', (r.breakdown || []).map((x) => `${x.purpose || ''} ${yen(x.amount)}`).join(' / '))}
+          ${r.admin_comment ? exdRowText('管理者コメント', r.admin_comment) : ''}
+        </div>
         ${r.status === 'applied' ? `
-        <input type="text" class="loan-admin-comment" placeholder="管理者コメント(任意)" style="margin-top:6px;">
+        <input type="text" id="loan-admin-detail-comment" placeholder="管理者コメント(任意)" style="margin-top:10px;">
         <div class="qual-verify-btns">
           <button type="button" class="approve-btn loan-decide" data-act="approve">承認</button>
           <button type="button" class="reject-btn loan-decide" data-act="return">差し戻し</button>
           <button type="button" class="reject-btn loan-decide" data-act="reject">却下</button>
         </div>` : ''}
-      </div>`).join('');
-    listEl.querySelectorAll('.loan-decide').forEach((btn) => {
+      </div>
+      ${r.status === 'approved' ? loanBuildPaymentSectionHtml(r) : ''}`;
+    body.querySelectorAll('.loan-decide').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const item = btn.closest('.supply-item');
-        const id = Number(item.dataset.id);
-        const comment = (item.querySelector('.loan-admin-comment') || {}).value || '';
+        const comment = (document.getElementById('loan-admin-detail-comment') || {}).value || '';
         const act = btn.dataset.act;
         if (act === 'reject' && !confirm('この借入申請を却下しますか?')) return;
         btn.disabled = true;
         try {
-          await rpc('admin_decide_loan_request', { p_admin_employee_code: session.employeeCode, p_id: id, p_action: act, p_comment: comment || null });
-          loadLoanAdminList();
+          await rpc('admin_decide_loan_request', { p_admin_employee_code: session.employeeCode, p_id: r.id, p_action: act, p_comment: comment || null });
+          showScreen('loan-admin');
         } catch (e) { btn.disabled = false; alert(e.message || '処理に失敗しました。'); }
       });
     });
-  } catch (e) { listEl.innerHTML = '<div class="hint">この画面には経理承認権限が必要です。</div>'; }
+    body.querySelectorAll('.loan-sheet-toggle').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const box = btn.closest('.settlement-sheet-wrap').querySelector('.loan-sheet-box');
+        const hidden = box.style.display === 'none';
+        box.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '閉じる' : '開く';
+      });
+    });
+    wireLoanPaymentSection(body, session, () => loadLoanAdminDetail());
+  } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
+}
+
+// 借入申請1件を「紙」として表示する(経費立替の経費精算書〔renderSettlementSheet〕と同じ様式。
+// 2026-09-10 Shota指摘「経費みたいな感じにしてってお願いしたじゃん、あの紙はどうやって出てくるの」
+// への対応。まとめ月次一覧〔screen-loan-monthly-ledger〕とは別に、1件ずつもこの画面その場で
+// 見えるようにする)。
+function loanRenderRequestSheetHtml(r) {
+  const esc = (v) => String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const yenFmt = (n) => (n === null || n === undefined || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const ymd = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return Number.isNaN(dt.getTime()) ? String(d) : `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
+  };
+  const breakdown = Array.isArray(r.breakdown) ? r.breakdown : [];
+  const MIN_ROWS = 6;
+  const blanks = Math.max(0, MIN_ROWS - breakdown.length);
+  const payLabel = r.payment_status === 'paid' ? (LOAN_RECEIPT_LABEL[r.payment_method] || '振込み')
+    : '現金　・　振込み';
+  const approvalNote = r.status === 'approved' ? `承認済み${r.decided_by ? `(${esc(r.decided_by)})` : ''}`
+    : r.status === 'rejected' ? `却下${r.decided_by ? `(${esc(r.decided_by)})` : ''}`
+      : r.status === 'returned' ? '差し戻し' : '未承認（承認するとここに承認者名が入ります）';
+  return `
+    <div class="settlement-sheet">
+      <div class="ss-title">借 入 申 請 書</div>
+      <div class="ss-meta">
+        申請日：<b>${ymd(r.request_date)}</b><br>
+        氏　名：<b>${esc(r.employee_name)}</b><br>
+        必要日：<b>${ymd(r.needed_by_date)}</b>
+      </div>
+      <table>
+        <tr><th style="width:56%;">使 用 目 的</th><th>金 額</th></tr>
+        ${breakdown.map((b) => `<tr><td class="small">${esc(b.purpose)}</td><td class="num">${yenFmt(b.amount)}</td></tr>`).join('')}
+        ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td></tr>').join('')}
+        <tr><th>理由</th><td class="small" colspan="1">${esc(r.reason)}</td></tr>
+      </table>
+      <div class="ss-bottom">
+        <div class="ss-admin">
+          <div style="font-size:10.5px;margin-bottom:2px;">［管理欄］</div>
+          <table>
+            <tr><th style="width:80px;">支 払 日</th><td>${r.scheduled_payment_date ? `${ymd(r.scheduled_payment_date)}${r.payment_status === 'paid' ? '' : '（予定）'}` : '　年　　月　　日'}</td></tr>
+            <tr><th>支払方法</th><td>${payLabel}</td></tr>
+            <tr><th>承認状況</th><td style="font-size:10.5px;">${approvalNote}</td></tr>
+          </table>
+        </div>
+        <div class="ss-total">
+          <table>
+            <tr><th style="width:100px;">借入希望額</th><td class="num">${yenFmt(r.amount)}</td></tr>
+          </table>
+          <div class="ss-note">受取方法　${esc(LOAN_RECEIPT_LABEL[r.receipt_method] || '')}</div>
+        </div>
+      </div>
+      <div class="ss-company">株式会社　迅翔興業</div>
+    </div>`;
+}
+
+// 承認済みの借入申請に「支払(承認とは別の状態)」欄を出す。経費立替(exdBuildPaymentSectionHtml)と
+// 同じ構成にする(2026-09-10 Shota指摘「経費みたいに出るんかなと思ったら全然でんかった」
+// 「ボタン押したらもう勝手に支払い済みまで行った」= 現在の状態がひと目で分からないまま
+// 記録ボタンだけがあったため、常に現在の支払状態を先に見せる構成へ作り直した)。
+function loanBuildPaymentSectionHtml(r) {
+  const paid = r.payment_status === 'paid';
+  const dOnly = (v) => (v ? String(v).slice(0, 10) : '');
+  const dJp = (v) => (v ? formatJpDate(dOnly(v)) : '未実施');
+  let html = `<div class="card" data-id="${r.id}" style="margin-top:10px;">
+    <div class="form-title" style="font-size:14px;margin-top:0;">支払(承認とは別の状態です)</div>
+    <div class="field-group">
+      ${exdRowText('支払の状態', LOAN_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status)}
+      ${exdRow('支払予定日', dJp(r.scheduled_payment_date))}
+      ${exdRowText('支払予定を入れた人', r.scheduled_payment_by)}
+      ${exdRow('支払日(実際に払った日)', dJp(r.paid_at))}
+      ${exdRowText('支払方法', LOAN_RECEIPT_LABEL[r.payment_method] || r.payment_method)}
+      ${exdRowText('支払処理をした人', r.paid_by)}
+    </div>`;
+  if (!paid) {
+    html += `<div class="exd-pay-form">
+      <label>支払予定日</label>
+      <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+        <input type="date" class="loan-schedule-date" style="width:160px;" value="${exdEsc(dOnly(r.scheduled_payment_date))}">
+        <button type="button" class="secondary loan-schedule-save">支払予定日を記録する</button>
+      </div>
+      <label>支払日<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">銀行振込の予約など、これから振り込む日(未来の日付)も入れられます。</div>
+      <input type="date" class="loan-paid-date" value="${exdEsc(dOnly(r.scheduled_payment_date) || todayJST())}">
+      <label>支払方法</label>
+      <select class="loan-paid-method">
+        <option value="">選択してください</option>
+        <option value="bank_transfer">銀行振込</option>
+        <option value="cash">現金</option>
+      </select>
+      <label>備考</label>
+      <input type="text" class="loan-paid-note" placeholder="例: 9月分まとめて振込">
+      <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
+      <div class="error loan-payment-error"></div>
+      <button type="button" class="loan-paid-save">支払を記録する</button>
+    </div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+// 借入台帳(月次): その月に申請された借入を1枚の紙にまとめる(2026-09-10 Shota指示)。
+function initLoanMonthlyLedger() {
+  const monthEl = document.getElementById('lml-month');
+  if (!monthEl.value) {
+    const now = new Date();
+    monthEl.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  }
+  document.getElementById('lml-hint').textContent = '';
+  document.getElementById('lml-sheet').innerHTML = '';
+  const btn = document.getElementById('lml-load');
+  btn.onclick = loadLoanMonthlyLedger;
+  loadLoanMonthlyLedger();
+}
+
+async function loadLoanMonthlyLedger() {
+  const session = getSession();
+  const monthEl = document.getElementById('lml-month');
+  const hintEl = document.getElementById('lml-hint');
+  const sheetEl = document.getElementById('lml-sheet');
+  const m = (monthEl.value || '').match(/^(\d{4})-(\d{2})$/);
+  if (!m) { hintEl.textContent = '対象年月を選んでください。'; return; }
+  const year = Number(m[1]); const month = Number(m[2]);
+  hintEl.textContent = '読み込み中...';
+  sheetEl.innerHTML = '';
+  try {
+    const rows = await rpc('admin_get_loan_requests_monthly', { p_admin_employee_code: session.employeeCode, p_year: year, p_month: month });
+    hintEl.textContent = `${year}年${month}月分: ${(rows || []).length}件`;
+    renderLoanMonthlySheet(year, month, rows || []);
+  } catch (e) {
+    hintEl.textContent = `読み込みに失敗しました: ${e.message || ''}`;
+  }
+}
+
+function renderLoanMonthlySheet(year, month, rows) {
+  const box = document.getElementById('lml-sheet');
+  if (!box) return;
+  const esc = (v) => String(v === null || v === undefined ? '' : v)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  const yenFmt = (n) => (n === null || n === undefined || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
+  const md = (d) => {
+    if (!d) return '';
+    const dt = new Date(d);
+    return Number.isNaN(dt.getTime()) ? String(d) : `${dt.getMonth() + 1}/${dt.getDate()}`;
+  };
+  const total = rows.reduce((a, r) => a + Number(r.amount || 0), 0);
+  const MIN_ROWS = 10;
+  const blanks = Math.max(0, MIN_ROWS - rows.length);
+  box.innerHTML = `
+    <div class="settlement-sheet">
+      <div class="ss-title">借 入 申 請 月 次 一 覧</div>
+      <div class="ss-meta">対象年月：<b>${year}年${month}月</b></div>
+      <table>
+        <tr>
+          <th style="width:56px;">申請日</th><th style="width:100px;">社員名</th>
+          <th>理由</th><th style="width:56px;">必要日</th><th style="width:70px;">状態</th>
+          <th style="width:56px;">支払予定</th><th style="width:56px;">支払日</th><th>金額</th>
+        </tr>
+        ${rows.map((r) => `
+        <tr>
+          <td>${md(r.request_date)}</td>
+          <td class="small">${esc(r.employee_name)}</td>
+          <td class="small">${esc(r.reason)}</td>
+          <td>${md(r.needed_by_date)}</td>
+          <td class="small">${esc(LOAN_STATUS_LABEL[r.status] || r.status)}</td>
+          <td>${md(r.scheduled_payment_date)}</td>
+          <td>${md(r.paid_at)}</td>
+          <td class="num">${yenFmt(r.amount)}</td>
+        </tr>`).join('')}
+        ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+      </table>
+      <div class="ss-bottom">
+        <div class="ss-total">
+          <table>
+            <tr><th style="width:100px;">合計</th><td class="num">${yenFmt(total)}</td></tr>
+            <tr><th>件数</th><td class="num">${rows.length}件</td></tr>
+          </table>
+        </div>
+      </div>
+      <div class="ss-company">株式会社　迅翔興業</div>
+    </div>`;
+}
+
+function wireLoanPaymentSection(containerEl, session, onDone) {
+  const reload = onDone || loadLoanAdminList;
+  containerEl.querySelectorAll('.loan-schedule-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const item = btn.closest('.card');
+      const id = Number(item.dataset.id);
+      const errEl = item.querySelector('.loan-payment-error');
+      const v = item.querySelector('.loan-schedule-date').value;
+      if (errEl) errEl.textContent = '';
+      if (!v) { if (errEl) errEl.textContent = '支払予定日を入力してください。'; return; }
+      btn.disabled = true;
+      try {
+        await rpc('admin_set_loan_payment_schedule', { p_admin_employee_code: session.employeeCode, p_id: id, p_scheduled_payment_date: v });
+        reload();
+      } catch (e) { btn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  });
+  containerEl.querySelectorAll('.loan-paid-save').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const item = btn.closest('.card');
+      const id = Number(item.dataset.id);
+      const errEl = item.querySelector('.loan-payment-error');
+      const v = item.querySelector('.loan-paid-date').value;
+      const method = item.querySelector('.loan-paid-method').value;
+      const note = item.querySelector('.loan-paid-note').value;
+      if (errEl) errEl.textContent = '';
+      if (!v) { if (errEl) errEl.textContent = '支払日を入力してください。'; return; }
+      if (!confirm('支払を記録します。よろしいですか?')) return;
+      btn.disabled = true;
+      try {
+        await rpc('admin_record_loan_payment', { p_admin_employee_code: session.employeeCode, p_id: id, p_paid_at: v, p_payment_method: method || null, p_note: note || null });
+        reload();
+      } catch (e) { btn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  });
 }
 
 // ==================== 毎日のラッキー賞 ====================
@@ -16606,6 +16953,8 @@ function init() {
   SCREEN_ENTER_HOOKS['loan-request'] = initLoanRequestForm;
   SCREEN_ENTER_HOOKS['loan-history'] = loadLoanHistory;
   SCREEN_ENTER_HOOKS['loan-admin'] = loadLoanAdminList;
+  SCREEN_ENTER_HOOKS['loan-admin-detail'] = loadLoanAdminDetail;
+  SCREEN_ENTER_HOOKS['loan-monthly-ledger'] = initLoanMonthlyLedger;
   SCREEN_ENTER_HOOKS['lucky-month'] = () => { wireLucky(); const now = todayJST(); luckyYM = { y: Number(now.slice(0, 4)), m: Number(now.slice(5, 7)) }; loadLuckyMonth(); };
   // 本番(IS_STAGING=false)ではラッキー賞管理を開かせない(直リンク・履歴復元でも RPC を呼ばずホームへ戻す)。
   // hook は showScreen の pushState 後に走るため、ホームへ戻す際は積まれた lucky 画面の履歴を置き換える(replace)。

@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>配置ウィジェットの入れ方</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #f6f3ed;
+    --surface: #ffffff;
+    --sunk: #efeae1;
+    --ink: #16202e;
+    --muted: #5c6875;
+    --faint: #8b95a1;
+    --line: #ddd6c9;
+    --navy: #16263f;
+    --navy-ink: #e7edf6;
+    --gold: #a87f3d;
+    --gold-soft: #f0e4cd;
+    --warn: #a4442f;
+    --ok: #2f6b4f;
+    --shadow: 0 1px 2px rgba(22,32,46,.06), 0 8px 24px rgba(22,32,46,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1622;
+      --surface: #16202e;
+      --sunk: #1b2735;
+      --ink: #e9eef5;
+      --muted: #9aa6b4;
+      --faint: #78838f;
+      --line: #2a3746;
+      --navy: #0a1220;
+      --navy-ink: #e7edf6;
+      --gold: #d5ab63;
+      --gold-soft: #35291a;
+      --warn: #e08b76;
+      --ok: #7fc0a0;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1622;
+    --surface: #16202e;
+    --sunk: #1b2735;
+    --ink: #e9eef5;
+    --muted: #9aa6b4;
+    --faint: #78838f;
+    --line: #2a3746;
+    --navy: #0a1220;
+    --navy-ink: #e7edf6;
+    --gold: #d5ab63;
+    --gold-soft: #35291a;
+    --warn: #e08b76;
+    --ok: #7fc0a0;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-text-size-adjust: 100%;
+  }
+  .page { max-width: 660px; margin: 0 auto; padding: 0 20px 72px; }
+
+  /* ---- 見出し ---- */
+  header {
+    background: var(--navy);
+    color: var(--navy-ink);
+    margin: 0 -20px 36px;
+    padding: 34px 24px 30px;
+  }
+  .brand {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 12px; letter-spacing: .18em;
+    color: var(--gold); margin-bottom: 10px;
+  }
+  h1 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 30px; line-height: 1.3;
+    margin: 0 0 12px; text-wrap: balance;
+  }
+  header p { margin: 0; color: #b9c5d6; font-size: 15px; }
+  header .time { margin-top: 14px; font-size: 13px; color: #8fa0b6; }
+
+  h2 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 20px; line-height: 1.45;
+    margin: 44px 0 4px; text-wrap: balance;
+  }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+  h2 + .sub { margin-top: 2px; }
+
+  /* ---- 手順 ---- */
+  ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol.steps > li {
+    display: grid; grid-template-columns: 40px 1fr; gap: 14px;
+    padding: 16px 0; border-bottom: 1px solid var(--line);
+  }
+  ol.steps > li:last-child { border-bottom: 0; }
+  .num {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 20px; color: var(--gold);
+    font-variant-numeric: tabular-nums; line-height: 1.5;
+  }
+  .what { font-weight: 700; font-size: 17px; line-height: 1.6; }
+  .how { color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+  .how b { color: var(--ink); font-weight: 700; }
+  kbd {
+    display: inline-block; min-width: 1.7em; text-align: center;
+    background: var(--sunk); border: 1px solid var(--line); border-radius: 5px;
+    padding: 0 6px; font-family: inherit; font-weight: 700; font-size: 14px;
+  }
+
+  /* ---- 注意・補足 ---- */
+  .note {
+    background: var(--gold-soft); border-left: 3px solid var(--gold);
+    padding: 16px 18px; margin: 24px 0; font-size: 14.5px; line-height: 1.8;
+  }
+  .note b { font-weight: 700; }
+  .note p { margin: 0; }
+  .note p + p { margin-top: 10px; }
+
+  /* ---- ウィジェットの見本 ---- */
+  .demo { display: grid; grid-template-columns: 1fr; gap: 18px; margin: 22px 0 8px; }
+  .widget {
+    background: #16233a; color: #e7edf6; border-radius: 20px; padding: 15px 16px 13px;
+    box-shadow: var(--shadow); font-size: 13px; line-height: 1.5;
+  }
+  .w-top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 9px; }
+  .w-brand { color: #d5ab63; font-weight: 700; font-size: 13px; }
+  .w-badge { color: #e5a06a; font-size: 11.5px; font-weight: 700; }
+  .w-day { display: flex; gap: 9px; padding: 5px 0; }
+  .w-bar { width: 3px; border-radius: 2px; background: #4b8ce0; flex: none; margin-top: 3px; }
+  .w-bar.b2 { background: #d0605a; }
+  .w-col { flex: 1; min-width: 0; }
+  .w-date { color: #93a1b4; font-size: 11.5px; }
+  .w-site { font-weight: 700; font-size: 15px; }
+  .w-meta { color: #93a1b4; font-size: 12px; }
+  .w-mark { color: #e5a06a; font-size: 11.5px; font-weight: 700; flex: none; }
+  .w-btns { display: flex; gap: 6px; margin-top: 11px; }
+  .w-btn {
+    flex: 1; text-align: center; background: rgba(159,176,204,.22);
+    border-radius: 10px; padding: 9px 4px; font-weight: 700; font-size: 12.5px;
+  }
+  .w-btn.hot { background: rgba(217,154,8,.32); color: #f2d493; }
+  .w-foot { color: #7a879a; font-size: 10.5px; margin-top: 9px; }
+
+  dl.legend { margin: 0; display: flex; flex-direction: column; gap: 0; }
+  dl.legend > div {
+    display: grid; grid-template-columns: 108px 1fr; gap: 12px;
+    padding: 11px 0; border-bottom: 1px solid var(--line); align-items: start;
+  }
+  dl.legend > div:last-child { border-bottom: 0; }
+  dl.legend dt { font-weight: 700; font-size: 14.5px; }
+  dl.legend dd { margin: 0; color: var(--muted); font-size: 14px; }
+
+  /* ---- 大きさの選び方 ---- */
+  .sizes { display: flex; flex-direction: column; gap: 0; margin: 0; }
+  .size {
+    display: grid; grid-template-columns: 62px 1fr; gap: 14px;
+    padding: 14px 0; border-bottom: 1px solid var(--line); align-items: start;
+  }
+  .size:last-child { border-bottom: 0; }
+  .size-name {
+    font-family: "Zen Kaku Gothic New", sans-serif; font-weight: 700; font-size: 15px;
+  }
+  .pill {
+    display: inline-block; background: var(--gold); color: #fff;
+    font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 999px;
+    margin-left: 6px; vertical-align: 2px;
+  }
+  .size-body { font-size: 14.5px; color: var(--muted); }
+  .size-body b { color: var(--ink); }
+
+  /* ---- 困ったとき ---- */
+  .qa { border-top: 1px solid var(--line); }
+  .qa > div { border-bottom: 1px solid var(--line); padding: 15px 0; }
+  .q { font-weight: 700; font-size: 15.5px; margin-bottom: 3px; }
+  .a { color: var(--muted); font-size: 14.5px; }
+  .a b { color: var(--ink); }
+
+  footer {
+    margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--faint); font-size: 12.5px; line-height: 1.8;
+  }
+  @media (max-width: 420px) {
+    h1 { font-size: 25px; }
+    ol.steps > li { grid-template-columns: 30px 1fr; gap: 10px; }
+    dl.legend > div { grid-template-columns: 1fr; gap: 2px; }
+    .size { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="brand">迅翔興業　社員ポータル</div>
+    <h1>配置ウィジェットの<br>入れ方</h1>
+    <p>iPhoneのホーム画面に、自分の配置・誰と行くか・日報の提出状況を出せます。アプリを開かなくても、ホーム画面を見るだけで分かります。</p>
+    <div class="time">かかる時間 5分ほど　／　お金はかかりません</div>
+  </header>
+
+  <h2>入れる前に</h2>
+  <p class="sub">用意するものは2つだけです。</p>
+  <ol class="steps">
+    <li>
+      <div class="num">A</div>
+      <div>
+        <div class="what">iPhone</div>
+        <div class="how">Androidでは使えません。iPhoneをお持ちでない方は、これまでどおり社員ポータルを開いてご確認ください。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">B</div>
+      <div>
+        <div class="what">社員ポータルにログインできること</div>
+        <div class="how">いつもの4桁の暗証番号でログインできれば大丈夫です。取り付け用のコードは、あとの手順2でご自身がその場で作ります。会社への連絡は不要です。</div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="note">
+    <p><b>コードは自分専用です。人に渡さないでください。</b></p>
+    <p>あなたの配置だけを読むためのものです。経費・日報・領収書などには一切さわれませんが、他の人に渡すとその人があなたの配置を見られてしまいます。</p>
+  </div>
+
+  <h2>手順</h2>
+  <p class="sub">上から順に進めてください。</p>
+  <ol class="steps">
+    <li>
+      <div class="num">1</div>
+      <div>
+        <div class="what">App Store で「Scriptable」を入れる</div>
+        <div class="how">無料のアプリです。作者は <b>Simon B. Støvring</b>。似た名前のアプリがあるので、作者名を確かめてください。課金も会員登録もありません。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">2</div>
+      <div>
+        <div class="what">社員ポータルを開き、「自分の情報」→「ホーム画面ウィジェット」</div>
+        <div class="how">いつもどおりログインし、下の方にある「自分の情報」タブから入ります。「取り付け用のコードを作る」を押すと、あなた専用のコードがその場でできます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">3</div>
+      <div>
+        <div class="what">「コードをすべてコピーする」を押す</div>
+        <div class="how">ボタン1つで全部コピーされます。<b>手で選ぶ必要はありません。</b>コピーできると画面に「コピーしました」と出ます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">4</div>
+      <div>
+        <div class="what">Scriptable を開いて、右上の <kbd>+</kbd> を押す</div>
+        <div class="how">まっさらな入力画面が出ます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">5</div>
+      <div>
+        <div class="what">画面を長押しして「ペースト」</div>
+        <div class="how">貼れたら左上の <b>Done</b> を押して閉じます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">6</div>
+      <div>
+        <div class="what">名前を「迅翔ホーム」に変える</div>
+        <div class="how">一覧でそのスクリプトを長押し →「<b>Rename</b>」。次の手順で選びやすくするためです。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">7</div>
+      <div>
+        <div class="what">ホーム画面の何もないところを長押し → 左上の <kbd>+</kbd> → 「Scriptable」を選ぶ</div>
+        <div class="how">大きさは <b>「中」</b> がおすすめです（下の「大きさの選び方」を参照）。選んだら「ウィジェットを追加」。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">8</div>
+      <div>
+        <div class="what">置いたウィジェットを長押し →「ウィジェットを編集」→ Script に「迅翔ホーム」を選ぶ</div>
+        <div class="how">これで自分の配置が出ます。<b>数秒かかります。</b>出ないときは、ホーム画面を一度左右にスワイプしてみてください。</div>
+      </div>
+    </li>
+  </ol>
+
+  <h2>画面の見かた</h2>
+  <p class="sub">これは見本です。実際にはあなたの配置が出ます。</p>
+
+  <div class="demo">
+    <div class="widget">
+      <div class="w-top">
+        <span class="w-brand">迅翔興業</span>
+        <span class="w-badge">未確認1　日報未提出1</span>
+      </div>
+      <div class="w-day">
+        <div class="w-bar"></div>
+        <div class="w-col">
+          <div class="w-date">9/8(火)</div>
+          <div class="w-site">本社</div>
+          <div class="w-meta">07:30集合 / 08:00〜17:00</div>
+          <div class="w-meta">🚚関口、佐川、佐藤</div>
+        </div>
+        <div class="w-mark">未 日報</div>
+      </div>
+      <div class="w-day">
+        <div class="w-bar b2"></div>
+        <div class="w-col">
+          <div class="w-date">9/9(水)</div>
+          <div class="w-site">淀川左岸線</div>
+          <div class="w-meta">終日</div>
+          <div class="w-meta">関口、佐藤</div>
+        </div>
+        <div class="w-mark">✓</div>
+      </div>
+      <div class="w-btns">
+        <div class="w-btn">配置表</div>
+        <div class="w-btn">日報を書く</div>
+        <div class="w-btn hot">確認 1件</div>
+      </div>
+      <div class="w-foot">今週 2件 ・ 更新 09:36 ・ v7</div>
+    </div>
+
+    <dl class="legend">
+      <div>
+        <dt>現場名</dt>
+        <dd>その日に行く現場です。タップすると、その日の配置表が開きます。</dd>
+      </div>
+      <div>
+        <dt>時間</dt>
+        <dd>集合時間と作業時間。決まっていない日は「終日」と出ます。</dd>
+      </div>
+      <div>
+        <dt>名前の並び</dt>
+        <dd><b>いちばん左があなたです。</b>そのあとが一緒に行く人。<b>🚚が付いている人がトラックに乗ります。</b>自分に🚚が付いていたら、あなたが運転する日です。</dd>
+      </div>
+      <div>
+        <dt>未 / ✓</dt>
+        <dd><b>未</b>＝まだ配置を確認していません。<b>✓</b>＝確認済みです。</dd>
+      </div>
+      <div>
+        <dt>日報</dt>
+        <dd>その日の日報がまだ出ていないという印です。</dd>
+      </div>
+      <div>
+        <dt>下の3つのボタン</dt>
+        <dd><b>配置表</b>＝その日のカレンダーを開く。<b>日報を書く</b>＝日報の画面を開く。<b>確認</b>＝配置を確認する画面を開く。残っている件数が出ます。</dd>
+      </div>
+      <div>
+        <dt>いちばん下</dt>
+        <dd>いつ時点の内容かと、ウィジェットの版です。<b>更新の時刻がかなり前なら、まだ新しい配置が反映されていません。</b>その場合は「配置表」を押せば最新が見られます。</dd>
+      </div>
+    </dl>
+  </div>
+
+  <h2>大きさの選び方</h2>
+  <p class="sub">あとから変えられます。まずは「中」で試してください。</p>
+  <div class="sizes">
+    <div class="size">
+      <div class="size-name">中<span class="pill">おすすめ</span></div>
+      <div class="size-body">今日と明日の2日ぶん。<b>一緒に行く人も出ます。</b>ほとんどの方はこれで足ります。</div>
+    </div>
+    <div class="size">
+      <div class="size-name">大</div>
+      <div class="size-body">予定のある日を最大5日ぶん。先の予定まで見たい方向け。場所は取りますが、<b>いちばん情報が多いです。</b></div>
+    </div>
+    <div class="size">
+      <div class="size-name">小</div>
+      <div class="size-body">今日の現場と時間だけ。<b>一緒に行く人は出ません。</b>ホーム画面を広く使いたい方向け。</div>
+    </div>
+    <div class="size">
+      <div class="size-name">ロック画面</div>
+      <div class="size-body">件数と時間だけ出ます。<b>現場名や人の名前は出ません</b>（ロックを解除しなくても見えてしまうため）。</div>
+    </div>
+  </div>
+
+  <h2>困ったとき</h2>
+  <div class="qa">
+    <div>
+      <div class="q">何も出ない・読み込み中のまま</div>
+      <div class="a">電波の届く場所で、<b>ホーム画面を一度左右にスワイプ</b>してみてください。それでも出ないときは、Scriptable アプリを開いて「迅翔ホーム」を1回タップすると動き出すことがあります。</div>
+    </div>
+    <div>
+      <div class="q">「設定が途中で欠けています」と出る</div>
+      <div class="a">コードの貼り付けが途中で切れています。社員ポータルの「ホーム画面ウィジェット」画面へ戻り、<b>もう一度「コードをすべてコピーする」を押してから</b>貼り直してください。</div>
+    </div>
+    <div>
+      <div class="q">配置を入れたのに、ウィジェットが古いまま</div>
+      <div class="a">故障ではありません。iPhoneが自分のタイミングで取り直すため、<b>少し遅れることがあります</b>（いちばん下の「更新 ○○:○○」がいつ時点かを示しています）。すぐ見たいときは「<b>配置表</b>」を押してください。そこは常に最新です。</div>
+    </div>
+    <div>
+      <div class="q">押しても社員ポータルが開かない</div>
+      <div class="a">初回はログインを求められることがあります。<b>いつもの4桁の暗証番号</b>を入れれば、そのまま目的の画面へ進みます。</div>
+    </div>
+    <div>
+      <div class="q">配置がない日はどうなる</div>
+      <div class="a">予定のある日だけを出します。<b>今日の配置がない日は「配置なし」</b>と出ます。空の行がずらっと並ぶことはありません。</div>
+    </div>
+    <div>
+      <div class="q">機種変更した・iPhoneを買い替えた</div>
+      <div class="a">新しい端末では<b>もう一度この手順が必要</b>です。コードも社員ポータルの「ホーム画面ウィジェット」画面でご自身で作り直せます。会社への連絡は不要です。</div>
+    </div>
+    <div>
+      <div class="q">やめたい・消したい</div>
+      <div class="a">ウィジェットを長押しして「ウィジェットを削除」。Scriptable アプリごと消しても構いません。<b>配置のデータには何も影響しません。</b>社員ポータルの「ホーム画面ウィジェット」画面で、その端末の分を「止める」こともできます。</div>
+    </div>
+  </div>
+
+  <div class="note">
+    <p><b>通信量はほとんどかかりません。</b></p>
+    <p>1回の更新で受け取るデータは約3.5KBです。1か月ずっと使っても、写真を数枚送るくらいの量にしかなりません。</p>
+  </div>
+
+  <footer>
+    迅翔興業　社員ポータル ／ 配置カレンダー<br>
+    うまくいかないときは、この画面のスクリーンショットを添えて会社へご連絡ください。
+  </footer>
+
+</div>
+</body>
+</html>

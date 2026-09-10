@@ -446,7 +446,19 @@
   <section id="screen-loan-admin" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">借入申請の管理</div>
+    <button type="button" class="link" data-nav="loan-monthly-ledger" style="margin-bottom:10px;">月ごとにまとめた紙（税理士提出用）を見る ›</button>
+    <div class="filter-row" id="loan-admin-status-filter">
+      <button type="button" class="filter-chip active" data-status="applied">承認待ち</button>
+      <button type="button" class="filter-chip" data-status="">履歴(承認済み・却下・差し戻し)</button>
+    </div>
     <div id="loan-admin-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <!-- 借入申請 詳細(管理者、タップで開く1件表示。支払欄・紙もここに大きく表示) -->
+  <section id="screen-loan-admin-detail" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="loan-admin">借入申請の管理に戻る</button>
+    <div class="form-title">借入申請の詳細</div>
+    <div id="loan-admin-detail-body"><div class="hint">読み込み中...</div></div>
   </section>
 
   <template id="loan-item-template">
@@ -2312,6 +2324,11 @@
         <div class="menu-item-body">経費台帳(社員別集計)<span class="desc">月別・社員別の経費集計と明細。税理士提出用の原簿は連携済みGoogleスプレッドシートに記帳されます</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="loan-monthly-ledger">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <div class="menu-item-body">借入台帳(月次)<span class="desc">その月に申請された借入を1枚の紙にまとめて確認・税理士提出用に出力</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
     </div>
   </section>
 
@@ -2334,6 +2351,25 @@
     </div>
     <div id="flc-summary" class="hint" style="margin-bottom:8px;"></div>
     <div id="flc-list"><div class="hint">読み込み中...</div></div>
+  </section>
+
+  <!-- 借入台帳(月次): その月に申請された借入を1枚の紙にまとめる(2026-09-10 Shota指示、
+       「経費立替の紙と一緒でちゃんと紙になるように」「月末に今月のやつは一気にまとめる」)。 -->
+  <section id="screen-loan-monthly-ledger" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
+    <div class="form-title">借入台帳(月次)</div>
+    <div class="field-row">
+      <label for="lml-month">対象年月</label>
+      <input type="month" id="lml-month">
+      <button type="button" id="lml-load" style="width:auto;padding:6px 12px;">この月をまとめる</button>
+    </div>
+    <div class="hint" id="lml-hint" style="margin:8px 0;"></div>
+    <div class="settlement-sheet-wrap">
+      <div class="settlement-sheet-head">
+        <span>借入申請 月次一覧（税理士提出用）</span>
+      </div>
+      <div id="lml-sheet" class="settlement-sheet-scroll"></div>
+    </div>
   </section>
 
   <!-- 常用台帳集計(Phase C-6): 月次マトリクス(社員別/外注会社別/現場別)+任意期間の総人工 -->
@@ -2440,6 +2476,7 @@
       <button type="button" class="filter-chip" data-type="supply_item">支給品</button>
       <button type="button" class="filter-chip" data-type="entertainment_preapproval">接待事前申請</button>
       <button type="button" class="filter-chip" data-type="qualification">資格・免許</button>
+      <button type="button" class="filter-chip" data-type="loan">借入申請</button>
     </div>
     <div class="filter-row" id="areq-status-filter">
       <button type="button" class="filter-chip active" data-status="">すべての状態</button>

@@ -1538,6 +1538,13 @@ body.assignment-calendar-open .app-header { display: none; }
 .exd-pay-form .exd-payable-missing { color: var(--danger); font-weight: 700; }
 .exd-pay-form input, .exd-pay-form select { max-width: 100%; }
 #exd-pay-submit:disabled { opacity: .45; }
+/* 2026-09-10: 未払いの経費は「支払を記録する」操作を明細9件の下まで探させない。
+   承認済みで未払いの間だけ、この操作を画面のいちばん上へ出す(exd-card本体は元の位置にも残し、
+   履歴としての導線は変えない)。 */
+.exd-pay-top-alert { border: 2px solid var(--warn); background: var(--warn-bg); }
+.exd-pay-top-alert.overdue { border-color: var(--danger); background: var(--danger-bg); }
+.exd-pay-top-alert .form-title { color: inherit; }
+.exd-pay-top-alert .exd-pay-form { border-top: none; margin-top: 6px; padding-top: 0; }
 #exd-schedule-save { width: auto; margin-top: 0; padding: 8px 12px; flex: 0 0 auto; }
 .expense-ledger-detail-btn { width: auto; padding: 8px 12px; }
 .ela-row-detail-btn { background: none; border: none; padding: 0; width: auto; color: var(--primary); text-decoration: underline; cursor: pointer; font-size: 13px; }
