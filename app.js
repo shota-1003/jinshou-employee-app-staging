@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v175-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T03:49:56.738Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v176-staging';
+const BUILD_DEPLOYED_AT = '2026-09-11T08:26:06.240Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11219,7 +11219,7 @@ function loanLedgerRenderSheetHtml(employeeName, entries, page) {
       <div class="ss-title">貸 付 金 台 帳</div>
       <div class="ss-meta">氏　名：<b>${esc(employeeName)}</b>${totalPages > 1 ? `　　${currentPage} / ${totalPages}ページ` : ''}</div>
       <table>
-        <tr><th style="width:60px;">日付</th><th style="width:110px;">貸付</th><th style="width:110px;">返済</th><th style="width:120px;">合計</th><th>備考</th></tr>
+        <tr><th style="width:14%;">日付</th><th style="width:21%;">貸付</th><th style="width:21%;">返済</th><th style="width:24%;">合計</th><th style="width:20%;">備考</th></tr>
         ${pageRows.map((e) => {
           const isRepay = Number(e.amount) < 0;
           const remarkType = LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type;
