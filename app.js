@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v178-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T14:36:43.904Z';
+const BUILD_DEPLOYED_AT = '2026-09-11T22:33:50.947Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -523,8 +523,10 @@ const ADMIN_SCREENS = new Set([
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
   'vehicle-admin', 'expense-ledger-admin',
-  'admin-action-item-create', 'admin-action-item-list', 'admin-action-item-detail',
 ]);
+// 2026-09-12: admin-action-item-create/list/detail は専務・社長限定を撤廃し全社員が使う画面に
+// なったため、ADMIN_SCREENSから外す(在籍中の社員なら誰でも管理者用ボトムナビへ切り替わらずに
+// 使える。実際の権限判定はRPC側〔created_by=自分 or 承認担当〕で行う、こちらはUIの見た目だけ)。
 let inAdminMode = false;
 
 // 管理者画面の論理的な親画面(PARENT_ROUTE)。
@@ -547,7 +549,6 @@ const PARENT_ROUTE = Object.freeze({
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
   'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard',
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
-  'admin-action-item-create': 'admin-dashboard', 'admin-action-item-list': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
   // 注: ADMIN_SCREENS にある 'master-management-hub' は index.html に画面が無い(死んだ定義)ため、ここには載せない。
@@ -557,6 +558,7 @@ const PARENT_ROUTE = Object.freeze({
   'qual-admin': 'personnel-ledger-hub', 'employee-directory': 'personnel-ledger-hub', 'health-admin': 'personnel-ledger-hub',
   'joyo-denpyo-admin': 'personnel-ledger-hub', 'joyo-denpyo-summary': 'personnel-ledger-hub', 'supply-holdings-admin': 'personnel-ledger-hub',
   'loan-monthly-ledger': 'personnel-ledger-hub', 'loan-admin-detail': 'loan-admin', 'loan-ledger-detail': 'loan-ledger-admin',
+  'admin-action-item-create': 'my-action-items', 'admin-action-item-list': 'my-action-items',
   'admin-action-item-detail': 'admin-action-item-list',
   'first-login-codes-admin': 'personnel-ledger-hub', 'subcontractor-company-admin': 'personnel-ledger-hub', 'subcontractor-worker-admin': 'personnel-ledger-hub',
   // 社員名簿の下
@@ -5182,13 +5184,18 @@ async function announceDeepLink(announcementId) {
     openMyRequestDetail(t.target_id, 'announcements');
     return;
   }
-  // 指示の確認要請/完了/差し戻し通知(related_id=employee_action_item_recipients.id)。
-  // 「確認要請がありました」は発行した専務・社長へ、「承認されました/差し戻しがあります」は
-  // 本人へ届く通知のため、タップした人が管理者かどうかで遷移先を分ける
-  // (management/employee両方に割り当てられる稀なケースは、管理者側の一覧から開き直せば足りる)。
+  // 依頼の確認要請/完了/差し戻し通知(related_id=employee_action_item_recipients.id)。
+  // 2026-09-12: 専務・社長限定を撤廃したため、タップした人が「管理者かどうか」では遷移先を
+  // 判定できなくなった(一般社員も依頼を出す・承認担当になる側になり得る)。本人が受信者
+  // (get_my_action_item_detailが成功する)なら本人側詳細へ、そうでなければ発行側の
+  // 一覧へ(発行側は複数の受信者を含みうるため、対象を特定できる一覧から開き直してもらう)。
   if (t.related_type === 'employee_tasks' && t.target_id) {
-    if (isAdmin()) { showScreen('admin-action-item-list'); return; }
-    openMyActionItemDetail(Number(t.target_id));
+    try {
+      await rpc('get_my_action_item_detail', { p_employee_code: session.employeeCode, p_recipient_id: Number(t.target_id) });
+      openMyActionItemDetail(Number(t.target_id));
+    } catch (e) {
+      showScreen('admin-action-item-list');
+    }
     return;
   }
   // 暗証番号再設定依頼(related_type='employees')は、支給品と完全に分離した「暗証番号のリセット」専用画面へ
@@ -10172,7 +10179,7 @@ async function loadMyActionItems() {
   list.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('get_my_action_items', { p_employee_code: session.employeeCode });
-    if (!rows || rows.length === 0) { list.innerHTML = '<div class="hint">現在、対応が必要な指示はありません。</div>'; return; }
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="hint">現在、対応が必要な依頼はありません。</div>'; return; }
     list.innerHTML = rows.map((r) => `
       <div class="card" data-recipient-id="${r.recipient_id}" style="margin-bottom:10px;cursor:pointer;">
         <div style="font-weight:700;">${r.is_overdue ? '<span class="tag danger">期限超過</span> ' : ''}${exdEsc(r.title)}</div>
@@ -10286,9 +10293,9 @@ async function doCreateActionItem() {
       p_admin_employee_code: session.employeeCode, p_title: title, p_body: body || null,
       p_due_date: dueDate, p_employee_codes: codes, p_department: null,
     });
-    showDone('指示を発行しました。', 'admin-action-item-list');
+    showDone('依頼しました。', 'admin-action-item-list');
   } catch (e) {
-    showError('action-item-error', e.message || '発行に失敗しました。');
+    showError('action-item-error', e.message || '依頼に失敗しました。');
   } finally {
     btn.disabled = false;
   }
@@ -10300,7 +10307,7 @@ async function loadAdminActionItemList() {
   body.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const rows = await rpc('admin_list_action_items', { p_admin_employee_code: session.employeeCode });
-    if (!rows || rows.length === 0) { body.innerHTML = '<div class="hint">まだ指示を発行していません。</div>'; return; }
+    if (!rows || rows.length === 0) { body.innerHTML = '<div class="hint">まだ依頼を出していません。</div>'; return; }
     body.innerHTML = rows.map((r) => `
       <div class="plain-list-row" data-id="${r.id}" style="cursor:pointer;">
         <div><b>${exdEsc(r.title)}</b></div>
@@ -10341,6 +10348,17 @@ async function loadAdminActionItemDetail() {
         ${head.body ? `<div class="hint-inline" style="white-space:pre-wrap;margin-top:6px;">${exdEsc(head.body)}</div>` : ''}
         <div class="hint-inline" style="margin-top:8px;">${head.due_date ? `期限: ${head.due_date}` : '期限なし'}</div>
       </div>
+      ${head.is_original_assigner ? `
+      <div class="card" style="margin-top:12px;" id="aai-approver-card">
+        <div class="form-title" style="font-size:14px;margin-top:0;">承認できる人を追加</div>
+        <div class="hint" style="margin-bottom:8px;">追加した人も、この依頼の完了認証・再提出を判断できるようになります(担当が変わった時などに)。</div>
+        <div id="aai-approver-list" class="hint">読み込み中...</div>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <select id="aai-approver-select" style="flex:1;"><option value="">(社員を選択)</option></select>
+          <button type="button" id="aai-approver-add-btn">追加</button>
+        </div>
+        <div class="error" id="aai-approver-error"></div>
+      </div>` : ''}
       ${rows.map((r, i) => `
         <div class="card" style="margin-top:12px;" data-recipient-id="${r.recipient_id}">
           <div class="row1" style="display:flex;justify-content:space-between;align-items:center;">
@@ -10368,7 +10386,7 @@ async function loadAdminActionItemDetail() {
       const errEl = card.querySelector('.aai-error');
       if (approveBtn) {
         approveBtn.addEventListener('click', async () => {
-          if (!confirm('この指示を完了として承認します。よろしいですか?')) return;
+          if (!confirm('この依頼を完了として承認します。よろしいですか?')) return;
           approveBtn.disabled = true;
           try {
             await rpc('admin_approve_action_item', { p_admin_employee_code: session.employeeCode, p_recipient_id: recipientId });
@@ -10381,7 +10399,7 @@ async function loadAdminActionItemDetail() {
           const note = card.querySelector('.aai-return-note').value.trim();
           if (errEl) errEl.textContent = '';
           if (!note) { if (errEl) errEl.textContent = '再提出の理由を入力してください。'; return; }
-          if (!confirm('修正指示を送り、再提出を求めます。よろしいですか?')) return;
+          if (!confirm('修正のお願いを送り、再提出を求めます。よろしいですか?')) return;
           returnBtn.disabled = true;
           try {
             await rpc('admin_return_action_item', { p_admin_employee_code: session.employeeCode, p_recipient_id: recipientId, p_return_note: note });
@@ -10390,8 +10408,61 @@ async function loadAdminActionItemDetail() {
         });
       }
     });
+    if (head.is_original_assigner) {
+      await wireActionItemApproverCard(currentAdminActionItemId, session);
+    }
   } catch (e) {
     body.innerHTML = `<div class="error show">${e.message || '読み込みに失敗しました。'}</div>`;
+  }
+}
+
+// 「承認できる人を追加」欄(依頼を出した本人だけに表示)。現在の承認担当一覧を表示し、
+// 在籍社員から1人選んで追加・既存の担当を削除できる。既存のlist_employees_for_participant_select
+// (社員選択UI共通、氏名・社員番号だけを返す)をそのまま再利用する。
+async function wireActionItemApproverCard(actionItemId, session) {
+  const listEl = document.getElementById('aai-approver-list');
+  const selectEl = document.getElementById('aai-approver-select');
+  const addBtn = document.getElementById('aai-approver-add-btn');
+  const errEl = document.getElementById('aai-approver-error');
+  if (!listEl || !selectEl || !addBtn) return;
+  try {
+    const [approvers, employees] = await Promise.all([
+      rpc('get_action_item_approvers', { p_employee_code: session.employeeCode, p_action_item_id: actionItemId }),
+      rpc('list_employees_for_participant_select', { p_employee_code: session.employeeCode }).catch(() => []),
+    ]);
+    listEl.innerHTML = (!approvers || approvers.length === 0)
+      ? '現在、追加されている人はいません。'
+      : approvers.map((a) => `
+        <div class="plain-list-row" data-code="${a.employee_code}" style="display:flex;justify-content:space-between;align-items:center;">
+          <span>${exdEsc(a.employee_name)}</span>
+          <button type="button" class="secondary aai-approver-remove-btn" data-code="${a.employee_code}" style="padding:4px 10px;">削除</button>
+        </div>
+      `).join('');
+    listEl.querySelectorAll('.aai-approver-remove-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        btn.disabled = true;
+        try {
+          await rpc('admin_remove_action_item_approver', { p_employee_code: session.employeeCode, p_action_item_id: actionItemId, p_approver_employee_code: btn.dataset.code });
+          await loadAdminActionItemDetail();
+        } catch (e) { btn.disabled = false; if (errEl) errEl.textContent = e.message || '削除できませんでした。'; }
+      });
+    });
+    const existingCodes = new Set((approvers || []).map((a) => a.employee_code));
+    const selectable = (employees || []).filter((e) => e.employee_code !== session.employeeCode && !existingCodes.has(e.employee_code));
+    selectEl.innerHTML = '<option value="">(社員を選択)</option>' + selectable.map((e) => `<option value="${e.employee_code}">${exdEsc(e.employee_name)}</option>`).join('');
+    addBtn.addEventListener('click', async () => {
+      if (errEl) errEl.textContent = '';
+      const code = selectEl.value;
+      if (!code) { if (errEl) errEl.textContent = '追加する社員を選択してください。'; return; }
+      addBtn.disabled = true;
+      try {
+        await rpc('admin_add_action_item_approver', { p_employee_code: session.employeeCode, p_action_item_id: actionItemId, p_new_approver_employee_code: code });
+        await loadAdminActionItemDetail();
+      } catch (e) { addBtn.disabled = false; if (errEl) errEl.textContent = e.message || '追加できませんでした。'; }
+    });
+  } catch (e) {
+    listEl.innerHTML = '';
+    if (errEl) errEl.textContent = e.message || '読み込みに失敗しました。';
   }
 }
 
