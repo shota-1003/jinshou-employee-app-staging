@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v173-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T02:32:20.054Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v174-staging';
+const BUILD_DEPLOYED_AT = '2026-09-11T03:44:03.442Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11233,6 +11233,8 @@ async function loadLoanLedgerDetail() {
   body.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const entries = await rpc('admin_get_loan_ledger', { p_admin_employee_code: session.employeeCode, p_employee_id: loanLedgerDetailEmployee.id });
+    const adRows = await rpc('admin_get_loan_auto_deduction', { p_admin_employee_code: session.employeeCode, p_employee_id: loanLedgerDetailEmployee.id }).catch(() => []);
+    const autoDeduction = (adRows && adRows[0]) || null;
     // 集計は「取消済みでない行だけ」を抜き出して合計してはならない。赤伝(反対仕訳)は
     // 元行と同じentry_typeを持ち、元行はvoided_atが付いても金額は変わらないため、
     // 元行を除いて赤伝だけを合計すると相殺されず二重にずれる(backendのloan_balance_summary
@@ -11309,6 +11311,19 @@ async function loadLoanLedgerDetail() {
               <input type="text" class="ll-adj-reason" placeholder="例: 入力ミスの訂正">
               <div class="error ll-adj-error"></div>
               <button type="button" class="ll-adj-save">調整を記録する</button>
+            </div>
+          </div>
+          <div class="card" style="margin-top:14px;">
+            <div class="form-title" style="font-size:14px;margin-top:0;">給料日自動控除(毎月5日)</div>
+            <div class="hint-inline">${autoDeduction
+      ? `現在: 月額${yen(autoDeduction.monthly_amount)}・${autoDeduction.is_paused ? '一時停止中' : '有効'}`
+      : '未設定です。設定すると毎月5日に自動で返済が記録されます。'}</div>
+            <div class="exd-pay-form">
+              <label>月々の控除額</label>
+              <input type="number" class="ll-ad-amount" min="1" step="1" value="${autoDeduction ? Number(autoDeduction.monthly_amount) : ''}" placeholder="例: 10000">
+              <div class="error ll-ad-error"></div>
+              <button type="button" class="ll-ad-save">${autoDeduction ? 'この金額に変更する' : '設定する'}</button>
+              ${autoDeduction ? `<button type="button" class="secondary ll-ad-toggle" data-paused="${autoDeduction.is_paused ? 'true' : 'false'}" style="margin-top:8px;">${autoDeduction.is_paused ? '再開する' : '一時停止する'}</button>` : ''}
             </div>
           </div>
         </div>
@@ -11414,6 +11429,37 @@ function wireLoanLedgerActions(containerEl, session, reload) {
         await rpc('admin_add_loan_adjustment', { p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_entry_date: date, p_amount: amount, p_reason: reason.trim() });
         reload();
       } catch (e) { adjBtn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
+    });
+  }
+  const adSaveBtn = containerEl.querySelector('.ll-ad-save');
+  if (adSaveBtn) {
+    adSaveBtn.addEventListener('click', async () => {
+      const errEl = containerEl.querySelector('.ll-ad-error');
+      const amount = Number(containerEl.querySelector('.ll-ad-amount').value || 0);
+      if (errEl) errEl.textContent = '';
+      if (!amount || amount <= 0) { if (errEl) errEl.textContent = '月々の控除額を入力してください。'; return; }
+      if (!confirm(`毎月5日に${yen(amount)}を自動で返済として記録します。よろしいですか?`)) return;
+      adSaveBtn.disabled = true;
+      try {
+        await rpc('admin_set_loan_auto_deduction_amount', { p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_monthly_amount: amount });
+        reload();
+      } catch (e) { adSaveBtn.disabled = false; if (errEl) errEl.textContent = e.message || '設定できませんでした。'; }
+    });
+  }
+  const adToggleBtn = containerEl.querySelector('.ll-ad-toggle');
+  if (adToggleBtn) {
+    adToggleBtn.addEventListener('click', async () => {
+      const errEl = containerEl.querySelector('.ll-ad-error');
+      const currentlyPaused = adToggleBtn.getAttribute('data-paused') === 'true';
+      const nextPaused = !currentlyPaused;
+      if (errEl) errEl.textContent = '';
+      if (!confirm(nextPaused ? '給料日自動控除を一時停止します。よろしいですか?' : '給料日自動控除を再開します。よろしいですか?')) return;
+      adToggleBtn.disabled = true;
+      try {
+        const r = await rpc('admin_set_loan_auto_deduction_paused', { p_admin_employee_code: session.employeeCode, p_target_employee_code: empCode, p_paused: nextPaused });
+        if (r && r.ok === false) { if (errEl) errEl.textContent = r.message || '変更できませんでした。'; adToggleBtn.disabled = false; return; }
+        reload();
+      } catch (e) { adToggleBtn.disabled = false; if (errEl) errEl.textContent = e.message || '変更できませんでした。'; }
     });
   }
   containerEl.querySelectorAll('.ll-void-btn').forEach((vb) => {
