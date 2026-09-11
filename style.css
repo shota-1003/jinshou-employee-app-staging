@@ -648,7 +648,11 @@ button.link {
   display: block; width: 100%; text-align: left; background: var(--warn-bg); border: 1px solid oklch(0.82 0.165 88 / 30%);
   border-radius: var(--radius-md); padding: 14px 16px; margin-bottom: 16px; font-family: inherit; cursor: pointer;
 }
+/* 最重要(critical)は重要(important)と同じ黄色ではなく、より強い赤で区別する
+   (2026-09-11 Shota指摘「重要は黄色やろ」= 最重要のバナーが重要と同じ黄色になっていた不具合)。 */
+.announce-banner.critical { background: var(--danger-bg); border-color: oklch(0.66 0.19 22 / 30%); }
 .announce-banner-label { font-size: 11px; font-weight: 800; color: var(--warn); display: flex; align-items: center; gap: 5px; }
+.announce-banner.critical .announce-banner-label { color: var(--danger); }
 .announce-banner-label .icon { width: 14px; height: 14px; }
 .announce-banner-title { font-size: 14px; font-weight: 700; color: var(--text); margin-top: 4px; }
 
