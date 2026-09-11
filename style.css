@@ -972,6 +972,15 @@ button.link {
   .ll-detail-right { flex: 1; }
 }
 
+/* 貸付金台帳の紙だけ、PCの広い画面では固定720pxをやめて横幅いっぱいに広げる
+   (2026-09-11 Shota指示「もっと幅広くできんの」)。他の紙(借入申請書・経費精算書)は
+   720px固定のまま変えない(.ll-sheetだけの上書き)。文字も少し大きくする。
+   .settlement-sheet(width:720px、style.css後方で定義)より詳しい2クラス指定にして、
+   ファイル内の定義順に関係なく確実に上書きする。 */
+@media (min-width: 1280px) {
+  .settlement-sheet.ll-sheet { width: 100%; font-size: 13.5px; }
+}
+
 /* ===== 管理者トップの社員管理カードなど汎用の一覧行 ===== */
 .plain-list-row {
   display: flex; align-items: center; justify-content: space-between; padding: 13px 4px; border-bottom: 1px solid var(--border);
