@@ -2165,6 +2165,11 @@
         <span class="home-card-label">指示を発行</span>
         <span class="home-card-desc">個人/複数社員へ期限付きの指示</span>
       </button>
+      <button type="button" class="home-card" data-nav="admin-action-item-list">
+        <span class="icon-slot" data-icon="clipboard-check"></span>
+        <span class="home-card-label">指示の確認・管理</span>
+        <span class="home-card-desc">確認要請の承認/再提出、履歴</span>
+      </button>
     </div>
 
     <div class="dash-card-grid" id="admin-dashboard-grid"></div>
@@ -3780,8 +3785,14 @@
   <section id="screen-my-action-items" class="screen">
     <button type="button" class="back-link back-to-origin" data-nav="menu">ホームに戻る</button>
     <div class="form-title">管理者からの指示</div>
-    <div class="hint" style="margin-bottom:12px;">対応が終わったら「完了にする」を押してください。期限を過ぎても自動的には消えません。</div>
+    <div class="hint" style="margin-bottom:12px;">対応が終わったら開いて「確認要請」を押してください。期限を過ぎても自動的には消えません。</div>
     <div id="my-action-items-list"></div>
+  </section>
+
+  <!-- 2026-09-11: 指示の詳細(本人側)。確認要請ボタン・履歴/やり取りのスレッド。 -->
+  <section id="screen-my-action-item-detail" class="screen">
+    <button type="button" class="back-link" data-nav="my-action-items">一覧に戻る</button>
+    <div id="my-action-item-detail-body"></div>
   </section>
 
   <!-- 2026-08-28: Action Center(管理者が個人/複数社員/部署へ指示を発行) -->
@@ -3799,8 +3810,21 @@
     <div id="action-item-employee-picker"></div>
     <div class="error" id="action-item-error"></div>
     <button type="button" id="action-item-submit">発行する</button>
-    <div class="section-title" style="margin-top:20px;">発行済みの指示</div>
-    <div id="admin-action-items-list"></div>
+    <button type="button" class="secondary" data-nav="admin-action-item-list" style="margin-top:12px;">発行済みの指示を確認する</button>
+  </section>
+
+  <!-- 2026-09-11: 発行済みの指示 一覧(専務・社長側)。確認要請中の件数を目立たせる。 -->
+  <section id="screen-admin-action-item-list" class="screen">
+    <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">発行済みの指示</div>
+    <button type="button" class="secondary" data-nav="admin-action-item-create" style="margin-bottom:14px;">新しく指示を発行する</button>
+    <div id="admin-action-item-list-body"></div>
+  </section>
+
+  <!-- 2026-09-11: 指示の詳細(専務・社長側)。受信者ごとの状態、完了認証/再提出、履歴/スレッド。 -->
+  <section id="screen-admin-action-item-detail" class="screen">
+    <button type="button" class="back-link" data-nav="admin-action-item-list">一覧に戻る</button>
+    <div id="admin-action-item-detail-body"></div>
   </section>
 
   <!-- 匿名相談トップ(送る/自分の相談一覧) -->

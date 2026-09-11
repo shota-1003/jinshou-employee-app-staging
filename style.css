@@ -405,6 +405,7 @@ button.link {
 }
 .status-badge.done, .history-item .status-badge.done { background: var(--success-bg); color: var(--success); }
 .status-badge.rejected, .history-item .status-badge.rejected { background: var(--danger-bg); color: var(--danger); }
+.status-badge.warn, .history-item .status-badge.warn { background: var(--warn-bg); color: var(--warn); }
 
 /* 領収書・経費精算書の画像タップ拡大表示(申請詳細画面、社員本人・管理者共通) */
 .mrd-receipt-thumb {
