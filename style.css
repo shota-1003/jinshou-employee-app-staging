@@ -1603,6 +1603,16 @@ body.assignment-calendar-open .app-header { display: none; }
 }
 .settlement-sheet-head button { padding: 4px 10px; font-size: 12px; }
 .settlement-sheet-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
+/* 貸付金台帳のページ送り(2026-09-11、下に追記され続けるとスクロールが増える指摘への対応)。
+   ノートのページ送りと同じ感覚で、常に最新ページを既定表示にする。 */
+.ll-pager {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  padding: 8px 12px; background: #f4f6f9; color: #1b2230;
+  border-top: 1px solid var(--line, #d8dce3);
+}
+.ll-pager button { padding: 4px 10px; font-size: 12px; }
+.ll-pager button:disabled { opacity: 0.4; }
+.ll-pager-label { font-size: 12px; font-weight: 700; min-width: 74px; text-align: center; }
 .settlement-sheet { width: 720px; font-size: 12px; }
 /* アプリ全体の配色(薄い文字色・暗い背景)をこの用紙の中にだけ持ち込まない。
    紙と同じ「白地に黒」で見えないと、承認する人が読めない(2026-09-07、実機確認で判明)。 */

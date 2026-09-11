@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v174-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T03:44:03.442Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v175-staging';
+const BUILD_DEPLOYED_AT = '2026-09-11T03:49:56.738Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10732,8 +10732,9 @@ async function loadMyLoanBalance() {
           <span>貸付金台帳</span>
           <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
         </div>
-        <div class="settlement-sheet-scroll loan-sheet-box">${loanLedgerRenderSheetHtml(session.employeeName, entries)}</div>
+        <div class="settlement-sheet-scroll loan-sheet-box"></div>
       </div>`;
+    renderLoanLedgerPagedSheet(body.querySelector('.settlement-sheet-wrap'), session.employeeName, entries);
     body.querySelectorAll('.loan-sheet-toggle').forEach((btn) => {
       btn.addEventListener('click', () => {
         const box = btn.closest('.settlement-sheet-wrap').querySelector('.loan-sheet-box');
@@ -11194,21 +11195,32 @@ function openLoanLedgerDetail(employee) {
 // 経費とか借り入れの時の紙ぐらいの大きさにして」を受けて、ダーク基調の小さい表ではなく
 // 既存のsettlement-sheet(紙)と同じ構造・フォントサイズで作り直した。列は実際の紙の
 // 貸付台帳(日付・貸付・返済・合計・備考)と同じ並びにする。
-function loanLedgerRenderSheetHtml(employeeName, entries) {
+const LOAN_LEDGER_PAGE_SIZE = 25;
+function loanLedgerTotalPages(entries) {
+  return Math.max(1, Math.ceil((entries || []).length / LOAN_LEDGER_PAGE_SIZE));
+}
+
+// pageは1始まり。省略時は最新ページ(ノートを開いたら一番新しいページが出る感覚に合わせる)。
+function loanLedgerRenderSheetHtml(employeeName, entries, page) {
   const esc = (v) => String(v === null || v === undefined ? '' : v)
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   const yenFmt = (n) => (n === null || n === undefined || n === '' ? '' : `${Number(n).toLocaleString('ja-JP')}円`);
   const rows = entries || [];
-  const MIN_ROWS = 25;
-  const blanks = Math.max(0, MIN_ROWS - rows.length);
+  const totalPages = loanLedgerTotalPages(rows);
+  let currentPage = Number(page) || totalPages;
+  if (currentPage < 1) currentPage = 1;
+  if (currentPage > totalPages) currentPage = totalPages;
+  const start = (currentPage - 1) * LOAN_LEDGER_PAGE_SIZE;
+  const pageRows = rows.slice(start, start + LOAN_LEDGER_PAGE_SIZE);
+  const blanks = Math.max(0, LOAN_LEDGER_PAGE_SIZE - pageRows.length);
   return `
     <div class="settlement-sheet ll-sheet">
       <div class="ss-title">貸 付 金 台 帳</div>
-      <div class="ss-meta">氏　名：<b>${esc(employeeName)}</b></div>
+      <div class="ss-meta">氏　名：<b>${esc(employeeName)}</b>${totalPages > 1 ? `　　${currentPage} / ${totalPages}ページ` : ''}</div>
       <table>
         <tr><th style="width:60px;">日付</th><th style="width:110px;">貸付</th><th style="width:110px;">返済</th><th style="width:120px;">合計</th><th>備考</th></tr>
-        ${rows.map((e) => {
+        ${pageRows.map((e) => {
           const isRepay = Number(e.amount) < 0;
           const remarkType = LOAN_ENTRY_TYPE_LABEL[e.entry_type] || e.entry_type;
           const remarkParts = [remarkType, e.payment_method ? (LOAN_RECEIPT_LABEL[e.payment_method] || e.payment_method) : '', e.note, e.voided_at ? '取消済み' : ''].filter(Boolean);
@@ -11224,6 +11236,35 @@ function loanLedgerRenderSheetHtml(employeeName, entries) {
       </table>
       <div class="ss-company">株式会社　迅翔興業</div>
     </div>`;
+}
+
+// wrapEl は .settlement-sheet-wrap(中に .loan-sheet-box を持つ)。現在ページは
+// wrapEl自身のdata属性で保持し、前/次ボタンはfetchし直さずローカルの再描画だけで動く。
+function renderLoanLedgerPagedSheet(wrapEl, employeeName, entries) {
+  const boxEl = wrapEl.querySelector('.loan-sheet-box');
+  if (!boxEl) return;
+  const totalPages = loanLedgerTotalPages(entries);
+  let page = Number(wrapEl.dataset.llPage || totalPages) || totalPages;
+  if (page < 1) page = 1;
+  if (page > totalPages) page = totalPages;
+  wrapEl.dataset.llPage = String(page);
+  boxEl.innerHTML = loanLedgerRenderSheetHtml(employeeName, entries, page);
+
+  let pagerEl = wrapEl.querySelector('.ll-pager');
+  if (totalPages <= 1) { if (pagerEl) pagerEl.remove(); return; }
+  if (!pagerEl) {
+    pagerEl = document.createElement('div');
+    pagerEl.className = 'll-pager';
+    wrapEl.appendChild(pagerEl);
+  }
+  pagerEl.innerHTML = `
+    <button type="button" class="secondary ll-pager-prev"${page <= 1 ? ' disabled' : ''}>← 前のページ</button>
+    <span class="ll-pager-label">${page} / ${totalPages}ページ</span>
+    <button type="button" class="secondary ll-pager-next"${page >= totalPages ? ' disabled' : ''}>次のページ →</button>`;
+  const prevBtn = pagerEl.querySelector('.ll-pager-prev');
+  const nextBtn = pagerEl.querySelector('.ll-pager-next');
+  if (prevBtn) prevBtn.addEventListener('click', () => { wrapEl.dataset.llPage = String(page - 1); renderLoanLedgerPagedSheet(wrapEl, employeeName, entries); });
+  if (nextBtn) nextBtn.addEventListener('click', () => { wrapEl.dataset.llPage = String(page + 1); renderLoanLedgerPagedSheet(wrapEl, employeeName, entries); });
 }
 
 async function loadLoanLedgerDetail() {
@@ -11333,7 +11374,7 @@ async function loadLoanLedgerDetail() {
               <span>貸付金台帳</span>
               <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
             </div>
-            <div class="settlement-sheet-scroll loan-sheet-box">${loanLedgerRenderSheetHtml(loanLedgerDetailEmployee.name, entries)}</div>
+            <div class="settlement-sheet-scroll loan-sheet-box"></div>
           </div>
           ${voidableOrPhoto.length === 0 ? '' : `
           <div class="ll-actions">
@@ -11348,6 +11389,7 @@ async function loadLoanLedgerDetail() {
         </div>
       </div>`;
 
+    renderLoanLedgerPagedSheet(body.querySelector('.ll-detail-right .settlement-sheet-wrap'), loanLedgerDetailEmployee.name, entries);
     body.querySelectorAll('.loan-sheet-toggle').forEach((btn) => {
       btn.addEventListener('click', () => {
         const box = btn.closest('.settlement-sheet-wrap').querySelector('.loan-sheet-box');
