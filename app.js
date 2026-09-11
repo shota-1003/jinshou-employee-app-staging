@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v172-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T01:03:13.056Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v173-staging';
+const BUILD_DEPLOYED_AT = '2026-09-11T01:21:32.176Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10952,13 +10952,15 @@ function loanBuildPaymentSectionHtml(r) {
         <option value="bank_transfer">銀行振込</option>
         <option value="cash">現金</option>
       </select>
-      <label>振込手数料(任意)</label>
-      <div class="hint-inline">貸付金台帳(残高・履歴)にも記録されます。手数料を残高に加算するかは下のチェックで選べます。</div>
-      <input type="number" class="loan-paid-fee" min="0" step="1" value="0">
-      <label style="display:flex;align-items:center;gap:6px;">
-        <input type="checkbox" class="loan-paid-fee-counts" checked style="width:auto;margin:0;">
-        <span>手数料を貸付残高に加算する</span>
-      </label>
+      <div class="loan-paid-fee-block" style="display:none;">
+        <label>振込手数料</label>
+        <div class="hint-inline">銀行振込は振込手数料を本人負担にする決まりのため、貸付金台帳(残高・履歴)へ足して記録します。手数料を残高に加算するかは下のチェックで選べます。</div>
+        <input type="number" class="loan-paid-fee" min="0" step="1" value="0">
+        <label style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" class="loan-paid-fee-counts" checked style="width:auto;margin:0;">
+          <span>手数料を貸付残高に加算する</span>
+        </label>
+      </div>
       <label>備考</label>
       <input type="text" class="loan-paid-note" placeholder="例: 9月分まとめて振込">
       <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。この操作で貸付金台帳(残高・履歴)へも記録されます。</div>
@@ -11055,6 +11057,17 @@ function renderLoanMonthlySheet(year, month, rows) {
 
 function wireLoanPaymentSection(containerEl, session, onDone) {
   const reload = onDone || loadLoanAdminList;
+  // 振込手数料は銀行振込のときだけ意味を持つ(現金に手数料は無い)。2026-09-11 Shota指示
+  // 「借入の時に銀行振り込みの場合は振込手数料も足す形にする」を受けて、方法を選ぶまでは
+  // 手数料欄を隠し、銀行振込を選んだときだけ出す(振込手数料は申請者負担という既存の方針、
+  // index.htmlの借入申請フォームの説明文と同じ)。
+  containerEl.querySelectorAll('.loan-paid-method').forEach((sel) => {
+    const block = sel.closest('.exd-pay-form').querySelector('.loan-paid-fee-block');
+    if (block) block.style.display = sel.value === 'bank_transfer' ? '' : 'none';
+    sel.addEventListener('change', () => {
+      if (block) block.style.display = sel.value === 'bank_transfer' ? '' : 'none';
+    });
+  });
   containerEl.querySelectorAll('.loan-schedule-save').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const item = btn.closest('.card');
