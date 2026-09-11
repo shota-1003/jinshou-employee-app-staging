@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v176-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T08:26:06.240Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v177-staging';
+const BUILD_DEPLOYED_AT = '2026-09-11T08:33:22.015Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1876,10 +1876,10 @@ async function loadHomeAnnouncePreview() {
     const TAG_LABEL = { critical: '最重要', important: '重要' };
     area.innerHTML = top.map((a) => `
       <div class="home-announce-item" data-id="${a.id}">
-        <span class="home-announce-dot ${a.importance !== 'normal' ? 'important' : (!a.is_read ? 'unread normal-imp' : '')}"></span>
+        <span class="home-announce-dot ${a.importance !== 'normal' ? a.importance : (!a.is_read ? 'unread normal-imp' : '')}"></span>
         <div class="home-announce-body2">
           <div class="home-announce-title-row">
-            ${TAG_LABEL[a.importance] ? `<span class="home-announce-tag important">${TAG_LABEL[a.importance]}</span>` : '<span class="home-announce-tag normal">お知らせ</span>'}
+            ${TAG_LABEL[a.importance] ? `<span class="home-announce-tag ${a.importance}">${TAG_LABEL[a.importance]}</span>` : '<span class="home-announce-tag normal">お知らせ</span>'}
             <span class="home-announce-title">${a.title}</span>
           </div>
           <div class="home-announce-date">${new Date(a.created_at).toLocaleDateString('ja-JP')}</div>

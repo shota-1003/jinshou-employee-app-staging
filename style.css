@@ -664,12 +664,14 @@ button.link {
   background: var(--card-bg); border: 1px solid var(--border); box-shadow: var(--shadow-sm); margin-bottom: 8px; cursor: pointer;
 }
 .home-announce-dot { width: 8px; height: 8px; border-radius: 50%; margin-top: 6px; flex-shrink: 0; background: var(--text-faint); }
-.home-announce-dot.important { background: var(--danger); }
+.home-announce-dot.important { background: var(--warn); }
+.home-announce-dot.critical { background: var(--danger); }
 .home-announce-dot.unread.normal-imp { background: var(--primary); }
 .home-announce-body2 { flex: 1; min-width: 0; }
 .home-announce-title-row { display: flex; align-items: center; gap: 6px; }
 .home-announce-tag { font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: var(--radius-pill); flex-shrink: 0; }
-.home-announce-tag.important { background: var(--danger-bg); color: var(--danger); }
+.home-announce-tag.important { background: var(--warn-bg); color: var(--warn); }
+.home-announce-tag.critical { background: var(--danger-bg); color: var(--danger); }
 .home-announce-tag.normal { background: var(--info-bg); color: var(--primary); }
 .home-announce-title { font-size: 13.5px; font-weight: 700; color: var(--text); }
 .home-announce-date { font-size: 11px; color: var(--text-muted); margin-top: 3px; }
