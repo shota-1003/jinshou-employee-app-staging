@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v181-staging';
-const BUILD_DEPLOYED_AT = '2026-09-12T10:47:09.141Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v182-staging';
+const BUILD_DEPLOYED_AT = '2026-09-12T10:55:48.887Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6809,6 +6809,18 @@ function renderExpenseRequestDetailHtml(full, opts) {
     && String(pay.scheduled_payment_date).slice(0, 10) < payTodayStr;
   const payShowAtTop = isAdmin && payUnpaidAmount;
 
+  // 2026-09-12 Shota指摘(原文、要約)「レシートばーって並べて、さっき承認するがあるべきじゃない
+  // 普通にで、この下に支払いを記録するじゃないの」。明細が多い申請で「承認する」ボタン
+  // (#rdetail-actions、画面の一番下)を押すために毎回全明細をスクロールし、押した後は
+  // 上のpayShowAtTop(支払欄)へ戻るためにまたスクロールし直す往復が発生していた。
+  // 支払欄をpayShowAtTopで上部固定したのと同じ考え方で、未承認の間は承認/差し戻し/却下も
+  // 画面のいちばん上(経費精算書より前)に出す。承認すると同じ場所にpayShowAtTopの支払欄が
+  // 入れ替わりで出るため、常に画面の同じ場所(いちばん上)だけで「確認→承認→支払」が完結する。
+  // ボタンのid・配線(wireExpenseRequestDetail側)は既存のrdetail-*をそのまま再利用する
+  // (renderRequestDetailActionsが#rdetail-actionsへ二重に描画しないよう、呼び出し側で調整済み)。
+  const canDecide = isAdmin && (!opts || opts.canDecide !== false);
+  const showDecisionAtTop = canDecide && (ap.status === 'pending' || !ap.status);
+
   // 0. 税理士へ提出する用紙。承認する人はまずこれを見て、その下の領収書・申請内容で裏を取る。
   let html = payShowAtTop
     ? `<div class="card exd-card exd-pay-top-alert${payIsOverdue ? ' overdue' : ''}">
@@ -6818,6 +6830,21 @@ function renderExpenseRequestDetailHtml(full, opts) {
       ${paymentSectionHtml}
     </div>`
     : '';
+  if (showDecisionAtTop) {
+    html += `<div class="card exd-card exd-decision-top-alert">
+      <div class="hint-inline" style="font-weight:800; margin-bottom:8px;">この申請はまだ承認されていません。下の経費精算書・明細で内容を確認してから決定してください。</div>
+      <div class="qual-verify-btns">
+        <button type="button" class="approve-btn" id="rdetail-approve">承認する</button>
+        <button type="button" class="reject-btn" id="rdetail-needs-info">差し戻す(要修正)</button>
+        <button type="button" class="reject-btn" id="rdetail-reject">却下する</button>
+      </div>
+      <div id="rdetail-reason-box" style="display:none;margin-top:10px;">
+        <label>理由<span class="required-mark">(必須)</span></label>
+        <textarea id="rdetail-reason"></textarea>
+        <button type="button" id="rdetail-reason-confirm">確定する</button>
+      </div>
+    </div>`;
+  }
   html += exdSettlementSheetHtml(full);
 
   // 1. だれの・どの申請か
@@ -7003,7 +7030,7 @@ async function renderExpenseRequestDetailInto(containerId, requestId, opts) {
     el.innerHTML = `<div class="hint">経費申請の内容を読み込めませんでした: ${exdEsc(e.message || '')}</div>`;
     return null;
   }
-  el.innerHTML = renderExpenseRequestDetailHtml(full, { mode });
+  el.innerHTML = renderExpenseRequestDetailHtml(full, { mode, canDecide: opts && opts.canDecide });
   wireExpenseRequestDetail(el, full, { mode, requestId, onChanged: opts && opts.onChanged });
   return full;
 }
@@ -14307,7 +14334,8 @@ async function loadRequestDetailContent() {
       if (histTitle) histTitle.style.display = 'none';
       document.getElementById('rdetail-history').style.display = 'none';
       document.getElementById('rdetail-receipt-title').style.display = 'none';
-      await renderExpenseRequestDetailInto('rdetail-receipts', sourceId, { mode: 'admin' });
+      const canDecide = !(r.employee_code && session && r.employee_code === session.employeeCode);
+      await renderExpenseRequestDetailInto('rdetail-receipts', sourceId, { mode: 'admin', canDecide });
       renderRequestDetailActions(sourceType, r);
       return;
     }
@@ -14389,7 +14417,23 @@ function renderRequestDetailActions(sourceType, r) {
     box.innerHTML = '<div class="hint">自分自身の申請は承認できません。別の管理者による承認が必要です。</div>';
     return;
   }
-  if (['expense_reimbursement', 'paid_leave', 'meeting'].includes(sourceType)) {
+  if (sourceType === 'expense_reimbursement') {
+    // 2026-09-12 Shota指摘対応: 承認/差し戻し/却下ボタンは、明細のスクロールなしで見える
+    // よう画面の一番上(renderExpenseRequestDetailHtml側)へ移設済み。ここ(画面の一番下)には
+    // 二重に描画せず、上のボタンへ配線するだけにする(処理済み・自己申請等でボタンが
+    // 出ていない場合は何もしない)。
+    box.innerHTML = '';
+    const approveBtn = document.getElementById('rdetail-approve');
+    if (!approveBtn) return;
+    approveBtn.addEventListener('click', () => doRequestDetailDecide('approved', null));
+    document.getElementById('rdetail-needs-info').addEventListener('click', () => { const b = document.getElementById('rdetail-reason-box'); b.dataset.action = 'needs_info'; revealReasonBox(b); });
+    document.getElementById('rdetail-reject').addEventListener('click', () => { const b = document.getElementById('rdetail-reason-box'); b.dataset.action = 'rejected'; revealReasonBox(b); });
+    document.getElementById('rdetail-reason-confirm').addEventListener('click', () => {
+      const reason = document.getElementById('rdetail-reason').value.trim();
+      if (!reason) { showError('rdetail-error', '理由を入力してください。'); return; }
+      doRequestDetailDecide(document.getElementById('rdetail-reason-box').dataset.action, reason);
+    });
+  } else if (['paid_leave', 'meeting'].includes(sourceType)) {
     if (r.status_group !== 'pending') { box.innerHTML = '<div class="hint">この申請は既に処理済みです。</div>'; return; }
     box.innerHTML = `
       <button type="button" id="rdetail-approve">承認する</button>
