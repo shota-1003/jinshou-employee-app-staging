@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>借入申請・経費のやり方</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #f6f3ed;
+    --surface: #ffffff;
+    --sunk: #efeae1;
+    --ink: #16202e;
+    --muted: #5c6875;
+    --faint: #8b95a1;
+    --line: #ddd6c9;
+    --navy: #16263f;
+    --navy-ink: #e7edf6;
+    --gold: #a87f3d;
+    --gold-soft: #f0e4cd;
+    --warn: #a4442f;
+    --ok: #2f6b4f;
+    --shadow: 0 1px 2px rgba(22,32,46,.06), 0 8px 24px rgba(22,32,46,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1622;
+      --surface: #16202e;
+      --sunk: #1b2735;
+      --ink: #e9eef5;
+      --muted: #9aa6b4;
+      --faint: #78838f;
+      --line: #2a3746;
+      --navy: #0a1220;
+      --navy-ink: #e7edf6;
+      --gold: #d5ab63;
+      --gold-soft: #35291a;
+      --warn: #e08b76;
+      --ok: #7fc0a0;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1622;
+    --surface: #16202e;
+    --sunk: #1b2735;
+    --ink: #e9eef5;
+    --muted: #9aa6b4;
+    --faint: #78838f;
+    --line: #2a3746;
+    --navy: #0a1220;
+    --navy-ink: #e7edf6;
+    --gold: #d5ab63;
+    --gold-soft: #35291a;
+    --warn: #e08b76;
+    --ok: #7fc0a0;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-text-size-adjust: 100%;
+  }
+  .page { max-width: 660px; margin: 0 auto; padding: 0 20px 72px; }
+
+  header {
+    background: var(--navy);
+    color: var(--navy-ink);
+    margin: 0 -20px 30px;
+    padding: 34px 24px 30px;
+  }
+  .brand {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 12px; letter-spacing: .18em;
+    color: var(--gold); margin-bottom: 10px;
+  }
+  h1 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 28px; line-height: 1.35;
+    margin: 0 0 12px; text-wrap: balance;
+  }
+  header p { margin: 0; color: #b9c5d6; font-size: 15px; }
+
+  nav.jump { display: flex; gap: 8px; margin: 0 0 8px; flex-wrap: wrap; }
+  nav.jump a {
+    display: inline-block; background: var(--surface); border: 1px solid var(--line);
+    color: var(--ink); text-decoration: none; font-weight: 700; font-size: 14px;
+    padding: 9px 16px; border-radius: 999px; box-shadow: var(--shadow);
+  }
+
+  h2 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 21px; line-height: 1.45;
+    margin: 46px 0 4px; text-wrap: balance; scroll-margin-top: 16px;
+  }
+  h2.section-open { margin-top: 8px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+  h2 + .sub { margin-top: 2px; }
+  h3 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 16.5px; margin: 26px 0 10px;
+  }
+
+  /* ---- 種類カード(経費: 会社/立替) ---- */
+  .kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 6px 0 22px; }
+  .kind {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 14px; box-shadow: var(--shadow);
+  }
+  .kind .name { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+  .kind .desc { color: var(--muted); font-size: 13.5px; line-height: 1.7; }
+  .kind .desc b { color: var(--ink); }
+  @media (max-width: 480px) { .kinds { grid-template-columns: 1fr; } }
+
+  /* ---- 手順 ---- */
+  ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol.steps > li {
+    display: grid; grid-template-columns: 34px 1fr; gap: 14px;
+    padding: 15px 0; border-bottom: 1px solid var(--line);
+  }
+  ol.steps > li:last-child { border-bottom: 0; }
+  .num {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 19px; color: var(--gold);
+    font-variant-numeric: tabular-nums; line-height: 1.5;
+  }
+  .what { font-weight: 700; font-size: 16.5px; line-height: 1.6; }
+  .how { color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+  .how b { color: var(--ink); font-weight: 700; }
+  .only-tag {
+    display: inline-block; background: var(--gold-soft); color: var(--gold);
+    font-size: 11.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px;
+    margin-left: 6px; vertical-align: 2px;
+  }
+
+  /* ---- 注意・補足 ---- */
+  .note {
+    background: var(--gold-soft); border-left: 3px solid var(--gold);
+    padding: 16px 18px; margin: 22px 0; font-size: 14.5px; line-height: 1.8;
+  }
+  .note.warn { background: rgba(164,68,47,.09); border-left-color: var(--warn); }
+  .note b { font-weight: 700; }
+  .note p { margin: 0; }
+  .note p + p { margin-top: 10px; }
+
+  .after {
+    display: flex; gap: 12px; align-items: flex-start;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 16px 16px; margin: 22px 0; box-shadow: var(--shadow);
+  }
+  .after .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-top: 8px; flex: none; }
+  .after .body { font-size: 14.5px; line-height: 1.8; }
+  .after .body b { font-weight: 700; }
+
+  /* ---- 困ったとき ---- */
+  .qa { border-top: 1px solid var(--line); }
+  .qa > div { border-bottom: 1px solid var(--line); padding: 15px 0; }
+  .q { font-weight: 700; font-size: 15.5px; margin-bottom: 3px; }
+  .a { color: var(--muted); font-size: 14.5px; }
+  .a b { color: var(--ink); }
+
+  hr.section-div { border: 0; border-top: 1px solid var(--line); margin: 52px 0 0; }
+
+  footer {
+    margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--faint); font-size: 12.5px; line-height: 1.8;
+  }
+  @media (max-width: 420px) {
+    h1 { font-size: 24px; }
+    ol.steps > li { grid-template-columns: 26px 1fr; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="brand">迅翔興業　社員ポータル</div>
+    <h1>借入申請・経費の<br>やり方</h1>
+    <p>社員ポータルから「会社にお金を借りたいとき」と「経費を申請するとき」の手順をまとめました。分からなくなったら、いつでもこの画面に戻ってきてください。</p>
+  </header>
+
+  <nav class="jump">
+    <a href="#loan">借入申請</a>
+    <a href="#expense">経費</a>
+    <a href="#loan-qa">借入のQ&amp;A</a>
+    <a href="#expense-qa">経費のQ&amp;A</a>
+  </nav>
+
+  <h2 id="loan" class="section-open">借入申請とは</h2>
+  <p class="sub">会社への一時的な借入をお願いする申請です。給料の前借りに近いものです。</p>
+
+  <div class="note warn">
+    <p><b>必要な日の3日前までに申請してください。</b></p>
+    <p>当日・前日の申請には対応できません。急ぎの事情がある場合も、まずは早めに申請だけしておいてください。</p>
+  </div>
+
+  <h3>手順(下部の「申請」タブ → 「借入申請」)</h3>
+  <ol class="steps">
+    <li>
+      <div class="num">1</div>
+      <div>
+        <div class="what">借入希望金額を入力する</div>
+        <div class="how">いくら借りたいかを金額で入力します。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">2</div>
+      <div>
+        <div class="what">先月の給与(総支給額)を入力する</div>
+        <div class="how">税金や保険を<b>引かれる前</b>の金額です。給与明細の総支給額の欄を見てください。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">3</div>
+      <div>
+        <div class="what">借入が必要になった理由を具体的に書く</div>
+        <div class="how"><b>「金欠」「生活費」だけでは申請できません。</b>「家賃と携帯料金の支払いが重なり生活費が不足したため」のように、具体的に書いてください。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">4</div>
+      <div>
+        <div class="what">使用目的の内訳を入力する</div>
+        <div class="how">「＋ 使用目的を追加」で、何にいくら使うかを1件ずつ追加できます。入力するたびに内訳の合計が自動で計算されます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">5</div>
+      <div>
+        <div class="what">いつまでに必要かを選ぶ</div>
+        <div class="how">お金が必要になる日を選びます。<b>その日の3日前までに</b>この申請自体を済ませておく必要があります。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">6</div>
+      <div>
+        <div class="what">受取方法を選ぶ(現金 または 銀行振込)</div>
+        <div class="how">銀行振込を選ぶと、登録済みの給与振込口座へ振り込まれます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">7</div>
+      <div>
+        <div class="what">「確認画面へ」→ 内容を確認して「この内容で申請する」</div>
+        <div class="how">金銭に関わる申請のため、確認画面で内容を必ず見直してから送信してください。</div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="after">
+    <div class="dot"></div>
+    <div class="body">申請後は「<b>借入申請履歴</b>」でいまの状況(承認待ち・承認・却下)を確認できます。承認されると、そこから「<b>貸付金の残高を見る</b>」で、いま会社からいくら借りているか(残高)を確認できます。</div>
+  </div>
+
+  <h3 id="loan-qa">困ったとき(借入申請)</h3>
+  <div class="qa">
+    <div>
+      <div class="q">理由に何を書けばいいか分からない</div>
+      <div class="a">「なぜ」「いくら」「いつ」が伝わる書き方にしてください。例:「子どもの入学費用の支払いが今月に重なったため」。抽象的な理由(金欠・生活費のみ)は却下されます。</div>
+    </div>
+    <div>
+      <div class="q">申請した内容を間違えた・直したい</div>
+      <div class="a">「借入申請履歴」からその申請を開くと、まだ処理前であれば「<b>この申請を修正する</b>」ボタンが出ます。</div>
+    </div>
+    <div>
+      <div class="q">いま会社にいくら借りているか分からない</div>
+      <div class="a">「借入申請履歴」の中にある「貸付金の残高を見る」で、現在の残高と過去の記録が確認できます。</div>
+    </div>
+  </div>
+
+  <hr class="section-div">
+
+  <h2 id="expense">経費とは</h2>
+  <p class="sub">支払ったお金が「誰の財布から出たか」で申請の種類が変わります。まずどちらかを選びます。</p>
+
+  <div class="kinds">
+    <div class="kind">
+      <div class="name">会社のお金を使った</div>
+      <div class="desc">会社の現金・法人カード・会社口座で払った場合。<b>あなたへの返金はありません</b>(使った記録の報告です)。</div>
+    </div>
+    <div class="kind">
+      <div class="name">自分のお金で立替えた</div>
+      <div class="desc">自分の財布・自分のカードで払った場合。<b>あとで会社から返金されます</b>(経費立替)。</div>
+    </div>
+  </div>
+
+  <h3>手順(ホーム画面、または「申請」タブ → 「経費」)</h3>
+  <ol class="steps">
+    <li>
+      <div class="num">1</div>
+      <div>
+        <div class="what">「会社のお金を使った」か「自分のお金で立替えた」かを選ぶ</div>
+        <div class="how">迷ったときは上の説明を参考にしてください。分からなければ「自分のお金で立替えた」を選んで申請し、備考にひとことメモを添えてください。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">2</div>
+      <div>
+        <div class="what">領収書を撮影・選択する</div>
+        <div class="how"><b>1枚でも、複数まとめてでもOKです。</b>1枚の写真に領収書が何枚も写っていても、AIが自動で1件ずつの明細に分けてくれます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">3</div>
+      <div>
+        <div class="what">明細の内容を確認する</div>
+        <div class="how">利用日・支払先・金額はAIが自動で読み取ります。<b>現場</b>と<b>使用目的</b>は必須項目なので、違っていないか確認し、無ければ選び直してください。該当する現場が無い場合は「会社共通」「現場外」も選べます。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">4</div>
+      <div>
+        <div class="what">受取方法を選ぶ<span class="only-tag">立替のときだけ</span></div>
+        <div class="how">「自分のお金で立替えた」を選んだ場合のみ必要です。現金 か 銀行振込 かを選びます(会社のお金を使った場合は、返金が発生しないため不要です)。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">5</div>
+      <div>
+        <div class="what">「この内容で申請する」を押す</div>
+        <div class="how">これで管理者への申請が完了します。</div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="after">
+    <div class="dot"></div>
+    <div class="body">申請後は、下部の「<b>履歴</b>」タブ → 「<b>経費の履歴...をすべて見る</b>」で確認できます。<b>申請1件が1枚のカード</b>で表示され、タップするとその申請の経費精算書と領収書がまとめて開きます。</div>
+  </div>
+
+  <h3 id="expense-qa">困ったとき(経費)</h3>
+  <div class="qa">
+    <div>
+      <div class="q">会社のお金か自分のお金か、どちらか分からない</div>
+      <div class="a">法人カード・会社の現金で払ったなら「会社のお金を使った」。自分の財布・自分名義のカードで払ったなら「自分のお金で立替えた」です。分からない場合は立替として申請し、備考に状況を書いてください。</div>
+    </div>
+    <div>
+      <div class="q">領収書の写真がぼやけている・文字が読み取れない</div>
+      <div class="a">明るい場所で、領収書全体が入るように撮り直してください。AIが読み取れなかった項目は空欄になるので、その場合は自分で入力すれば申請できます。</div>
+    </div>
+    <div>
+      <div class="q">どの現場の経費か分からない・複数の現場にまたがる</div>
+      <div class="a">はっきり分からない場合は「<b>現場外</b>」、会社全体に関わるものは「<b>会社共通</b>」を選んでください。リストに無い現場は「リストに無い現場を入力する」からその場で追加できます。</div>
+    </div>
+    <div>
+      <div class="q">受取方法は現金と銀行振込、どちらを選べばいいか</div>
+      <div class="a">銀行振込を選ぶと、登録済みの給与振込口座へまとめて振り込まれます。手渡しで受け取りたい場合は現金を選んでください。</div>
+    </div>
+    <div>
+      <div class="q">申請したのに履歴に出てこない・状況を知りたい</div>
+      <div class="a">「履歴」タブ →「経費の履歴...をすべて見る」のカードに、承認待ち・承認済み・却下・支払済みの状況が表示されます。カードをタップすると詳しい内容が見られます。</div>
+    </div>
+  </div>
+
+  <footer>
+    迅翔興業　社員ポータル<br>
+    うまくいかないときは、この画面のスクリーンショットを添えて会社へご連絡ください。
+  </footer>
+
+</div>
+</body>
+</html>
