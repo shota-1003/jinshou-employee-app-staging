@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>誕生日・扶養人数の登録のお願い</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@500;700;900&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #f6f3ed;
+    --surface: #ffffff;
+    --sunk: #efeae1;
+    --ink: #16202e;
+    --muted: #5c6875;
+    --faint: #8b95a1;
+    --line: #ddd6c9;
+    --navy: #16263f;
+    --navy-ink: #e7edf6;
+    --gold: #a87f3d;
+    --gold-soft: #f0e4cd;
+    --warn: #a4442f;
+    --ok: #2f6b4f;
+    --shadow: 0 1px 2px rgba(22,32,46,.06), 0 8px 24px rgba(22,32,46,.05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #0e1622;
+      --surface: #16202e;
+      --sunk: #1b2735;
+      --ink: #e9eef5;
+      --muted: #9aa6b4;
+      --faint: #78838f;
+      --line: #2a3746;
+      --navy: #0a1220;
+      --navy-ink: #e7edf6;
+      --gold: #d5ab63;
+      --gold-soft: #35291a;
+      --warn: #e08b76;
+      --ok: #7fc0a0;
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #0e1622;
+    --surface: #16202e;
+    --sunk: #1b2735;
+    --ink: #e9eef5;
+    --muted: #9aa6b4;
+    --faint: #78838f;
+    --line: #2a3746;
+    --navy: #0a1220;
+    --navy-ink: #e7edf6;
+    --gold: #d5ab63;
+    --gold-soft: #35291a;
+    --warn: #e08b76;
+    --ok: #7fc0a0;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.3);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "Noto Sans JP", -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    font-size: 16px;
+    line-height: 1.85;
+    -webkit-text-size-adjust: 100%;
+  }
+  .page { max-width: 660px; margin: 0 auto; padding: 0 20px 72px; }
+
+  header {
+    background: var(--navy);
+    color: var(--navy-ink);
+    margin: 0 -20px 36px;
+    padding: 34px 24px 30px;
+  }
+  .brand {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 12px; letter-spacing: .18em;
+    color: var(--gold); margin-bottom: 10px;
+  }
+  h1 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 28px; line-height: 1.35;
+    margin: 0 0 12px; text-wrap: balance;
+  }
+  header p { margin: 0; color: #b9c5d6; font-size: 15px; }
+
+  h2 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 21px; line-height: 1.45;
+    margin: 46px 0 4px; text-wrap: balance;
+  }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 18px; }
+  h2 + .sub { margin-top: 2px; }
+  h3 {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 700; font-size: 16.5px; margin: 26px 0 10px;
+  }
+
+  .allowance {
+    display: flex; align-items: flex-start; gap: 14px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 18px; margin: 0 0 22px; box-shadow: var(--shadow);
+  }
+  .allowance .icon { font-size: 28px; line-height: 1; flex: none; margin-top: 2px; }
+  .allowance .name { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .allowance .desc { color: var(--muted); font-size: 14px; line-height: 1.8; }
+  .allowance .desc b { color: var(--ink); font-weight: 700; }
+
+  ol.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  ol.steps > li {
+    display: grid; grid-template-columns: 34px 1fr; gap: 14px;
+    padding: 15px 0; border-bottom: 1px solid var(--line);
+  }
+  ol.steps > li:last-child { border-bottom: 0; }
+  .num {
+    font-family: "Zen Kaku Gothic New", sans-serif;
+    font-weight: 900; font-size: 19px; color: var(--gold);
+    font-variant-numeric: tabular-nums; line-height: 1.5;
+  }
+  .what { font-weight: 700; font-size: 16.5px; line-height: 1.6; }
+  .how { color: var(--muted); font-size: 14.5px; margin-top: 4px; }
+  .how b { color: var(--ink); font-weight: 700; }
+
+  .note {
+    background: var(--gold-soft); border-left: 3px solid var(--gold);
+    padding: 16px 18px; margin: 22px 0; font-size: 14.5px; line-height: 1.8;
+  }
+  .note.warn { background: rgba(164,68,47,.09); border-left-color: var(--warn); }
+  .note b { font-weight: 700; }
+  .note p { margin: 0; }
+  .note p + p { margin-top: 10px; }
+
+  .qa { border-top: 1px solid var(--line); }
+  .qa > div { border-bottom: 1px solid var(--line); padding: 15px 0; }
+  .q { font-weight: 700; font-size: 15.5px; margin-bottom: 3px; }
+  .a { color: var(--muted); font-size: 14.5px; }
+  .a b { color: var(--ink); }
+
+  footer {
+    margin-top: 48px; padding-top: 20px; border-top: 1px solid var(--line);
+    color: var(--faint); font-size: 12.5px; line-height: 1.8;
+  }
+  @media (max-width: 420px) {
+    h1 { font-size: 24px; }
+    ol.steps > li { grid-template-columns: 26px 1fr; gap: 10px; }
+  }
+</style>
+</head>
+<body>
+<div class="page">
+
+  <header>
+    <div class="brand">迅翔興業　社員ポータル</div>
+    <h1>誕生日・扶養人数の<br>登録のお願い</h1>
+    <p>「自分の情報」に2つの項目を登録しておいてください。入れていないと、誕生日手当・扶養手当が正しく受け取れません。</p>
+  </header>
+
+  <div class="allowance">
+    <div class="icon">🎂</div>
+    <div>
+      <div class="name">誕生日 → 誕生日手当</div>
+      <div class="desc">生年月日が登録されていないと、<b>誕生日の月が分からず誕生日手当の対象月を判定できません。</b>登録すると社内カレンダーにも月日だけ表示されます(生年・年齢は表示されません)。</div>
+    </div>
+  </div>
+
+  <div class="allowance">
+    <div class="icon">👨‍👩‍👧</div>
+    <div>
+      <div class="name">扶養人数 → 扶養手当</div>
+      <div class="desc">扶養している家族の人数が登録されていないと、<b>扶養手当の対象かどうか会社側で判断できません。</b>人数が変わったとき(結婚・出産・扶養から外れた等)も、そのつど登録し直してください。</div>
+    </div>
+  </div>
+
+  <h2>登録の手順</h2>
+  <p class="sub">「自分の情報」タブから、どちらも1分ほどで登録できます。</p>
+  <ol class="steps">
+    <li>
+      <div class="num">1</div>
+      <div>
+        <div class="what">下部の「自分の情報」タブを開く</div>
+        <div class="how">「基本情報」の中に「生年月日」「扶養人数」の欄があります。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">2</div>
+      <div>
+        <div class="what">それぞれの「変更申請」ボタンを押す</div>
+        <div class="how">生年月日・扶養人数、どちらも同じ操作です。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">3</div>
+      <div>
+        <div class="what">内容を入力して送信する</div>
+        <div class="how">扶養人数は現在の人数(0人であれば「0」)を入力してください。</div>
+      </div>
+    </li>
+    <li>
+      <div class="num">4</div>
+      <div>
+        <div class="what">管理者の確認後、登録が反映される</div>
+        <div class="how">申請してすぐには反映されません。管理者が内容を確認してから反映されます。</div>
+      </div>
+    </li>
+  </ol>
+
+  <div class="note warn">
+    <p><b>まだ登録していない方は、今すぐ登録をお願いします。</b></p>
+    <p>該当する月の給与計算までに登録が済んでいないと、その月の手当に間に合わないことがあります。</p>
+  </div>
+
+  <h2>困ったとき</h2>
+  <div class="qa">
+    <div>
+      <div class="q">扶養が0人の場合も登録が必要?</div>
+      <div class="a">必要です。「0」で登録してください。未登録のままだと、0人なのか単に未登録なのか会社側で区別できません。</div>
+    </div>
+    <div>
+      <div class="q">申請したのに反映されない</div>
+      <div class="a">申請は<b>管理者が確認してから反映</b>される仕組みです。しばらく経っても反映されない場合は会社へご連絡ください。</div>
+    </div>
+    <div>
+      <div class="q">入力を間違えた</div>
+      <div class="a">同じ「変更申請」からもう一度、正しい内容で申請し直してください。</div>
+    </div>
+    <div>
+      <div class="q">誕生日をカレンダーに表示したくない</div>
+      <div class="a">生年月日を登録すると自動でカレンダー表示もONになりますが、表示自体は月日のみです(生年・年齢は出ません)。それでも表示したくない場合は会社へご相談ください。</div>
+    </div>
+  </div>
+
+  <footer>
+    迅翔興業　社員ポータル<br>
+    うまくいかないときは、この画面のスクリーンショットを添えて会社へご連絡ください。
+  </footer>
+
+</div>
+</body>
+</html>
