@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v179-staging';
-const BUILD_DEPLOYED_AT = '2026-09-12T01:40:06.176Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v180-staging';
+const BUILD_DEPLOYED_AT = '2026-09-12T10:32:41.941Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -13056,7 +13056,7 @@ async function fetchDailyReportForTarget(dateStr) {
     p_subcontractor_company_id: null, p_report_status: null,
   });
   const filtered = dailyReportTarget.type === 'subcontractor'
-    ? rows.filter((r) => r.subcontractor_worker_name === dailyReportTarget.workerName)
+    ? rows.filter((r) => r.subcontractor_worker_id === dailyReportTarget.subcontractorWorkerId)
     : rows;
   return filtered.map((r) => ({
     site_id: r.site_id, work_type: r.work_type, headcount: r.headcount, reflected: !!r.reflected_to_sheet_at,
