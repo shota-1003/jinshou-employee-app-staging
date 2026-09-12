@@ -1459,6 +1459,12 @@
       <div class="total-row total-amount"><span>合計金額</span><span id="expense-total-amount">0円</span></div>
     </div>
 
+    <div id="expense-receipt-method-block" style="display:none;margin-top:10px;">
+      <label>受取方法(会社から受け取る方法)<span class="required-mark">(必須)</span></label>
+      <div class="checkbox-row"><input type="radio" name="expense-receipt-method" value="cash" id="expense-receipt-cash"><label for="expense-receipt-cash">現金</label></div>
+      <div class="checkbox-row"><input type="radio" name="expense-receipt-method" value="bank_transfer" id="expense-receipt-bank"><label for="expense-receipt-bank">銀行振込</label></div>
+    </div>
+
     <div class="error" id="expense-error"></div>
     <button id="expense-submit">この内容で申請する</button>
 
@@ -1619,6 +1625,12 @@
     <label>備考</label>
     <div class="hint-inline">任意</div>
     <input type="text" id="expense-bulk-note">
+
+    <div id="expense-bulk-receipt-method-block" style="display:none;margin-top:10px;">
+      <label>受取方法(会社から受け取る方法)<span class="required-mark">(必須)</span></label>
+      <div class="checkbox-row"><input type="radio" name="expense-bulk-receipt-method" value="cash" id="expense-bulk-receipt-cash"><label for="expense-bulk-receipt-cash">現金</label></div>
+      <div class="checkbox-row"><input type="radio" name="expense-bulk-receipt-method" value="bank_transfer" id="expense-bulk-receipt-bank"><label for="expense-bulk-receipt-bank">銀行振込</label></div>
+    </div>
 
     <div class="error" id="expense-bulk-error"></div>
     <button id="expense-bulk-submit">まとめて経費精算を申請</button>

@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v178-staging';
-const BUILD_DEPLOYED_AT = '2026-09-11T22:33:50.947Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v179-staging';
+const BUILD_DEPLOYED_AT = '2026-09-12T01:40:06.176Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2370,6 +2370,9 @@ function enterExpenseScreen(category) {
   const text = EXPENSE_SCREEN_TEXT[category];
   document.getElementById('expense-screen-title').textContent = text.title;
   document.getElementById('expense-screen-hint').textContent = text.hint;
+  // 受取方法(会社からの受け取り方)は、会社が社員へ返す「経費立替」の時だけ必要
+  // (会社経費は会社自身の支出のため受け取りが発生しない)。
+  document.getElementById('expense-receipt-method-block').style.display = category === 'employee_advance' ? 'block' : 'none';
   resetExpenseForm();
   hideError('expense-error');
   populateVendorList();
@@ -2924,6 +2927,7 @@ function resetExpenseForm() {
   participantSelects.clear();
   expenseItemSeq = 0;
   addExpenseItem();
+  document.querySelectorAll('input[name="expense-receipt-method"]').forEach((el) => { el.checked = false; });
 }
 
 async function doSubmitExpense() {
@@ -3020,10 +3024,15 @@ async function doSubmitExpense() {
     });
   }
 
+  const receiptMethod = (document.querySelector('input[name="expense-receipt-method"]:checked') || {}).value || null;
+  if (currentExpenseCategory === 'employee_advance' && !receiptMethod) {
+    showError('expense-error', '受取方法(現金・銀行振込)を選択してください。'); return;
+  }
+
   const btn = document.getElementById('expense-submit');
   btn.disabled = true;
   try {
-    const result = await rpc('submit_expense_claim', { p_employee_code: session.employeeCode, p_expense_category: currentExpenseCategory, p_items: items });
+    const result = await rpc('submit_expense_claim', { p_employee_code: session.employeeCode, p_expense_category: currentExpenseCategory, p_items: items, p_receipt_method: receiptMethod });
     const r = result && result[0];
     const label = currentExpenseCategory === 'company_expense' ? '会社経費登録' : '経費立替申請';
     showDone(`${label}を受け付けました(${r ? r.item_count : items.length}件、合計${r ? Number(r.total_amount).toLocaleString() : ''}円)。承認をお待ちください。`, 'menu-apply');
@@ -3378,12 +3387,14 @@ function resetExpenseBulkForm() {
   document.getElementById('expense-bulk-month').value = todayJST().slice(0, 7);
   document.getElementById('expense-bulk-batch-title').value = '';
   document.getElementById('expense-bulk-note').value = '';
+  document.querySelectorAll('input[name="expense-bulk-receipt-method"]').forEach((el) => { el.checked = false; });
   updateBulkExpenseTotal();
 }
 
 function enterExpenseBulkScreen(category) {
   bulkExpenseCategory = category;
   document.getElementById('expense-bulk-title').textContent = category === 'company_expense' ? 'まとめて精算(会社経費)' : 'まとめて精算(経費立替)';
+  document.getElementById('expense-bulk-receipt-method-block').style.display = category === 'employee_advance' ? 'block' : 'none';
   resetExpenseBulkForm();
   hideError('expense-bulk-error');
   populateSiteSelect(document.getElementById('expense-bulk-bulk-site'), '');
@@ -3437,13 +3448,18 @@ async function doSubmitExpenseBulk() {
     declared_total: bulkCoverSheet.declaredTotal, applicant_name: bulkCoverSheet.applicantName,
   } : null;
 
+  const receiptMethod = (document.querySelector('input[name="expense-bulk-receipt-method"]:checked') || {}).value || null;
+  if (bulkExpenseCategory === 'employee_advance' && !receiptMethod) {
+    showError('expense-bulk-error', '受取方法(現金・銀行振込)を選択してください。'); return;
+  }
+
   const btn = document.getElementById('expense-bulk-submit');
   btn.disabled = true;
   try {
     const result = await rpc('submit_bulk_expense_claim', {
       p_employee_code: session.employeeCode, p_expense_category: bulkExpenseCategory,
       p_target_month: `${monthValue}-01`, p_batch_title: document.getElementById('expense-bulk-batch-title').value.trim() || null,
-      p_items: items, p_cover_sheet: coverSheet,
+      p_items: items, p_cover_sheet: coverSheet, p_receipt_method: receiptMethod,
     });
     const r = result && result[0];
     let msg = `まとめて精算を受け付けました(${r ? r.item_count : items.length}件、合計${r ? Number(r.total_amount).toLocaleString('ja-JP') : ''}円)。承認をお待ちください。`;
@@ -6091,23 +6107,49 @@ function dateTimeText(v) { return v ? new Date(v).toLocaleString('ja-JP') : '-';
 // 2026-09-06(X2): 「領収書リンク」がGoogle Driveのビューア直リンクだったため、Googleに
 // ログインしていない端末(社員のiPhone・税理士の端末)では開けなかった(A1指摘)。
 // 認証プロキシ(receipt-image)経由のサムネイル+タップ拡大に統一し、Driveの生URLは出さない。
-function expenseLedgerCardHtml(r, opts) {
+// 台帳は元々「領収書(明細)1件=1行」だったが、1つの申請に複数の領収書がある場合
+// (まとめて精算など)、同じ申請が何行にも分かれて並び、税理士へ渡す紙(経費精算書)と
+// 対応が取りづらかった(2026-09-12ユーザー指摘「領収書を並べるのじゃなくて、この紙を
+// 並べるようにして。クリックするとこの紙の領収書が出て来るようにして」)。
+// 申請(employee_request_id)単位へ集約し、1申請=1カードにする(クリック先の詳細画面は
+// 既存のexdSettlementSheetHtml/renderSettlementSheetがそのまま「この紙+領収書」を表示する)。
+function groupExpenseLedgerRows(rows) {
+  const map = new Map();
+  for (const r of rows || []) {
+    const key = r.employee_request_id;
+    if (!map.has(key)) {
+      map.set(key, {
+        employee_request_id: key, employee_name: r.employee_name, employee_code: r.employee_code,
+        expense_category: r.expense_category, requested_at: r.requested_at,
+        item_count: 0, amount: 0, has_pending: false, has_rejected: false, has_approved: false,
+        scheduled_payment_date: null, paid_at: null, payment_status: r.payment_status,
+      });
+    }
+    const g = map.get(key);
+    g.item_count += 1;
+    g.amount += Number(r.amount || 0);
+    if (r.item_approval_status === 'rejected') g.has_rejected = true;
+    else if (r.item_approval_status === 'approved') g.has_approved = true;
+    else g.has_pending = true;
+    if (!g.scheduled_payment_date && r.scheduled_payment_date) g.scheduled_payment_date = r.scheduled_payment_date;
+    if (!g.paid_at && r.paid_at) g.paid_at = r.paid_at;
+    if (r.payment_status) g.payment_status = r.payment_status;
+    if (r.requested_at && (!g.requested_at || new Date(r.requested_at) < new Date(g.requested_at))) g.requested_at = r.requested_at;
+  }
+  return Array.from(map.values()).sort((a, b) => new Date(b.requested_at) - new Date(a.requested_at));
+}
+
+function expenseRequestLedgerCardHtml(g, opts) {
   const showName = !opts || opts.showName !== false;
+  const statusLabel = g.has_pending ? '確認中' : (g.has_rejected && !g.has_approved) ? '却下' : (g.has_rejected ? '一部却下' : '承認済み');
+  const statusClass = g.has_pending ? 'warn' : (g.has_rejected && !g.has_approved) ? 'rejected' : 'done';
   return `
-    <div class="history-item expense-ledger-card" data-request-id="${r.employee_request_id}" data-document-id="${r.document_id || ''}">
-      <div class="row1"><span>${showName ? `${r.employee_name}・` : ''}${r.store_name || '(支払先不明)'}</span><span>${yenText(r.amount)}</span></div>
-      <div class="row2">帰属月: ${r.belonging_year_month || '-'}　利用日: ${dateText(r.document_date)}　現場: ${r.site_name || '-'}</div>
-      <div class="row2">勘定科目: ${r.account_category || '(未確定)'}${r.account_category_status === 'confirmed' ? '' : '(要確認)'}　区分: ${r.expense_category === 'employee_advance' ? '立替' : '会社払い'}</div>
-      <div class="row2">領収書: ${r.has_receipt && r.document_id
-    ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb" data-secure-kind="receipt" data-secure-id="${r.document_id}" alt="領収書" loading="lazy"><div class="hint-inline">タップで拡大(書類ID ${r.document_id})</div></div>`
-    : '<span class="mini-tag warn">なし</span>'}</div>
-      <div class="row2">申請日時: ${dateTimeText(r.requested_at)}</div>
-      <div class="row2">${expenseApprovalBadgeHtml(r.item_approval_status, r.approval_method, r.approval_method_label, r.approver_name, r.approved_at)}</div>
-      ${approvalMethodNoteHtml(r.approval_method)}
-      <div class="row2">支払予定日: ${dateText(r.scheduled_payment_date)}　支払完了日: ${dateText(r.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status || '-'}</div>
-      <div class="row2">税理士への提出: ${TAX_SUBMISSION_STATE_LABEL[r.tax_submission_state] || r.tax_submission_state || '未送信'}${r.tax_last_sent_at ? `(最終送信 ${dateText(r.tax_last_sent_at)})` : ''}</div>
-      ${r.item_approval_status === 'rejected' && (r.item_approval_reason || r.rejection_reason) ? `<div class="row2">却下理由: ${r.item_approval_reason || r.rejection_reason}</div>` : ''}
-      <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">この経費の全体を見る</button>
+    <div class="history-item expense-ledger-request-card" data-request-id="${g.employee_request_id}" style="cursor:pointer;">
+      <div class="row1"><span>${showName ? `${exdEsc(g.employee_name)}・` : ''}経費精算書(${g.item_count}件)</span><span>${yenText(g.amount)}</span></div>
+      <div class="row2">申請日: ${dateTimeText(g.requested_at)}　区分: ${g.expense_category === 'employee_advance' ? '立替' : '会社払い'}</div>
+      <div class="row2">支払予定日: ${dateText(g.scheduled_payment_date)}　支払完了日: ${dateText(g.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[g.payment_status] || g.payment_status || '-'}</div>
+      <span class="status-badge ${statusClass}">${statusLabel}</span>
+      <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">経費精算書を開く</button>
     </div>
   `;
 }
@@ -6125,22 +6167,18 @@ async function loadMyExpenseLedger() {
       p_employee_code: session.employeeCode,
       p_year_month: myExpenseLedgerMonth || null,
     });
-    if (countEl) countEl.textContent = `${(rows || []).length}件`;
     if (!rows || rows.length === 0) {
+      if (countEl) countEl.textContent = '';
       listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
       return;
     }
-    listEl.innerHTML = rows.map((r) => expenseLedgerCardHtml(r, { showName: false })).join('');
+    const grouped = groupExpenseLedgerRows(rows);
+    if (countEl) countEl.textContent = `${grouped.length}件(明細${rows.length}件)`;
+    listEl.innerHTML = grouped.map((g) => expenseRequestLedgerCardHtml(g, { showName: false })).join('');
     hydrateIcons(listEl);
-    // 領収書は認証プロキシ経由で表示し、タップで拡大(Driveの直リンクは使わない)。
-    hydrateSecureImages(listEl);
-    // 台帳の1行からも、申請詳細とまったく同じ「経費の全体」を開ける(入口が違っても同じ描画関数)。
-    listEl.querySelectorAll('.expense-ledger-detail-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const card = e.target.closest('.expense-ledger-card');
-        openMyRequestDetail(card.dataset.requestId, 'my-expense-ledger');
-      });
+    // 台帳のカード(=1申請=経費精算書1枚)から、申請詳細(紙+領収書)を開く。
+    listEl.querySelectorAll('.expense-ledger-request-card').forEach((card) => {
+      card.addEventListener('click', () => openMyRequestDetail(card.dataset.requestId, 'my-expense-ledger'));
     });
   } catch (e) {
     // 「0件」と「取得失敗」を混同させない。
@@ -6168,21 +6206,19 @@ async function loadExpenseLedgerAdmin() {
       p_status_group: expenseLedgerAdminFilters.statusGroup || null,
     }) || [];
     const total = expenseLedgerAdminRows.reduce((s, r) => s + Number(r.amount || 0), 0);
-    if (countEl) countEl.textContent = `${expenseLedgerAdminRows.length}件・合計${yenText(total)}`;
+    const groupedAdmin = groupExpenseLedgerRows(expenseLedgerAdminRows);
+    if (countEl) countEl.textContent = `${groupedAdmin.length}件(明細${expenseLedgerAdminRows.length}件)・合計${yenText(total)}`;
     if (expenseLedgerAdminRows.length === 0) {
       listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
       bodyEl.innerHTML = '<tr><td colspan="16"><div class="hint">この条件の経費履歴はありません。</div></td></tr>';
       return;
     }
-    listEl.innerHTML = expenseLedgerAdminRows.map((r) => expenseLedgerCardHtml(r)).join('');
+    // 台帳は「領収書1件=1行」ではなく「申請(経費精算書)1件=1カード」で並べ、カードを
+    // クリックするとその申請の紙+領収書がまとめて開く(2026-09-12ユーザー指摘)。
+    listEl.innerHTML = groupedAdmin.map((g) => expenseRequestLedgerCardHtml(g)).join('');
     hydrateIcons(listEl);
-    hydrateSecureImages(listEl);
-    // 台帳の1行 →「この経費の全体を見る」で申請詳細(共通の1関数)へ。入った場所(台帳)へ戻る。
-    listEl.querySelectorAll('.expense-ledger-detail-btn').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openRequestDetail('expense_reimbursement', e.target.closest('.expense-ledger-card').dataset.requestId);
-      });
+    listEl.querySelectorAll('.expense-ledger-request-card').forEach((card) => {
+      card.addEventListener('click', () => openRequestDetail('expense_reimbursement', card.dataset.requestId));
     });
     bodyEl.innerHTML = expenseLedgerAdminRows.map((r) => `
       <tr>
@@ -6224,28 +6260,22 @@ async function loadExpenseLedgerAdmin() {
 // 税理士へそのまま渡せるCSV(Excelでそのまま開けるようUTF-8 BOM付き)。
 // 列は既存の税理士提出パッケージ(scripts/lib/receipt-monthly-tax-export.js)の台帳CSVと
 // 同じ意味の項目に揃え、承認方式・税理士送信状態を追加している。
+// 2026-09-12 ユーザー指摘(原文)「こんなエクセルで税理士が分かるわけないだろ 帰属月も
+// 意味わからんし 社員番号も意味わからん 消費税も税率もいらん インボイスもいらん
+// 領収書の確認もポータル以外でしないからいらない 税理士初回とか最終とかその他IDいらない」
+// を受けて、税理士がそのまま読める最小限の項目だけに絞った(帰属月・社員番号・消費税・税率・
+// インボイス番号・領収書関連・勘定科目確認状態・承認方式・税理士送信の内部管理項目・
+// 各種内部ID列を削除)。内部管理用の詳細が必要な場合は社員ポータルの管理画面を直接見る。
 const EXPENSE_LEDGER_CSV_COLUMNS = [
-  ['帰属月', 'belonging_year_month'], ['利用日', 'document_date'], ['申請者', 'employee_name'],
-  ['社員番号', 'employee_code'], ['経費区分', (r) => (r.expense_category === 'employee_advance' ? '立替' : '会社払い')],
+  ['利用日', 'document_date'], ['申請者', 'employee_name'],
+  ['経費区分', (r) => (r.expense_category === 'employee_advance' ? '立替' : '会社払い')],
   ['支払先', 'store_name'], ['現場', 'site_name'], ['使用目的', 'purpose_category'], ['使用目的詳細', 'purpose'],
-  ['勘定科目', 'account_category'], ['勘定科目の確認状態', (r) => (r.account_category_status === 'confirmed' ? '確定' : '要確認')],
-  ['支払方法', 'payment_method'], ['金額', 'amount'], ['消費税', 'tax_amount'], ['税率', 'tax_rate'],
-  ['インボイス番号', 'invoice_registration_number'],
-  ['領収書', (r) => (r.has_receipt ? 'あり' : 'なし')],
-  // 2026-09-06(X2): 旧「領収書リンク」はGoogle Driveのビューア直リンクで、Googleに
-  // ログインしていない端末(税理士側を含む)では開けなかった。CSVにはDriveのURLを載せず、
-  // 社内の管理画面で原本にたどり着くための書類ID・申請IDだけを載せる。
-  ['領収書の確認方法', (r) => (r.has_receipt
-    ? `社員ポータル 管理者→経費履歴台帳→この行の「この経費の全体を見る」(申請ID ${r.employee_request_id} / 書類ID ${r.document_id})`
-    : '領収書なし')],
+  ['勘定科目', 'account_category'], ['支払方法', 'payment_method'], ['金額', 'amount'],
   ['申請日時', 'requested_at'],
   ['承認状態', (r) => EXPENSE_ITEM_STATUS_LABEL[r.item_approval_status] || r.item_approval_status || ''],
-  ['承認方式', 'approval_method_label'], ['承認者', 'approver_name'], ['承認日時', 'approved_at'],
+  ['承認者', 'approver_name'], ['承認日時', 'approved_at'],
   ['支払予定日', 'scheduled_payment_date'], ['支払完了日', 'paid_at'],
   ['精算状態', (r) => EXPENSE_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status || ''],
-  ['税理士送信状態', (r) => TAX_SUBMISSION_STATE_LABEL[r.tax_submission_state] || r.tax_submission_state || ''],
-  ['税理士初回送信', 'tax_first_sent_at'], ['税理士最終送信', 'tax_last_sent_at'], ['追送回数', 'tax_additional_send_count'],
-  ['伝票ID', 'expense_item_id'], ['申請ID', 'employee_request_id'], ['書類ID', 'document_id'],
 ];
 
 function expenseLedgerToCsv(rows) {
@@ -6596,7 +6626,12 @@ function exdSettlementSheetHtml(full) {
     });
   const total = rows.reduce((acc, it) => acc + Number(it.amount || 0), 0);
   const blanks = Math.max(0, 12 - rows.length);
-  const payLabel = pay.method === 'transfer' ? '振込み' : pay.method === 'cash' ? '現金' : '現金　・　振込み';
+  // 実際に支払済みならその方法をそのまま表示。まだ支払前でも、申請者が希望した受取方法が
+  // あればそれを「(希望)」付きで表示する(2026-09-12ユーザー指摘: 申請時に選べないのはおかしい)。
+  const payLabel = pay.method === 'transfer' ? '振込み' : pay.method === 'cash' ? '現金'
+    : pay.preferred_receipt_method === 'bank_transfer' ? '銀行振込(希望)'
+    : pay.preferred_receipt_method === 'cash' ? '現金(希望)'
+    : '現金　・　振込み';
   const approverName = ap.approved_by || ap.approver || '';
   const approvedOn = d.approved_at ? ymd(d.approved_at) : '';
   const stampCell = (label, filled) => `<td class="ss-stamp" style="width:60px;">${filled
