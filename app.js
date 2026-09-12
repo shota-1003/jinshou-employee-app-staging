@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v182-staging';
-const BUILD_DEPLOYED_AT = '2026-09-12T10:55:48.887Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v183-staging';
+const BUILD_DEPLOYED_AT = '2026-09-12T12:45:31.582Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7336,7 +7336,7 @@ function lockedFieldRow(label, value) {
 const CHANGE_FIELD_LABEL = {
   phone: '電話番号', postal_code: '郵便番号', address: '住所', email: 'メールアドレス',
   emergency_contact_name: '緊急連絡先(氏名)', emergency_contact_relation: '緊急連絡先(続柄)', emergency_contact_phone: '緊急連絡先(電話番号)',
-  birth_date: '生年月日',
+  birth_date: '生年月日', dependents_count: '扶養人数',
 };
 
 function renderAvatar(elId, name, photoUrl) {
@@ -7454,6 +7454,7 @@ async function loadMyInfo() {
       lockedFieldRow('氏名', p.employee_name) +
       lockedFieldRow('フリガナ', p.furigana) +
       fieldRow('生年月日', p.birth_date ? new Date(p.birth_date).toLocaleDateString('ja-JP') : null, 'birth_date', p.birth_date) +
+      fieldRow('扶養人数', p.dependents_count != null ? `${p.dependents_count}人` : null, 'dependents_count', p.dependents_count) +
       lockedFieldRow('入社日', p.hire_date ? new Date(p.hire_date).toLocaleDateString('ja-JP') : null) +
       lockedFieldRow('所属/役割', p.department);
     document.getElementById('myinfo-contact-fields').innerHTML =
@@ -7503,7 +7504,9 @@ function openProfileEdit(field, currentValue) {
   document.getElementById('profile-edit-title').textContent = `${CHANGE_FIELD_LABEL[field] || field}の変更申請`;
   document.getElementById('profile-edit-label').textContent = `新しい${CHANGE_FIELD_LABEL[field] || ''}`;
   const input = document.getElementById('profile-edit-value');
-  input.type = field === 'birth_date' ? 'date' : 'text';
+  input.type = field === 'birth_date' ? 'date' : (field === 'dependents_count' ? 'number' : 'text');
+  input.min = field === 'dependents_count' ? '0' : '';
+  input.max = field === 'dependents_count' ? '20' : '';
   input.value = currentValue || '';
   hideError('profile-edit-error');
   showScreen('profile-edit');
