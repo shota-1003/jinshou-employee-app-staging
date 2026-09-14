@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v184-staging';
-const BUILD_DEPLOYED_AT = '2026-09-12T12:50:19.269Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v185-staging';
+const BUILD_DEPLOYED_AT = '2026-09-14T04:28:12.247Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9400,64 +9400,103 @@ function formatSupplyHoldingsDate(d) {
   return d ? new Date(d).toLocaleDateString('ja-JP') : '-';
 }
 
+let supplyHoldingsMatrixCache = null;
+
+// 2026-09-14 Shota指摘(原文要約)「一個一個スライドして本人のとこを見て確認していかなあかん
+// からそうじゃなくて、表にして誰が何を持ってないかが分かるようにしてほしい。誰が何個、
+// この子は0とか、表の中に数字が入っていくようにしてほしい」。1人1カードの縦並びから、
+// 社員×品目のマトリクス表(既存の出面マトリクス〔attendance-matrix-table〕と同じ見た目・
+// 挙動を再利用)へ作り替える。0個の人も必ず列に出す(admin_get_supply_holdings_matrixが
+// 支給実績の無い品目・社員も0件として返す設計、既存のadmin_list_all_supply_holdingsは
+// 実績が無いと行ごと消えるため流用せず新規RPCにした)。
 async function loadSupplyHoldingsAdmin() {
   const session = getSession();
-  const listEl = document.getElementById('sha-list');
+  const wrapEl = document.getElementById('sha-matrix-wrap');
   const countEl = document.getElementById('sha-count');
+  const historyEl = document.getElementById('sha-history-panel');
+  if (historyEl) { historyEl.style.display = 'none'; historyEl.innerHTML = ''; }
+  wrapEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    if (!supplyHoldingsMatrixCache) {
+      supplyHoldingsMatrixCache = await rpc('admin_get_supply_holdings_matrix', { p_admin_employee_code: session.employeeCode });
+    }
+    renderSupplyHoldingsMatrix(supplyHoldingsMatrixCache, wrapEl, countEl);
+  } catch (e) {
+    wrapEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function renderSupplyHoldingsMatrix(rows, wrapEl, countEl) {
   const employeeName = document.getElementById('sha-search-employee').value.trim();
   const itemName = document.getElementById('sha-search-item').value.trim();
   const heldOnly = document.getElementById('sha-held-only').checked;
-  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+
+  const cols = [];
+  const colKeySeen = new Set();
+  rows.forEach((r) => {
+    if (itemName && !r.item_name.includes(itemName)) return;
+    const key = `${r.item_name}|${r.size || ''}`;
+    if (!colKeySeen.has(key)) { colKeySeen.add(key); cols.push({ key, itemName: r.item_name, size: r.size || '' }); }
+  });
+
+  const byEmployee = new Map();
+  rows.forEach((r) => {
+    if (itemName && !r.item_name.includes(itemName)) return;
+    if (employeeName && !r.employee_name.includes(employeeName)) return;
+    if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, code: r.employee_code, byCol: new Map() });
+    byEmployee.get(r.employee_code).byCol.set(`${r.item_name}|${r.size || ''}`, r);
+  });
+  let employees = Array.from(byEmployee.values());
+  if (heldOnly) employees = employees.filter((e) => Array.from(e.byCol.values()).some((c) => c.current_quantity > 0));
+
+  if (employees.length === 0 || cols.length === 0) {
+    wrapEl.innerHTML = '<div class="hint">該当する保有データはありません。</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${employees.length}名 × ${cols.length}品目`;
+
+  const headers = cols.map((c) => `<th>${exdEsc(c.itemName)}${c.size ? `<br><span style="font-weight:400;">(${exdEsc(c.size)})</span>` : ''}</th>`).join('');
+  const bodyRows = employees.map((e) => {
+    const cells = cols.map((c) => {
+      const cell = e.byCol.get(c.key);
+      const qty = cell ? cell.current_quantity : 0;
+      return qty > 0
+        ? `<td class="am-cell-value" data-employee-code="${e.code}" data-item-name="${exdEsc(c.itemName)}" data-size="${exdEsc(c.size)}">${qty}</td>`
+        : '<td class="am-cell-empty">0</td>';
+    }).join('');
+    return `<tr><td>${exdEsc(e.name)}</td>${cells}</tr>`;
+  }).join('');
+
+  wrapEl.innerHTML = `
+    <table class="attendance-matrix-table">
+      <thead><tr><th>社員</th>${headers}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+    <div class="hint-inline" style="margin-top:8px;">数字をタップするとその品目の支給履歴が見られます。</div>
+  `;
+  wrapEl.querySelectorAll('.am-cell-value').forEach((el) => {
+    el.addEventListener('click', () => openSupplyHoldingCellHistory(el.dataset.employeeCode, el.dataset.itemName, el.dataset.size));
+  });
+}
+
+async function openSupplyHoldingCellHistory(employeeCode, itemName, size) {
+  const session = getSession();
+  const panel = document.getElementById('sha-history-panel');
+  panel.style.display = 'block';
+  panel.innerHTML = '<div class="hint">読み込み中...</div>';
+  panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   try {
-    const rows = await rpc('admin_list_all_supply_holdings', {
-      p_admin_employee_code: session.employeeCode,
-      p_item_name: itemName || null, p_employee_name: employeeName || null, p_held_only: heldOnly,
+    const hist = await rpc('admin_get_supply_item_history', {
+      p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode,
+      p_item_name: itemName, p_size: size || null,
     });
-    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する保有データはありません。</div>'; countEl.textContent = ''; return; }
-
-    const byEmployee = new Map();
-    rows.forEach((r) => {
-      if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, items: [] });
-      byEmployee.get(r.employee_code).items.push(r);
-    });
-    countEl.textContent = `${byEmployee.size}名・${rows.length}件`;
-
-    listEl.innerHTML = Array.from(byEmployee.values()).map((emp) => `
-      <div class="card">
-        <div class="form-title" style="font-size:15px;">${emp.name}</div>
-        ${emp.items.map((it, idx) => `
-          <div class="supply-item">
-            <div class="row1"><span>${it.item_name}${it.size ? `(${it.size})` : ''}</span><span>${it.current_quantity}${it.current_quantity <= 0 ? '(保有なし)' : '個'}</span></div>
-            <div class="row2">最終支給日: ${formatSupplyHoldingsDate(it.last_issued_date)}${it.first_issued_date && it.first_issued_date !== it.last_issued_date ? `(初回: ${formatSupplyHoldingsDate(it.first_issued_date)})` : ''}</div>
-            ${it.replacement_due_date ? `<div class="row2">交換目安: ${formatSupplyHoldingsDate(it.replacement_due_date)}${new Date(it.replacement_due_date) < new Date() ? '<span class="mini-tag warn">交換目安を超過</span>' : ''}</div>` : ''}
-            ${it.note ? `<div class="row2">備考: ${it.note}</div>` : ''}
-            <button type="button" class="sha-history-toggle" data-employee-code="${it.employee_code}" data-item-name="${it.item_name}" data-size="${it.size || ''}" data-target="sha-history-${emp.name}-${idx}">履歴を見る</button>
-            <div id="sha-history-${emp.name}-${idx}" class="sha-history-box" style="display:none;"></div>
-          </div>
-        `).join('')}
-      </div>
-    `).join('');
-    listEl.querySelectorAll('.sha-history-toggle').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const box = document.getElementById(btn.dataset.target);
-        if (box.style.display !== 'none') { box.style.display = 'none'; return; }
-        box.style.display = 'block';
-        box.innerHTML = '<div class="hint">読み込み中...</div>';
-        try {
-          const hist = await rpc('admin_get_supply_item_history', {
-            p_admin_employee_code: session.employeeCode, p_target_employee_code: btn.dataset.employeeCode,
-            p_item_name: btn.dataset.itemName, p_size: btn.dataset.size || null,
-          });
-          box.innerHTML = hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
-            <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
-          `).join('');
-        } catch (e) {
-          box.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
-        }
-      });
-    });
+    const title = `${itemName}${size ? `(${size})` : ''}の支給履歴`;
+    panel.innerHTML = `<div class="form-title" style="font-size:14px;">${exdEsc(title)}</div>` + (hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
+      <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
+    `).join(''));
   } catch (e) {
-    listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+    panel.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
@@ -17745,6 +17784,7 @@ function init() {
   };
   SCREEN_ENTER_HOOKS['supply-holdings-admin'] = () => {
     if (!isAdmin()) { enterMenu(); return; }
+    supplyHoldingsMatrixCache = null; // 画面へ入り直すたびに最新の保有数を取り直す
     loadSupplyHoldingsAdmin();
   };
   SCREEN_ENTER_HOOKS['health-submit'] = resetHealthForm;
