@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v185-staging';
-const BUILD_DEPLOYED_AT = '2026-09-14T04:28:12.247Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v186-staging';
+const BUILD_DEPLOYED_AT = '2026-09-14T04:41:26.092Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6049,6 +6049,101 @@ async function doVerifyQualification(id, action) {
     await rpc('admin_verify_qualification', { p_admin_employee_code: session.employeeCode, p_qualification_id: Number(id), p_action: action });
     await loadQualAdminList();
   } catch (e) { /* 失敗時は一覧が更新されないだけ */ }
+}
+
+// 2026-09-14 Shota指摘(原文要約)「この四角一覧のところも、支給品保有と一緒で表にしてほしい。
+// 誰が何を持ってないかが分かるように。丸とかバツとかでいいと思うんだけど、丸を押したら
+// その資格証の写真に飛ぶっていう風にしてほしい」。既存の一覧(確認待ち・期限切れ等の
+// 絞り込みや承認操作に使う)はそのまま残し、「表で見る」で社員×資格名のマトリクスへ
+// 切り替えられるようにする(支給品保有マトリクスと同じ考え方・同じ見た目を再利用)。
+let qualAdminView = 'list';
+let qualAdminMatrixCache = null;
+
+function wireQualAdminViewToggle() {
+  document.querySelectorAll('#screen-qual-admin [data-qview]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      qualAdminView = btn.dataset.qview;
+      document.querySelectorAll('#screen-qual-admin [data-qview]').forEach((b) => b.classList.toggle('active', b === btn));
+      document.getElementById('qual-admin-list').style.display = qualAdminView === 'list' ? '' : 'none';
+      document.getElementById('qual-admin-matrix-wrap').style.display = qualAdminView === 'matrix' ? '' : 'none';
+      if (qualAdminView === 'matrix') loadQualAdminMatrix();
+    });
+  });
+}
+
+async function loadQualAdminMatrix() {
+  const session = getSession();
+  const wrapEl = document.getElementById('qual-admin-matrix-wrap');
+  const countEl = document.getElementById('qual-admin-count');
+  wrapEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    if (!qualAdminMatrixCache) {
+      qualAdminMatrixCache = await rpc('admin_get_qualification_matrix', { p_admin_employee_code: session.employeeCode });
+    }
+    renderQualAdminMatrix(qualAdminMatrixCache, wrapEl, countEl);
+  } catch (e) {
+    wrapEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+  }
+}
+
+function renderQualAdminMatrix(rows, wrapEl, countEl) {
+  const search = document.getElementById('qual-admin-search').value.trim();
+
+  const cols = [];
+  const colSeen = new Set();
+  rows.forEach((r) => {
+    if (search && !r.qualification_name.includes(search) && !r.employee_name.includes(search)) return;
+    if (!colSeen.has(r.qualification_name)) { colSeen.add(r.qualification_name); cols.push(r.qualification_name); }
+  });
+
+  const byEmployee = new Map();
+  rows.forEach((r) => {
+    if (search && !r.qualification_name.includes(search) && !r.employee_name.includes(search)) return;
+    if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, code: r.employee_code, byCol: new Map() });
+    byEmployee.get(r.employee_code).byCol.set(r.qualification_name, r);
+  });
+  const employees = Array.from(byEmployee.values());
+
+  if (employees.length === 0 || cols.length === 0) {
+    wrapEl.innerHTML = '<div class="hint">該当する資格・免許はありません。</div>';
+    countEl.textContent = '';
+    return;
+  }
+  countEl.textContent = `${employees.length}名 × ${cols.length}資格`;
+
+  const headers = cols.map((c) => `<th>${exdEsc(c)}</th>`).join('');
+  const bodyRows = employees.map((e) => {
+    const cells = cols.map((c) => {
+      const cell = e.byCol.get(c);
+      if (!cell || !cell.has_it) return '<td class="am-cell-empty">✕</td>';
+      const expiring = cell.display_status === 'expiring_soon' || cell.display_status === 'expired';
+      const mark = expiring ? '△' : '○';
+      return cell.has_photo
+        ? `<td class="am-cell-value" data-qual-id="${cell.qualification_id}" title="タップで証書写真を見る">${mark}</td>`
+        : `<td${expiring ? ' class="am-cell-value"' : ''}>${mark}</td>`;
+    }).join('');
+    return `<tr><td>${exdEsc(e.name)}</td>${cells}</tr>`;
+  }).join('');
+
+  wrapEl.innerHTML = `
+    <table class="attendance-matrix-table">
+      <thead><tr><th>社員</th>${headers}</tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table>
+    <div class="hint-inline" style="margin-top:8px;">○=保有・✕=未保有・△=期限切れ間近または期限切れ。写真がある○はタップすると証書写真が見られます。</div>
+  `;
+  wrapEl.querySelectorAll('td[data-qual-id]').forEach((el) => {
+    el.addEventListener('click', () => openQualificationCertPhoto(el.dataset.qualId));
+  });
+}
+
+async function openQualificationCertPhoto(qualificationId) {
+  try {
+    const objUrl = await fetchSecureImageObjectUrl(`kind=qualification_photo&id=${encodeURIComponent(qualificationId)}`);
+    openImageZoom(objUrl);
+  } catch (e) {
+    alert('証書写真を表示できませんでした。');
+  }
 }
 
 // ---------- 経費の承認方式の表示(共通) ----------
@@ -17155,18 +17250,19 @@ function init() {
   let qualSearchTimer = null;
   document.getElementById('qual-admin-search').addEventListener('input', () => {
     clearTimeout(qualSearchTimer);
-    qualSearchTimer = setTimeout(() => loadQualAdminList(), 300);
+    qualSearchTimer = setTimeout(() => (qualAdminView === 'matrix' ? loadQualAdminMatrix() : loadQualAdminList()), 300);
   });
   document.getElementById('qual-category-qualification').addEventListener('click', () => setQualCategory('qualification'));
   document.getElementById('qual-category-license').addEventListener('click', () => setQualCategory('license'));
-  document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((btn) => {
+  document.querySelectorAll('#screen-qual-admin .filter-chip[data-cat]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#screen-qual-admin .filter-chip[data-cat]').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       qualAdminCategoryFilter = btn.dataset.cat;
       loadQualAdminList();
     });
   });
+  wireQualAdminViewToggle();
 
   document.getElementById('health-submit').addEventListener('click', doSubmitHealthCheckup);
   document.getElementById('health-file-input').addEventListener('change', (e) => handleHealthFile(e.target.files[0]));
@@ -17657,10 +17753,16 @@ function init() {
     if (navf === 'expiring') {
       // カードは種類(資格/免許)・検索語で絞っていないため、遷移先も揃える。
       qualAdminCategoryFilter = '';
-      document.querySelectorAll('#screen-qual-admin .filter-chip').forEach((c) => c.classList.toggle('active', (c.dataset.cat || '') === ''));
+      document.querySelectorAll('#screen-qual-admin .filter-chip[data-cat]').forEach((c) => c.classList.toggle('active', (c.dataset.cat || '') === ''));
       const search = document.getElementById('qual-admin-search');
       if (search) search.value = '';
     }
+    // 画面へ入り直すたびに一覧表示へ戻し、マトリクスのキャッシュも作り直す(最新の登録状況にするため)。
+    qualAdminView = 'list';
+    qualAdminMatrixCache = null;
+    document.querySelectorAll('#screen-qual-admin [data-qview]').forEach((b) => b.classList.toggle('active', b.dataset.qview === 'list'));
+    document.getElementById('qual-admin-list').style.display = '';
+    document.getElementById('qual-admin-matrix-wrap').style.display = 'none';
     renderQualAdminActiveFilterChip();
     loadQualAdminList();
   };

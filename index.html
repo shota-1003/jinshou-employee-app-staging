@@ -1328,8 +1328,13 @@
     </select>
     <!-- ダッシュボードのカード「資格・免許の期限切れ/期限接近」から来たときの絞り込み表示と解除。 -->
     <div id="qual-admin-active-filter" style="display:none;margin:8px 0;"></div>
+    <div class="filter-row">
+      <button type="button" class="filter-chip active" data-qview="list">一覧で見る</button>
+      <button type="button" class="filter-chip" data-qview="matrix">表で見る(誰が持ってない)</button>
+    </div>
     <div class="hint" id="qual-admin-count" style="margin:8px 0;"></div>
     <div id="qual-admin-list"></div>
+    <div id="qual-admin-matrix-wrap" class="attendance-matrix-wrap" style="display:none;"></div>
   </section>
 
   <!-- 勘定科目確認(管理者) -->
