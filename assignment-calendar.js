@@ -60,8 +60,11 @@
         return (s && s.is_subcontracted) ? 'sub_support' : 'normal';
     }
     function modeInfo(s) { return WORK_MODES[modeOf(s)]; }
+    // 現場・社員を指定しない簡易メモ(2026-09-14追加)専用の色。既存の種別色(通常/常傭/応援等)と
+    // 重ならないニュートラルなグレーにし、メモだと一目で分かるようにする。
+    const MEMO_COLOR = '#6b7280';
     // 月表示のタグ・日別の左帯・種別バッジで共通に使う色。
-    function modeColor(s) { return modeInfo(s).color || (s && s.color) || '#1a73e8'; }
+    function modeColor(s) { return (s && s.is_memo) ? MEMO_COLOR : (modeInfo(s).color || (s && s.color) || '#1a73e8'); }
     function isLeaderRole(role) { return !!role && String(role).includes(LEADER_ROLE); }
 
     // 人の区分。色だけに頼らず必ず文字も出す(色覚差への配慮)。
@@ -1439,6 +1442,11 @@
                 // いちばん使う「配置を追加」を最も大きく、いちばん押しやすい位置に置く
                 const add = el('button', 'ac-actbtn ac-actmain', '＋ 配置を追加');
                 add.addEventListener('click', () => openEntrySheet(null));
+                // 2026-09-14追加: 現場・社員を指定しない一言メモ。「配置を追加」より
+                // 手数を減らしたいという要望のため、誰でも押せる位置に独立ボタンで置く。
+                const memo = el('button', 'ac-actbtn ac-actmemo', '📝 メモ');
+                memo.title = '現場・社員を指定しない一言メモをサッと登録します';
+                memo.addEventListener('click', () => openMemoSheet());
                 const more = el('button', 'ac-actbtn ac-actmore', '⋯');
                 more.title = 'その他の操作';
                 more.addEventListener('click', openDayMenuSheet);
@@ -1446,9 +1454,9 @@
                 if (state.isAdmin) {
                     const conf = el('button', 'ac-actbtn ac-actsub', '確定して通知');
                     conf.addEventListener('click', confirmDay);
-                    bar.append(add, conf, more);
+                    bar.append(add, memo, conf, more);
                 } else {
-                    bar.append(add, more);
+                    bar.append(add, memo, more);
                 }
                 head.append(bar);
             }
@@ -1600,8 +1608,10 @@
             top.append(name);
             // 種別バッジ自体にも種別色を塗る。左の細い帯だけでは実機で見分けが付かない、
             // という指摘への対応。色だけに頼らないよう文字(仕事/常傭/応援…)は必ず出す。
-            const catBadge = el('span', 'ac-badge ac-catbadge', s.category_name);
-            const catColor = s.color || '#1a73e8';
+            // メモ(現場・社員を指定しない簡易メモ)は種別バッジの代わりに専用バッジを出す。
+            // 種別(仕事/常傭/その他…)はメモには意味を持たないため出さない。
+            const catBadge = el('span', 'ac-badge ac-catbadge', s.is_memo ? '📝 メモ' : s.category_name);
+            const catColor = s.is_memo ? MEMO_COLOR : (s.color || '#1a73e8');
             catBadge.style.background = catColor;
             catBadge.style.borderColor = catColor;
             catBadge.style.color = isLightColor(catColor) ? '#16202e' : '#fff';
@@ -1640,15 +1650,18 @@
             // 現場名の右に人数を大きく出す(「京田辺 4人」が一目で読めることを優先)。
             // 人数は「その現場で実際に作業する人」。運搬は別バッジにする。
             // 下請け請負は人数を把握していないことが正常なので、0人と出さない。
-            const unknownHead = modeOf(s) === 'sub_contract' && !s.member_count;
-            const cnt = el('span', 'ac-sitecount', unknownHead ? '人数未把握' : `${s.member_count}人`);
-            if (unknownHead) cnt.classList.add('ac-sitecount-unknown');
-            cnt.title = unknownHead
-                ? '下請け請負のため人数は把握していません(現場が稼働していることだけを記録しています)'
-                : (s.subcontractor_count > 0
-                    ? `作業 社員 ${s.employee_count}人 / 外注 ${s.subcontractor_count}人`
-                    : `作業 社員 ${s.employee_count}人`);
-            top.insertBefore(cnt, top.children[1] || null);
+            // メモは社員を指定しないため人数の概念が無く、「0人」は出さない。
+            if (!s.is_memo) {
+                const unknownHead = modeOf(s) === 'sub_contract' && !s.member_count;
+                const cnt = el('span', 'ac-sitecount', unknownHead ? '人数未把握' : `${s.member_count}人`);
+                if (unknownHead) cnt.classList.add('ac-sitecount-unknown');
+                cnt.title = unknownHead
+                    ? '下請け請負のため人数は把握していません(現場が稼働していることだけを記録しています)'
+                    : (s.subcontractor_count > 0
+                        ? `作業 社員 ${s.employee_count}人 / 外注 ${s.subcontractor_count}人`
+                        : `作業 社員 ${s.employee_count}人`);
+                top.insertBefore(cnt, top.children[1] || null);
+            }
             // 職長は現場を回すうえで最初に見たい情報なので、現場名の帯に出す。
             const leader = (s.members || []).find((m) => isLeaderRole(m.role));
             if (leader) {
@@ -1668,6 +1681,7 @@
             }
 
             const meta = [];
+            if (s.is_memo && s.created_by_name) meta.push(`書いた人 ${s.created_by_name}`);
             if (s.meeting_time) meta.push(`集合 ${s.meeting_time}`);
             if (s.start_time) meta.push(`開始 ${s.start_time}`);
             if (s.end_time) meta.push(`終了 ${s.end_time}`);
@@ -3318,6 +3332,59 @@
                 input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 250); });
                 setTimeout(() => input.focus(), 60);
             });
+        }
+
+        // -----------------------------------------------------------
+        // メモ(2026-09-14追加): 現場・社員を指定しない一言メモ。
+        // 「配置を追加」フォーム自体はすでに現場なしでも登録できる作りだが、
+        // 現場検索・種別選択・社員選択が並ぶため、一言メモには手数が多すぎるという
+        // 指摘への対応。ここでは文字を打つだけで登録できるようにする。
+        // 保存先は配置と同じ assignment_schedules(is_memo=trueの行)で、
+        // 新しい表は作らない。
+        // -----------------------------------------------------------
+        function openMemoSheet() {
+            const draft = { title: '' };
+            let inputEl = null;
+            async function save() {
+                const title = (draft.title || '').trim();
+                if (!title) { toast('メモの内容を入力してください'); if (inputEl) inputEl.focus(); return; }
+                // 種別は必須項目のため、メモ専用に会社共通の「その他」種別を使う。
+                // (種別そのものはメモの見た目には使わない。表示はis_memoで専用色にする)
+                const fallbackCat = state.categories.find((c) => c.code === 'other_work')
+                    || state.categories[state.categories.length - 1] || state.categories[0] || {};
+                try {
+                    await rpc('assignment_save_schedule', {
+                        p_employee_code: me, p_schedule_id: null, p_date: state.selected,
+                        p_site_id: null, p_category_id: fallbackCat.id,
+                        p_title: title, p_start_time: null, p_end_time: null,
+                        p_meeting_time: null, p_note: null, p_members: [],
+                        p_status: 'draft', p_is_memo: true,
+                    });
+                    await Promise.all([loadMonth(), loadDay()]);
+                    render();
+                    api.close();
+                    toast('メモを登録しました');
+                } catch (e) { fail(e); }
+            }
+            const api = sheet(
+                `${labelDate(state.selected)} のメモ`,
+                (box) => {
+                    box.append(el('div', 'ac-schedmeta',
+                        '現場・社員を指定しない一言メモです。カレンダー上は専用の色で常に先頭に出ます。'));
+                    const titleField = el('div', 'ac-field');
+                    titleField.append(el('div', 'ac-label', 'メモの内容'));
+                    inputEl = el('input', 'ac-input');
+                    inputEl.placeholder = '例: スカイトピア労基 13:30';
+                    inputEl.addEventListener('input', () => { draft.title = inputEl.value; });
+                    inputEl.addEventListener('keydown', (ev) => {
+                        if (ev.key === 'Enter') { ev.preventDefault(); save(); }
+                    });
+                    titleField.append(inputEl);
+                    box.append(titleField);
+                    setTimeout(() => inputEl.focus(), 60);
+                },
+                [sheetBtn('登録', save, 'ac-primary')],
+            );
         }
 
         // -----------------------------------------------------------

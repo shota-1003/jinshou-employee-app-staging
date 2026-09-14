@@ -337,6 +337,9 @@
 .ac-actbtn:active { filter: brightness(.94); }
 /* いちばん使う「配置を追加」を最大にし、押し間違えないよう他と色を分ける */
 .ac-actmain { flex: 1 1 auto; background: var(--ac-accent); border-color: var(--ac-accent); color: #fff; font-size: 15px; }
+/* メモ(現場・社員を指定しない一言メモ)ボタン。「配置を追加」ほど強調せず、
+   かつメモ専用の色(assignment-calendar.js の MEMO_COLOR)で見分けが付くようにする。 */
+.ac-actmemo { flex: 0 0 auto; border-color: #6b7280; color: #6b7280; }
 .ac-actsub  { flex: 0 0 auto; }
 .ac-actmore { flex: 0 0 auto; width: 46px; padding: 0; font-size: 18px; line-height: 1; }
 .ac-daytitle { font-size: 14px; font-weight: 700; }
