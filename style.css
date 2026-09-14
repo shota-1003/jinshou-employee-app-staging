@@ -1186,11 +1186,18 @@ button.link {
     background: var(--info-bg); color: var(--primary); border-radius: var(--radius-pill); box-shadow: none;
   }
   body:has(#screen-admin-all-requests.active) main { max-width: 1400px; }
+  /* 2026-09-14 Shota指摘「パソコンで見える時にもっと広く見たいから」: 支給品保有・
+     資格免許のマトリクス表(列数が多く横に伸びる)も、申請管理の表と同じ考え方で
+     PC幅を広く使う。 */
+  body:has(#screen-supply-holdings-admin.active) main,
+  body:has(#screen-qual-admin.active) main { max-width: 1400px; }
 }
 
 @media (min-width: 1280px) {
   main { max-width: 1280px; }
   body:has(#screen-admin-all-requests.active) main { max-width: 1600px; }
+  body:has(#screen-supply-holdings-admin.active) main,
+  body:has(#screen-qual-admin.active) main { max-width: 1600px; }
   [id$="-list"], [id$="-results"] { column-count: 3; }
   #today-list, #daily-report-entry-list, #expense-item-list,
   .home-card-grid, .main-menu-grid, .dash-card-grid, .supply-select-grid, .menu-list {
@@ -1244,6 +1251,13 @@ button.link {
   position: sticky; right: 0; z-index: 1; background: var(--card-bg-solid);
 }
 .attendance-matrix-table thead th:last-child { z-index: 3; }
+/* 2026-09-14 Shota指摘「右の防寒着が固定化されてるんだけどこれは別に右に固定しなくていい」:
+   出面マトリクスは最後の列が「合計」なので右端固定が意味を持つが、支給品保有・資格免許の
+   マトリクスは最後の列がただの品目・資格名で、固定する理由が無い(むしろ表の下の項目と
+   重なって見えるバグの原因になっていた)。この2つの表にはplain-last-colを付けて解除する。 */
+.attendance-matrix-table.plain-last-col th:last-child, .attendance-matrix-table.plain-last-col td:last-child {
+  position: static; background: inherit;
+}
 
 @media (min-width: 1280px) {
   .attendance-matrix-table { font-size: 13px; }
