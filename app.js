@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v187-staging';
-const BUILD_DEPLOYED_AT = '2026-09-14T04:57:40.271Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v188-staging';
+const BUILD_DEPLOYED_AT = '2026-09-14T05:25:36.757Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9521,28 +9521,33 @@ async function loadSupplyHoldingsAdmin() {
   }
 }
 
+// 2026-09-14 Shota指摘(原文要約)「このサイズ、秋冬用シャツ3L・L・LLとかいっぱいあるでしょう。
+// これは全部一個にまとめてほしい。項目が横に長すぎないように。タップしたらサイズが分かる
+// ようにしてくれてたらそれでいい」。サイズ違いを別列にせず品目名だけで1列にまとめ、
+// 数字はその品目の全サイズ合計にする。内訳(サイズごとの数)はセルをタップして確認する形にする。
 function renderSupplyHoldingsMatrix(rows, wrapEl, countEl) {
   const employeeName = document.getElementById('sha-search-employee').value.trim();
   const itemName = document.getElementById('sha-search-item').value.trim();
   const heldOnly = document.getElementById('sha-held-only').checked;
 
   const cols = [];
-  const colKeySeen = new Set();
+  const colSeen = new Set();
   rows.forEach((r) => {
     if (itemName && !r.item_name.includes(itemName)) return;
-    const key = `${r.item_name}|${r.size || ''}`;
-    if (!colKeySeen.has(key)) { colKeySeen.add(key); cols.push({ key, itemName: r.item_name, size: r.size || '' }); }
+    if (!colSeen.has(r.item_name)) { colSeen.add(r.item_name); cols.push(r.item_name); }
   });
 
   const byEmployee = new Map();
   rows.forEach((r) => {
     if (itemName && !r.item_name.includes(itemName)) return;
     if (employeeName && !r.employee_name.includes(employeeName)) return;
-    if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, code: r.employee_code, byCol: new Map() });
-    byEmployee.get(r.employee_code).byCol.set(`${r.item_name}|${r.size || ''}`, r);
+    if (!byEmployee.has(r.employee_code)) byEmployee.set(r.employee_code, { name: r.employee_name, code: r.employee_code, byItem: new Map() });
+    const byItem = byEmployee.get(r.employee_code).byItem;
+    if (!byItem.has(r.item_name)) byItem.set(r.item_name, []);
+    byItem.get(r.item_name).push(r);
   });
   let employees = Array.from(byEmployee.values());
-  if (heldOnly) employees = employees.filter((e) => Array.from(e.byCol.values()).some((c) => c.current_quantity > 0));
+  if (heldOnly) employees = employees.filter((e) => Array.from(e.byItem.values()).some((variants) => variants.some((c) => c.current_quantity > 0)));
 
   if (employees.length === 0 || cols.length === 0) {
     wrapEl.innerHTML = '<div class="hint">該当する保有データはありません。</div>';
@@ -9551,47 +9556,68 @@ function renderSupplyHoldingsMatrix(rows, wrapEl, countEl) {
   }
   countEl.textContent = `${employees.length}名 × ${cols.length}品目`;
 
-  const headers = cols.map((c) => `<th>${exdEsc(c.itemName)}${c.size ? `<br><span style="font-weight:400;">(${exdEsc(c.size)})</span>` : ''}</th>`).join('');
+  const headers = cols.map((c) => `<th>${exdEsc(c)}</th>`).join('');
   const bodyRows = employees.map((e) => {
     const cells = cols.map((c) => {
-      const cell = e.byCol.get(c.key);
-      const qty = cell ? cell.current_quantity : 0;
-      return qty > 0
-        ? `<td class="am-cell-value" data-employee-code="${e.code}" data-item-name="${exdEsc(c.itemName)}" data-size="${exdEsc(c.size)}">${qty}</td>`
+      const variants = e.byItem.get(c) || [];
+      const total = variants.reduce((sum, v) => sum + Number(v.current_quantity || 0), 0);
+      return total > 0
+        ? `<td class="am-cell-value" data-employee-code="${e.code}" data-item-name="${exdEsc(c)}" title="タップでサイズ内訳を見る">${total}</td>`
         : '<td class="am-cell-empty">0</td>';
     }).join('');
     return `<tr><td>${exdEsc(e.name)}</td>${cells}</tr>`;
   }).join('');
 
   wrapEl.innerHTML = `
-    <table class="attendance-matrix-table plain-last-col">
+    <table class="attendance-matrix-table plain-last-col wide-matrix">
       <thead><tr><th>社員</th>${headers}</tr></thead>
       <tbody>${bodyRows}</tbody>
     </table>
-    <div class="hint-inline" style="margin-top:8px;">数字をタップするとその品目の支給履歴が見られます。</div>
+    <div class="hint-inline" style="margin-top:8px;">数字はサイズ違いを合計した個数です。タップするとサイズごとの内訳・支給履歴が見られます。</div>
   `;
   wrapEl.querySelectorAll('.am-cell-value').forEach((el) => {
-    el.addEventListener('click', () => openSupplyHoldingCellHistory(el.dataset.employeeCode, el.dataset.itemName, el.dataset.size));
+    el.addEventListener('click', () => openSupplyHoldingItemBreakdown(el.dataset.employeeCode, el.dataset.itemName));
   });
 }
 
-async function openSupplyHoldingCellHistory(employeeCode, itemName, size) {
-  const session = getSession();
+function openSupplyHoldingItemBreakdown(employeeCode, itemName) {
+  const rows = (supplyHoldingsMatrixCache || []).filter((r) => r.employee_code === employeeCode && r.item_name === itemName);
   const panel = document.getElementById('sha-history-panel');
   panel.style.display = 'block';
-  panel.innerHTML = '<div class="hint">読み込み中...</div>';
   panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  const variants = rows.filter((r) => r.current_quantity > 0);
+  panel.innerHTML = `<div class="form-title" style="font-size:14px;">${exdEsc(itemName)}のサイズ内訳</div>` + (variants.length === 0
+    ? '<div class="hint">保有はありません。</div>'
+    : variants.map((v) => `
+      <div class="supply-item">
+        <div class="row1"><span>${v.size ? `サイズ: ${exdEsc(v.size)}` : 'サイズ指定なし'}</span><span>${v.current_quantity}個</span></div>
+        <button type="button" class="sha-breakdown-history-btn" data-employee-code="${employeeCode}" data-item-name="${exdEsc(itemName)}" data-size="${exdEsc(v.size || '')}">この履歴を見る</button>
+        <div class="sha-breakdown-history-box" style="display:none;"></div>
+      </div>
+    `).join(''));
+  panel.querySelectorAll('.sha-breakdown-history-btn').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const box = btn.nextElementSibling;
+      if (box.style.display !== 'none') { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.innerHTML = '<div class="hint">読み込み中...</div>';
+      await renderSupplyHoldingHistoryInto(box, btn.dataset.employeeCode, btn.dataset.itemName, btn.dataset.size);
+    });
+  });
+}
+
+async function renderSupplyHoldingHistoryInto(box, employeeCode, itemName, size) {
+  const session = getSession();
   try {
     const hist = await rpc('admin_get_supply_item_history', {
       p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode,
       p_item_name: itemName, p_size: size || null,
     });
-    const title = `${itemName}${size ? `(${size})` : ''}の支給履歴`;
-    panel.innerHTML = `<div class="form-title" style="font-size:14px;">${exdEsc(title)}</div>` + (hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
+    box.innerHTML = hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
       <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
-    `).join(''));
+    `).join('');
   } catch (e) {
-    panel.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+    box.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
 }
 
