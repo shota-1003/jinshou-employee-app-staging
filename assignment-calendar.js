@@ -2959,6 +2959,9 @@
                     // 外注の運搬で使う車両(社員と同じ扱い)
                     vehicle_id: x.vehicle_id || '',
                     vehicle_plate: x.vehicle_plate || '',
+                    // 2026-09-15追加: 運搬(haul)の人が、同じ会社の「仕事」人数に
+                    // 既に含まれている兼務かどうか。会社名+人数タイプでの二重計上を防ぐ。
+                    haul_concurrent_with_work: !!x.haul_concurrent_with_work,
                     workers: (x.workers || []).map((w) => ({
                         subcontractor_worker_id: w.subcontractor_worker_id || null,
                         name: w.name || '', phone: w.phone || '',
@@ -3440,6 +3443,7 @@
                         vehicle_id: m.vehicle_id || '',
                         vehicle_plate: m.vehicle_plate || '',
                         vehicle_name: m.vehicle_name || '',
+                        haul_concurrent_with_work: !!m.haul_concurrent_with_work,
                         workers: (m.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
@@ -3696,10 +3700,26 @@
                     function drawSubVehicle() {
                         subVehicle.innerHTML = '';
                         if ((sub.assignment_kind || 'work') !== 'haul') {
-                            sub.vehicle_id = ''; sub.vehicle_plate = '';
+                            sub.vehicle_id = ''; sub.vehicle_plate = ''; sub.haul_concurrent_with_work = false;
                             return;
                         }
                         subVehicle.append(vehicleRow(sub, () => { syncSummary(); renderHaulRows(); }));
+                        // 2026-09-15追加(Shota実例指摘): 会社名+人数タイプの運搬は、
+                        // 「仕事の人数に含まれる人が兼務で運転しているだけ」なのか
+                        // 「運搬専属の別の人」なのかをシステムでは判別できない。
+                        // ここで選んでもらい、兼務なら人数を二重に数えない。
+                        const concurRow = el('div', 'ac-mrow ac-haulconcur');
+                        const concurLabel = el('label', 'ac-checklabel');
+                        const concurCheck = el('input');
+                        concurCheck.type = 'checkbox';
+                        concurCheck.checked = !!sub.haul_concurrent_with_work;
+                        concurCheck.addEventListener('change', () => {
+                            sub.haul_concurrent_with_work = concurCheck.checked;
+                        });
+                        concurLabel.append(concurCheck,
+                            el('span', null, '仕事の人数に含まれている人が運転している(兼務・追加人数なし)'));
+                        concurRow.append(concurLabel);
+                        subVehicle.append(concurRow);
                     }
                     for (const r of SUB_ROLES) {
                         const t = el('button', 'ac-token'

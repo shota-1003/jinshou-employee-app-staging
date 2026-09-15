@@ -1162,6 +1162,12 @@
 .ac-vehiclerow .ac-input { flex: 1; min-width: 0; }
 .ac-dim { opacity: .55; }
 
+/* 運搬の「兼務(仕事人数に含まれる)」チェック(2026-09-15追加) */
+.ac-haulconcur { margin-top: 4px; }
+.ac-checklabel { display: flex; align-items: flex-start; gap: 6px; font-size: 13px;
+  line-height: 1.35; color: var(--ac-fg); cursor: pointer; }
+.ac-checklabel input[type="checkbox"] { margin-top: 2px; flex: 0 0 auto; }
+
 /* --- 名前タップ → 連絡先(2026-09-05) ------------------------------------ */
 .ac-contact { display: flex; flex-direction: column; gap: 6px; }
 .ac-contactrow { display: flex; align-items: baseline; gap: 10px;
