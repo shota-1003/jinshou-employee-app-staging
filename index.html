@@ -152,8 +152,24 @@
         <div class="error" id="pin-forgot-error"></div>
         <button id="pin-forgot-submit">この暗証番号にする</button>
       </div>
-      <div class="card" id="pin-forgot-request-card">
-        <div class="hint" style="margin-bottom:14px;">この端末では本人確認ができないため、その場での再設定はできません。管理者へ再設定を依頼してください。依頼すると管理者に通知が届き、初回登録コードが発行されます。</div>
+      <div class="card" id="pin-forgot-phone-card">
+        <div class="hint" style="margin-bottom:14px;">この端末では本人確認ができないため、登録済みの電話番号でご本人確認ください。一致すれば、その場で新しい暗証番号を設定できます。</div>
+        <label for="pin-forgot-phone">登録済みの電話番号</label>
+        <input type="tel" id="pin-forgot-phone" placeholder="例: 09012345678" autocomplete="off">
+        <label for="pin-forgot-phone-new" style="margin-top:10px;">新しい暗証番号(4〜6桁の数字)</label>
+        <div class="pin-field">
+          <input type="password" id="pin-forgot-phone-new" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        </div>
+        <label for="pin-forgot-phone-confirm">確認のためもう一度入力</label>
+        <div class="pin-field">
+          <input type="password" id="pin-forgot-phone-confirm" inputmode="numeric" pattern="[0-9]*" maxlength="6" autocomplete="off">
+        </div>
+        <div class="error" id="pin-forgot-phone-error"></div>
+        <button id="pin-forgot-phone-submit">電話番号で本人確認してリセットする</button>
+        <button type="button" class="link" id="pin-forgot-request-link" style="margin-top:10px;">電話番号を登録していない方はこちら</button>
+      </div>
+      <div class="card" id="pin-forgot-request-card" style="display:none;">
+        <div class="hint" style="margin-bottom:14px;">管理者へ再設定を依頼してください。依頼すると管理者に通知が届き、初回登録コードが発行されます。</div>
         <div class="error" id="pin-forgot-request-error"></div>
         <button id="pin-forgot-request-submit">管理者へ再設定を依頼する</button>
       </div>
@@ -1487,7 +1503,7 @@
           <label class="photo-capture-btn">
             <span class="icon-slot" data-icon="camera"></span>
             <span>領収書を撮影する</span>
-            <input type="file" accept="image/*" capture="environment" class="item-photo-input">
+            <input type="file" accept="image/*" capture="environment" multiple class="item-photo-input">
           </label>
           <label class="photo-pick-link">写真から選ぶ<input type="file" accept="image/*" class="item-photo-input-lib"></label>
         </div>
@@ -1589,7 +1605,7 @@
       <label class="photo-capture-btn" style="flex:1;">
         <span class="icon-slot" data-icon="camera"></span>
         <span>カメラで撮る</span>
-        <input type="file" accept="image/*" capture="environment" id="expense-bulk-camera-input">
+        <input type="file" accept="image/*" capture="environment" multiple id="expense-bulk-camera-input">
       </label>
       <label class="photo-capture-btn" style="flex:1;">
         <span class="icon-slot" data-icon="receipt"></span>
