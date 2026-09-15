@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v192-staging';
-const BUILD_DEPLOYED_AT = '2026-09-15T01:45:57.201Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v193-staging';
+const BUILD_DEPLOYED_AT = '2026-09-15T01:57:23.231Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2834,7 +2834,13 @@ function addExpenseItem(initialFile) {
       status.textContent = 'アップロード完了';
       status.className = 'photo-status ok';
     } catch (e) {
-      status.textContent = 'アップロードに失敗しました。もう一度お試しください。';
+      // 2026-09-15 Shota指摘(徳永さん報告)「写真が読み取れない、金額等打ち込んでも
+      // 申請できない」: 実際にはOCR失敗ではなくこの写真アップロード自体の失敗
+      // (driveFileId未設定→doSubmitExpenseの必須チェックで止まる)だった可能性が高い。
+      // uploadReceiptPhoto()はサーバー側のエラー内容・HTTPステータスを含めた具体的な
+      // メッセージを投げる設計なのに、ここで握りつぶして毎回同じ一般的な文言に
+      // 差し替えていたため、原因が本人にも管理者にも分からなくなっていた。
+      status.textContent = `アップロードに失敗しました: ${e.message || '不明なエラー'}(もう一度お試しください)`;
       status.className = 'photo-status err';
     } finally {
       state.uploading = false;
