@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v191-staging';
-const BUILD_DEPLOYED_AT = '2026-09-15T01:19:13.090Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v192-staging';
+const BUILD_DEPLOYED_AT = '2026-09-15T01:39:23.107Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1816,17 +1816,35 @@ async function renderHomeDailyReportStatusBanner(session) {
   if (restBtn) restBtn.style.display = 'none';
 }
 
-// executiveはadmin-dashboard(全管理メニュー)、日報担当(nippo_admin、executiveではない)は
-// 日報管理画面への専用入口を表示する。nippo_adminはrequestRole(セッションに直接入っている値)
-// では判定できず、都度サーバーへ確認が必要(check_nippo_admin RPC)なため非同期。
-// admin-dashboard自体がisAdmin()(executive)限定のため、この入口が無いとnippo_adminは
-// 日報管理画面へ辿り着く手段が無くなってしまう。
+// 2026-09-15までのバグ: ここがexecutiveかどうかだけでadmin-dashboardへの入口を
+// 出す/出さないを決めていたため、hr_admin/subcontractor_admin/site_admin/
+// device_admin等の機能別権限だけを持つ社員(executiveではない)は、DBには権限が
+// 付与されているのに管理者ダッシュボード(社員名簿等がぶら下がる)へ辿り着く手段が
+// 一切無かった(Shota指摘: 「坂本幸一郎は別の社員を登録できない」→調査の結果、
+// hr_admin自体は正しく付与されており、フロントの導線だけが対応していなかった)。
+// 機能別権限が1つでもあればcheck_any_admin_role RPCがtrueを返すので、それも
+// admin-dashboardの表示条件に加える。nippo_adminにだけ用意していた「日報管理」専用
+// 入口(admin-dashboardより素早く辿り着ける)は、利便性のためそのまま追加表示する。
+let _anyAdminRoleCache = null;
+async function isAnyAdmin() {
+  if (isAdmin()) return true;
+  if (_anyAdminRoleCache !== null) return _anyAdminRoleCache;
+  const session = getSession();
+  try {
+    _anyAdminRoleCache = await rpc('check_any_admin_role', { p_employee_code: session.employeeCode });
+  } catch (e) {
+    // 通信不良等で確認できなかっただけなら「権限なし」に固定しない(isNippoAdminと同じ方針)。
+    return false;
+  }
+  return _anyAdminRoleCache;
+}
 async function renderHomeAdminBanner(session) {
   const bannerArea = document.getElementById('admin-banner-area');
-  const showAdmin = session.requestRole === 'executive';
+  const showAdmin = session.requestRole === 'executive' || await isAnyAdmin();
+  const showNippoShortcut = !showAdmin && await isNippoAdmin();
   let html = '';
   if (showAdmin) {
-    html = `
+    html += `
       <button type="button" class="main-menu-card" data-nav="admin-dashboard" style="width:100%; flex-direction:row; align-items:center; gap:14px; margin-top:8px;">
         <span class="main-menu-card-icon">${icon('shield')}</span>
         <span style="text-align:left;">
@@ -1836,8 +1854,9 @@ async function renderHomeAdminBanner(session) {
         <span style="margin-left:auto; color:var(--text-faint);">${icon('chevron-right')}</span>
       </button>
     `;
-  } else if (await isNippoAdmin()) {
-    html = `
+  }
+  if (showNippoShortcut) {
+    html += `
       <button type="button" class="main-menu-card" data-nav="daily-report-management" style="width:100%; flex-direction:row; align-items:center; gap:14px; margin-top:8px;">
         <span class="main-menu-card-icon">${icon('clipboard-list')}</span>
         <span style="text-align:left;">
