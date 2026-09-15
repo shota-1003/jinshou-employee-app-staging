@@ -1191,6 +1191,12 @@ button.link {
      PC幅を広く使う。 */
   body:has(#screen-supply-holdings-admin.active) main,
   body:has(#screen-qual-admin.active) main { max-width: 1400px; }
+
+  /* 2026-09-15 Shota指摘「なぜ横に広がって行かずにこういう並びになる」: 借入申請の管理は
+     [id$="-list"]の固定column-count:2のせいで、mainを広げても2列の間延びにしかならない。
+     column-widthへ変えて、空いている横幅ぶんだけ列数が自動で増えるようにする。 */
+  body:has(#screen-loan-admin.active) main { max-width: 1400px; }
+  #loan-admin-list { column-width: 260px; column-count: initial; }
 }
 
 @media (min-width: 1280px) {
@@ -1198,11 +1204,14 @@ button.link {
   body:has(#screen-admin-all-requests.active) main { max-width: 1600px; }
   body:has(#screen-supply-holdings-admin.active) main,
   body:has(#screen-qual-admin.active) main { max-width: 1600px; }
+  body:has(#screen-loan-admin.active) main { max-width: 1600px; }
   [id$="-list"], [id$="-results"] { column-count: 3; }
   #today-list, #daily-report-entry-list, #expense-item-list,
   .home-card-grid, .main-menu-grid, .dash-card-grid, .supply-select-grid, .menu-list {
     column-count: initial;
   }
+  /* column-countの3固定を打ち消し、768px側のcolumn-widthだけで自動的に列数を決めさせる */
+  #loan-admin-list { column-count: initial; }
   .home-card-grid, .main-menu-grid, .dash-card-grid, .supply-select-grid, .menu-list {
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   }
