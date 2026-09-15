@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v195-staging';
-const BUILD_DEPLOYED_AT = '2026-09-15T03:19:18.713Z';
+const BUILD_DEPLOYED_AT = '2026-09-15T03:22:51.911Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6276,6 +6276,7 @@ function groupExpenseLedgerRows(rows) {
         expense_category: r.expense_category, requested_at: r.requested_at,
         item_count: 0, amount: 0, has_pending: false, has_rejected: false, has_approved: false,
         scheduled_payment_date: null, paid_at: null, payment_status: r.payment_status,
+        original_uncollected_count: 0,
       });
     }
     const g = map.get(key);
@@ -6284,6 +6285,7 @@ function groupExpenseLedgerRows(rows) {
     if (r.item_approval_status === 'rejected') g.has_rejected = true;
     else if (r.item_approval_status === 'approved') g.has_approved = true;
     else g.has_pending = true;
+    if (r.has_receipt && !r.original_receipt_collected_at) g.original_uncollected_count += 1;
     if (!g.scheduled_payment_date && r.scheduled_payment_date) g.scheduled_payment_date = r.scheduled_payment_date;
     if (!g.paid_at && r.paid_at) g.paid_at = r.paid_at;
     if (r.payment_status) g.payment_status = r.payment_status;
@@ -6302,6 +6304,7 @@ function expenseRequestLedgerCardHtml(g, opts) {
       <div class="row2">申請日: ${dateTimeText(g.requested_at)}　区分: ${g.expense_category === 'employee_advance' ? '立替' : '会社払い'}</div>
       <div class="row2">支払予定日: ${dateText(g.scheduled_payment_date)}　支払完了日: ${dateText(g.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[g.payment_status] || g.payment_status || '-'}</div>
       <span class="status-badge ${statusClass}">${statusLabel}</span>
+      ${showName && g.original_uncollected_count > 0 ? `<span class="status-badge warn">原本未回収 ${g.original_uncollected_count}件</span>` : ''}
       <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">経費精算書を開く</button>
     </div>
   `;
@@ -6363,7 +6366,7 @@ async function loadExpenseLedgerAdmin() {
     if (countEl) countEl.textContent = `${groupedAdmin.length}件(明細${expenseLedgerAdminRows.length}件)・合計${yenText(total)}`;
     if (expenseLedgerAdminRows.length === 0) {
       listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
-      bodyEl.innerHTML = '<tr><td colspan="16"><div class="hint">この条件の経費履歴はありません。</div></td></tr>';
+      bodyEl.innerHTML = '<tr><td colspan="17"><div class="hint">この条件の経費履歴はありません。</div></td></tr>';
       return;
     }
     // 台帳は「領収書1件=1行」ではなく「申請(経費精算書)1件=1カード」で並べ、カードを
@@ -6385,6 +6388,7 @@ async function loadExpenseLedgerAdmin() {
         <td>${r.has_receipt
     ? `<button type="button" class="link ela-row-detail-btn" data-request-id="${r.employee_request_id}">開く</button>`
     : 'なし'}</td>
+        <td>${r.has_receipt ? (r.original_receipt_collected_at ? '回収済み' : '<span class="mini-tag warn">未回収</span>') : '-'}</td>
         <td>${dateTimeText(r.requested_at)}</td>
         <td>${EXPENSE_ITEM_STATUS_LABEL[r.item_approval_status] || r.item_approval_status}</td>
         <td>${r.approval_method_label || '-'}</td>
@@ -7105,6 +7109,11 @@ function renderExpenseRequestDetailHtml(full, opts) {
     ? '<div class="hint-inline">この明細は除外されています。合計金額にも税理士へ出す用紙にも含まれません。</div>' : ''}
           ${it.approval_reason ? exdRowText('承認・却下の理由', it.approval_reason) : ''}
         </div>
+        <div class="field-group">
+          ${exdRow('領収書の原本', `<span class="status-badge ${it.original_receipt_collected_at ? 'done' : 'warn'}">${it.original_receipt_collected_at ? '回収済み' : '未回収'}</span>`)}
+          ${it.original_receipt_collected_at ? exdRowText('回収した人・日時', `${it.original_receipt_collected_by || ''}・${dt(it.original_receipt_collected_at)}`) : ''}
+          ${isAdmin ? `<div style="margin-top:6px;"><button type="button" class="secondary exd-item-collect-original" data-collected="${it.original_receipt_collected_at ? '1' : '0'}">${it.original_receipt_collected_at ? '回収を取り消す' : '原本を回収した'}</button></div>` : ''}
+        </div>
         ${attached
     ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb exd-receipt-thumb" data-secure-kind="receipt" data-secure-id="${exdEsc(r0.document_id)}" alt="領収書" loading="lazy"><div class="hint-inline">領収書(書類ID ${exdEsc(r0.document_id)})・タップで拡大</div></div>`
     : '<div class="hint-inline"><span class="mini-tag warn">領収書なし</span> この明細には領収書の原本が添付されていません(税理士へ出す証拠がありません)。</div>'}
@@ -7263,6 +7272,25 @@ function wireExpenseRequestDetail(el, full, ctx) {
         });
         await reload();
       } catch (e) { ex.disabled = false; alert(e.message || '除外できませんでした。'); }
+    });
+  });
+
+  // 領収書の原本を回収した/取り消す(2026-09-15 Shota指示「経費申請のときに原本は
+  // 必ず回収したいので原本を回収できる仕組みを取り入れたい」)。
+  el.querySelectorAll('.exd-item').forEach((itemEl) => {
+    const btn = itemEl.querySelector('.exd-item-collect-original');
+    if (!btn) return;
+    btn.addEventListener('click', async () => {
+      const wasCollected = btn.dataset.collected === '1';
+      btn.disabled = true;
+      try {
+        await rpc('admin_set_original_receipt_collected', {
+          p_admin_employee_code: session.employeeCode,
+          p_expense_item_id: Number(itemEl.dataset.itemId),
+          p_collected: !wasCollected,
+        });
+        await reload();
+      } catch (e) { btn.disabled = false; alert(e.message || '記録できませんでした。'); }
     });
   });
 
