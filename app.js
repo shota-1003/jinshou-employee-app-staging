@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v195-staging';
-const BUILD_DEPLOYED_AT = '2026-09-15T03:22:51.911Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v196-staging';
+const BUILD_DEPLOYED_AT = '2026-09-15T05:36:11.938Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -276,9 +276,7 @@ async function compressImageForUpload(file) {
 // 領収書写真をn8n「App Receipt Upload」経由でDriveへアップロードする。このワークフローは
 // 秘密情報(Gateway Shared Secret)を要求せず、内部でemployee_codeをSupabaseへ照会して
 // 本人確認する(ブラウザに秘密情報を埋め込まないための設計、詳細はn8n/app-receipt-upload.json)。
-async function uploadReceiptPhoto(employeeCode, file) {
-  file = await compressImageForUpload(file);
-  const base64 = await fileToBase64(file);
+async function uploadReceiptPhotoViaN8n(employeeCode, file, base64) {
   const res = await fetch(`${N8N_BASE_URL}/webhook/app-receipt-upload`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -289,9 +287,41 @@ async function uploadReceiptPhoto(employeeCode, file) {
   // (「アップロードに失敗しました」とだけ表示すると、通信エラーなのかサーバー側の処理失敗なのか
   // 区別できず実機での原因調査ができなかったため)。
   if (!res.ok || !json || json.error || !json.driveFileId) {
-    throw new Error((json && json.error) || `アップロードに失敗しました(status:${res.status})`);
+    throw new Error((json && json.error) || `n8n経由のアップロードに失敗(status:${res.status})`);
   }
   return json;
+}
+
+// 2026-09-15追加: n8n Cloudの実行回数上限到達により領収書アップロードが軒並み失敗した事故
+// (Shota報告)を受けて、n8nを経由しない直接経路(Supabase Edge Function、社長経費アプリと
+// 同じGoogle認証パターンを再利用)を追加した。n8n経路をまず試し、失敗したときだけこちらへ
+// 自動フォールバックする(SKILL-013 Resilience Cascadeと同じ考え方。n8nを置き換えるのではなく、
+// n8n障害時にも社員が経費申請を止められないようにする安全網)。
+async function uploadReceiptPhotoDirect(employeeCode, file, base64) {
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/receipt-upload-direct`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}` },
+    body: JSON.stringify({ employeeCode, fileName: file.name || 'receipt.jpg', mimeType: file.type || 'image/jpeg', base64 }),
+  });
+  const json = await res.json().catch(() => null);
+  if (!res.ok || !json || json.error || !json.driveFileId) {
+    throw new Error((json && json.error) || `直接経路のアップロードにも失敗(status:${res.status})`);
+  }
+  return json;
+}
+
+async function uploadReceiptPhoto(employeeCode, file) {
+  file = await compressImageForUpload(file);
+  const base64 = await fileToBase64(file);
+  try {
+    return await uploadReceiptPhotoViaN8n(employeeCode, file, base64);
+  } catch (e) {
+    try {
+      return await uploadReceiptPhotoDirect(employeeCode, file, base64);
+    } catch (e2) {
+      throw new Error(`${e.message} / ${e2.message}`);
+    }
+  }
 }
 
 // ============================================================
