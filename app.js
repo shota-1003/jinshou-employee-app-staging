@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v192-staging';
-const BUILD_DEPLOYED_AT = '2026-09-15T01:39:23.107Z';
+const BUILD_DEPLOYED_AT = '2026-09-15T01:45:57.201Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -17784,8 +17784,8 @@ function init() {
   SCREEN_ENTER_HOOKS.history = loadHistory;
   SCREEN_ENTER_HOOKS['supply-request'] = () => { hideError('supply-req-error'); resetSupplyRequestScreen(); };
   SCREEN_ENTER_HOOKS['supply-initial-holding'] = () => { hideError('supply-ih-error'); resetSupplyInitialHoldingScreen(); };
-  SCREEN_ENTER_HOOKS['supply-request-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['supply-request-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     // 遷移元(ダッシュボードのカード)が nav.filter で渡した絞り込みを反映する。
     // filter を持たない経路で入ったときは前回の絞り込みを必ず解除する。
     const navf = navCurrent() && navCurrent().screen === 'supply-request-admin' ? (navCurrent().filter || '') : '';
@@ -17796,43 +17796,43 @@ function init() {
   SCREEN_ENTER_HOOKS['my-supply'] = loadMySupply;
   SCREEN_ENTER_HOOKS.myinfo = loadMyInfo;
   SCREEN_ENTER_HOOKS['my-change-requests'] = loadMyChangeRequests;
-  SCREEN_ENTER_HOOKS.admin = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS.admin = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminEmployeeSelects();
     document.getElementById('admin-search-results').innerHTML = '';
   };
-  SCREEN_ENTER_HOOKS['pin-reset-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['pin-reset-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadPinResetAdmin();
   };
   SCREEN_ENTER_HOOKS['anon-consult'] = loadMyAnonConsultations;
   SCREEN_ENTER_HOOKS['anon-submit'] = () => { hideError('anon-submit-error'); document.getElementById('anon-content').value = ''; };
-  SCREEN_ENTER_HOOKS['anon-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['anon-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAnonAdminList();
   };
   SCREEN_ENTER_HOOKS.announcements = loadAnnouncements;
   const announceArchiveBtn = document.getElementById('announce-show-archived-btn');
   if (announceArchiveBtn) announceArchiveBtn.addEventListener('click', () => loadAnnouncements(true));
-  SCREEN_ENTER_HOOKS['admin-dashboard'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['admin-dashboard'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminDashboard();
   };
   SCREEN_ENTER_HOOKS['expense-payment-pending'] = () => { loadExpensePaymentPending(); };
-  SCREEN_ENTER_HOOKS['admin-request-list'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['admin-request-list'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminRequestList();
   };
-  SCREEN_ENTER_HOOKS['admin-announce'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['admin-announce'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     hideError('announce-error');
     loadAnnounceAdminEmployeeSelect();
     loadAnnounceAdminList();
   };
   SCREEN_ENTER_HOOKS['qual-submit'] = resetQualForm;
   SCREEN_ENTER_HOOKS['my-qual'] = loadMyQualifications;
-  SCREEN_ENTER_HOOKS['qual-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['qual-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     // 遷移元(ダッシュボードのカード「資格・免許の期限切れ/期限接近」)が nav.filter で渡した
     // 絞り込みを反映する。'expiring' は admin_list_qualifications の p_filter と同じ値で、
     // カードとまったく同じ述語(status='active' かつ 期限 <= 当日+60日)になる。
@@ -17856,8 +17856,8 @@ function init() {
     renderQualAdminActiveFilterChip();
     loadQualAdminList();
   };
-  SCREEN_ENTER_HOOKS['category-review'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['category-review'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadCategoryReview();
   };
 
@@ -17881,8 +17881,8 @@ function init() {
   }
 
   // 経費の履歴台帳(管理者)。人別・月別・状態別。
-  SCREEN_ENTER_HOOKS['expense-ledger-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['expense-ledger-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     // 台帳本体を先に読む(社員絞り込み用の名簿取得を待たせない。名簿が取れなくても
     // 「全員」のまま台帳は使えるようにする)。
     loadExpenseLedgerAdmin();
@@ -17954,28 +17954,28 @@ function init() {
       renderLeaveHistory();
     });
   }
-  SCREEN_ENTER_HOOKS['employee-directory'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['employee-directory'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     document.getElementById('employee-search-input').value = '';
     employeeStatusFilter = 'active';
     document.querySelectorAll('#employee-status-filter .filter-chip').forEach((b) => b.classList.toggle('active', b.dataset.status === 'active'));
     loadEmployeeDirectory();
   };
-  SCREEN_ENTER_HOOKS['employee-create'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['employee-create'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     resetEmployeeCreateForm();
   };
   onId('ec-submit', 'click', doCreateEmployee);
-  SCREEN_ENTER_HOOKS['info-change-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['info-change-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadInfoChangeAdmin();
   };
-  SCREEN_ENTER_HOOKS['supply-master-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['supply-master-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadSupplyMasterAdmin();
   };
-  SCREEN_ENTER_HOOKS['supply-holdings-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['supply-holdings-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     supplyHoldingsMatrixCache = null; // 画面へ入り直すたびに最新の保有数を取り直す
     loadSupplyHoldingsAdmin();
   };
@@ -18007,8 +18007,8 @@ function init() {
   SCREEN_ENTER_HOOKS['status-board-general'] = loadStatusBoardGeneral;
   SCREEN_ENTER_HOOKS['entertainment-late-submit'] = resetEntertainmentLateForm;
   SCREEN_ENTER_HOOKS['my-entertainment'] = loadMyEntertainmentList;
-  SCREEN_ENTER_HOOKS['entertainment-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['entertainment-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadEntertainmentAdminList();
   };
   SCREEN_ENTER_HOOKS['site-admin'] = async () => {
@@ -18030,31 +18030,31 @@ function init() {
   });
 
   // ---------- 有給管理・社員別集計・出面集計(管理者) ----------
-  SCREEN_ENTER_HOOKS['leave-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['leave-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     document.getElementById('la-search').value = '';
     loadLeaveAdmin();
   };
   // 休暇履歴(管理者、全社員・全種別)。既定は「対象月なし=全期間」で開く。
   // 承認済みの休暇がどこにも見当たらない、という状態にしないため、絞り込みは既定でかけない。
-  SCREEN_ENTER_HOOKS['admin-leave-history'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['admin-leave-history'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminLeaveHistory();
   };
-  SCREEN_ENTER_HOOKS['employee-summary'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['employee-summary'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     if (!document.getElementById('es-month').value) document.getElementById('es-month').value = todayJST().slice(0, 7);
     loadEmployeeSummary();
   };
-  SCREEN_ENTER_HOOKS['attendance-matrix'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['attendance-matrix'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     if (!document.getElementById('am-month').value) document.getElementById('am-month').value = todayJST().slice(0, 7);
     updateAmMonthDisplay();
     loadAttendanceFilterOptions();
     loadAttendanceMatrix();
   };
-  SCREEN_ENTER_HOOKS['bulk-expense-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['bulk-expense-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     // 遷移元(ダッシュボードのカード)が nav.filter で渡した絞り込みを反映する。
     // 前回の絞り込みが残っていると「カード件数 ≠ 表示件数」になるため、
     // filter を持たない経路で入ったときは必ず解除する。
@@ -18202,8 +18202,8 @@ function init() {
   // ---------- 常用伝票 ----------
   SCREEN_ENTER_HOOKS['joyo-denpyo-list'] = () => { jdFilters = { partner: '', dateFrom: '', dateTo: '' }; document.getElementById('jd-search-partner').value = ''; document.getElementById('jd-search-date-from').value = ''; document.getElementById('jd-search-date-to').value = ''; loadJoyoDenpyoList(); };
   SCREEN_ENTER_HOOKS['joyo-denpyo-form'] = () => { if (!document.getElementById('jd-edit-id').value) resetJoyoDenpyoForm(); };
-  SCREEN_ENTER_HOOKS['joyo-denpyo-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['joyo-denpyo-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     if (!jdaEmployeeFilterJustSet) jdaEmployeeFilter = null;
     jdaEmployeeFilterJustSet = false;
     jdaStatusFilter = '';
@@ -18220,8 +18220,8 @@ function init() {
   document.getElementById('jda-site-select').addEventListener('change', loadJoyoDenpyoAdminList);
 
   // ---------- 常用台帳集計(Phase C-6) ----------
-  SCREEN_ENTER_HOOKS['joyo-denpyo-summary'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['joyo-denpyo-summary'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     if (!document.getElementById('jds-month').value) document.getElementById('jds-month').value = todayJST().slice(0, 7);
     jdsView = 'employee';
     document.querySelectorAll('#jds-view-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
@@ -18345,8 +18345,8 @@ function init() {
 
   // ---------- 社内イベント ----------
   SCREEN_ENTER_HOOKS.events = loadEventsList;
-  SCREEN_ENTER_HOOKS['event-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['event-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadEventAdminList();
   };
   document.querySelectorAll('#event-response-chips .filter-chip').forEach((btn) => {
@@ -18359,8 +18359,8 @@ function init() {
   document.getElementById('event-create-submit').addEventListener('click', doCreateEvent);
   document.getElementById('event-notify-unanswered-btn').addEventListener('click', doNotifyUnansweredEvent);
 
-  SCREEN_ENTER_HOOKS['license-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['license-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadLicenseTypeAdminList();
   };
   document.getElementById('vehicle-submit').addEventListener('click', doSaveVehicle);
@@ -18371,8 +18371,8 @@ function init() {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadVehicleAdminList();
   };
-  SCREEN_ENTER_HOOKS['health-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['health-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadHealthAdminList();
   };
   SCREEN_ENTER_HOOKS['daily-report'] = resetDailyReportForm;
@@ -18385,12 +18385,12 @@ function init() {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportAdminList();
   };
-  SCREEN_ENTER_HOOKS['purpose-admin'] = () => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['purpose-admin'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadPurposeAdminList();
   };
-  SCREEN_ENTER_HOOKS['admin-all-requests'] = (opts) => {
-    if (!isAdmin()) { enterMenu(); return; }
+  SCREEN_ENTER_HOOKS['admin-all-requests'] = async (opts) => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
     // 2026-09-06 最終完成監査で発覚: 「今日やること」の休暇カードで入った後、下部ナビの申請管理を開くと
     // チップは「すべて」なのに一覧は休暇だけ(カード由来の p_category が state に残っていた)。
     // 条件付きの入場(setAreqFilters 直後)と「戻る」(popstate / replace)以外は既定の全件表示へ戻す。
