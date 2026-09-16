@@ -4253,6 +4253,7 @@
                         end_time: x.end_time || '',
                         vehicle_id: x.vehicle_id || '',
                         vehicle_plate: x.vehicle_plate || '',
+                        haul_concurrent_with_work: !!x.haul_concurrent_with_work,
                         workers: (x.workers || []).map((w) => ({
                             subcontractor_worker_id: w.subcontractor_worker_id || null,
                             name: w.name || '', phone: w.phone || '',
