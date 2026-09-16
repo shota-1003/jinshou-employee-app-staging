@@ -3633,7 +3633,11 @@
                     const card = el('div', 'ac-subcard');
 
                     const top = el('div', 'ac-subtop');
-                    top.append(el('div', 'ac-subname', sub.company_name));
+                    // 2026-09-16: 同じ会社が「仕事」「運搬」で2枚のカードに分かれる場合、
+                    // 会社名だけだと見分けが付かず、意図と違うカードを操作してしまう事故が
+                    // 実際に起きた。運搬カードだけ分かるように役割を添える。
+                    const nameSuffix = (sub.assignment_kind || 'work') === 'haul' ? '（運搬）' : '';
+                    top.append(el('div', 'ac-subname', sub.company_name + nameSuffix));
                     const remove = el('button', 'ac-del', '✕');
                     remove.title = 'この協力会社を外す';
                     remove.addEventListener('click', () => {
