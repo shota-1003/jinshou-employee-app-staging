@@ -998,6 +998,31 @@
 
         function timelineEl() { return elBody.querySelector('.ac-timeline'); }
 
+        // 2026-09-21 実機録画で判明: 指で動かしている最中・慣性で流れている最中に、
+        // 通信が返ってきた区画の差し替え(警告帯が後から出て高さが変わる)や前の日の追加が入ると、
+        // iOS Safari は慣性を止め、表示位置もずれる(「かくつく」「下へ動かしても戻る」)。
+        // 高さや scrollTop を動かす描き直しは、スクロールが落ち着いてから行う。
+        const SCROLL_IDLE_MS = 160;
+        let scrollActive = false;
+        let touchDown = false;
+        let scrollIdleTimer = null;
+        let lastUserTouchAt = 0;
+        function markScrollActive() {
+            scrollActive = true;
+            clearTimeout(scrollIdleTimer);
+            if (!touchDown) scrollIdleTimer = setTimeout(() => { scrollActive = false; }, SCROLL_IDLE_MS);
+        }
+        function scrollIdle(maxWaitMs) {
+            const limit = Date.now() + (maxWaitMs || 2500);
+            return new Promise((resolve) => {
+                const tick = () => {
+                    if (!scrollActive || Date.now() > limit) resolve();
+                    else setTimeout(tick, 60);
+                };
+                tick();
+            });
+        }
+
         // その日のデータを取ってキャッシュへ入れる。既にあれば何もしない。
         async function loadDayData(date, force) {
             if (!force && state.days.has(date)) return state.days.get(date);
@@ -1025,15 +1050,20 @@
                 rec.confirmation = confirmation;
             } catch (e) { rec.full = false; return; }
             if (state.selected === date) focusDate(date);
+            // スクロール中に区画を差し替えると高さが変わって表示位置がずれる。落ち着いてから描き直す。
+            await scrollIdle();
             // その区画だけ描き直す。増えた高さぶんスクロールを送り、見ている位置を保つ。
             const tl = timelineEl();
             const old = tl && tl.querySelector(`.ac-daysec[data-date="${date}"]`);
             if (!old) return;
-            const topBefore = old.getBoundingClientRect().top;
+            const oldRect = old.getBoundingClientRect();
             const scrollBefore = elBody.scrollTop;
+            // 見ている位置より上の区画が伸び縮みしたときだけ、そのぶん位置を送る。
+            // (区画自身の上端は動かないので、以前の「上端の差」では常に0で補正になっていなかった)
+            const aboveView = oldRect.bottom <= elBody.getBoundingClientRect().top;
             const fresh = buildDaySection(date);
             old.replaceWith(fresh);
-            const delta = fresh.getBoundingClientRect().top - topBefore;
+            const delta = aboveView ? fresh.getBoundingClientRect().height - oldRect.height : 0;
             if (delta) elBody.scrollTop = scrollBefore + delta;
             focusDate(state.selected);
         }
@@ -1170,8 +1200,10 @@
             renderMonth(holder);
             const fresh = holder.querySelector('.ac-monthwrap');
             if (fresh) wrap.replaceWith(fresh);
-            // 念のため高さが動いたぶんだけ補正する(見ている位置を動かさない)
-            elBody.scrollTop = top + (elBody.scrollHeight - before);
+            // 念のため高さが動いたぶんだけ補正する(見ている位置を動かさない)。
+            // 動いていないのに scrollTop を書くと、iOS は慣性スクロールを止めてしまう。
+            const moved = elBody.scrollHeight - before;
+            if (moved) elBody.scrollTop = top + moved;
         }
 
         // タイムラインの組み替えは1つずつ順番に行う。
@@ -1211,11 +1243,17 @@
                     tl2.append(buildDaySection(d));
                     state.tl.to = d;
                 } else {
+                    // 前の日を足すと scrollTop を書き換える必要があり、指で動かしている最中や
+                    // 慣性中に書くと iOS は動きを止める。落ち着いてから足す。
+                    await scrollIdle();
+                    const tl3 = timelineEl();
+                    if (!tl3) break;
                     const beforeH = elBody.scrollHeight;
                     const beforeTop = elBody.scrollTop;
-                    tl2.prepend(buildDaySection(d));
+                    tl3.prepend(buildDaySection(d));
                     state.tl.from = d;
-                    elBody.scrollTop = beforeTop + (elBody.scrollHeight - beforeH);
+                    const grown = elBody.scrollHeight - beforeH;
+                    if (grown) elBody.scrollTop = beforeTop + grown;
                 }
             }
             focusDate(state.selected);
@@ -5157,7 +5195,19 @@
         let stripTimer = null;
         // スクロール中の追従は1フレームに1回にまとめる。タイマーで間引くと
         // 描画のタイミングとずれて、指を動かしている最中に一瞬遅れて動いて見える。
+        elBody.addEventListener('touchstart', () => {
+            touchDown = true; scrollActive = true; lastUserTouchAt = Date.now();
+            clearTimeout(scrollIdleTimer);
+        }, { passive: true });
+        const onTouchEnd = () => {
+            touchDown = false; lastUserTouchAt = Date.now();
+            clearTimeout(scrollIdleTimer);
+            scrollIdleTimer = setTimeout(() => { scrollActive = false; }, SCROLL_IDLE_MS);
+        };
+        elBody.addEventListener('touchend', onTouchEnd, { passive: true });
+        elBody.addEventListener('touchcancel', onTouchEnd, { passive: true });
         elBody.addEventListener('scroll', () => {
+            markScrollActive();
             if (stripTimer) return;
             stripTimer = requestAnimationFrame(() => {
                 stripTimer = null;
@@ -5211,10 +5261,13 @@
             // 前後の日を読んでいる最中に利用者が操作した場合は、
             // 起動処理の最後で位置を戻さない(押した操作を上書きしない)。
             const navAtStart = tlNavCount;
+            const initAt = Date.now();
             await extendTimeline(1);
             await extendTimeline(1);
             await extendTimeline(-1);
-            if (tlNavCount === navAtStart) goToDaySection(state.selected, false);
+            // 読み込み中に利用者が指でスクロールしていた場合は戻さない(下へ動かした位置が
+            // 数秒後に元へ引き戻される原因になっていた)。
+            if (tlNavCount === navAtStart && lastUserTouchAt < initAt) goToDaySection(state.selected, false);
         })();
 
         return {
