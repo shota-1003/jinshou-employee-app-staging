@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v199-staging';
-const BUILD_DEPLOYED_AT = '2026-09-20T23:14:17.316Z';
+const BUILD_DEPLOYED_AT = '2026-09-21T06:27:27.243Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -545,7 +545,7 @@ const ADMIN_SCREENS = new Set([
   'qual-admin', 'category-review', 'employee-directory', 'employee-detail', 'info-change-admin',
   'supply-master-admin', 'entertainment-admin', 'site-admin', 'leave-admin', 'leave-grant', 'admin-leave-history',
   'employee-summary', 'employee-monthly-detail', 'attendance-matrix', 'bulk-expense-admin', 'bulk-expense-detail',
-  'expense-payment-pending',
+  'expense-payment-pending', 'fulfillment-pending',
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
@@ -577,7 +577,7 @@ const PARENT_ROUTE = Object.freeze({
   'entertainment-admin': 'admin-dashboard', 'site-admin': 'admin-dashboard', 'leave-admin': 'admin-dashboard',
   'employee-summary': 'admin-dashboard', 'attendance-matrix': 'admin-dashboard', 'bulk-expense-admin': 'admin-dashboard',
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
-  'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard',
+  'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard', 'fulfillment-pending': 'admin-dashboard',
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
@@ -5496,10 +5496,22 @@ async function renderAdminTodayTasks(session) {
   const el = document.getElementById('admin-today-tasks');
   if (!el) return;
   try {
-    const rows = await rpc('admin_home_today_tasks', { p_admin_employee_code: session.employeeCode });
+    // 「今日やること」の集約が失敗(重い日のタイムアウト等)しても、支払い・受け渡し待ちは必ず出す
+    // (待ちが見えないと払い忘れ・渡し忘れになるため。2026-09-21 Shota指摘)。
+    let rows = []; let todayRpcFailed = false;
+    try { rows = (await rpc('admin_home_today_tasks', { p_admin_employee_code: session.employeeCode })) || []; } catch (e) { todayRpcFailed = true; }
+    // 支払い・受け渡し待ち(経費・借入・支給品。払った/渡した記録が入るまで残る)。件数は一覧と同じ関数で数える。
+    try {
+      const fp = await fetchFulfillmentPending(session);
+      if (fp.items.length) {
+        const nAlert = fp.items.filter((x) => x.alert).length;
+        rows.push({ task_key: 'fulfillment_pending', label: '支払い・受け渡し待ち' + (nAlert ? '(うち期日未設定・超過 ' + nAlert + '件)' : ''), cnt: fp.items.length, nav_screen: 'fulfillment-pending', severity: nAlert ? 'urgent' : 'attention', sort_order: 41 });
+      }
+    } catch (_) { /* 取れなくても他の項目は出す */ }
     const actionable = (rows || []).filter((r) => Number(r.cnt) > 0).sort((a, b) => a.sort_order - b.sort_order);
     if (actionable.length === 0) {
-      el.innerHTML = '<div class="card" style="text-align:center;color:var(--muted);">今日、対応が必要なことはありません 🎉</div>';
+      // 集約が取れなかったのに「対応なし」と出すと誤解を招くので、その場合は従来どおり何も出さない。
+      el.innerHTML = todayRpcFailed ? '' : '<div class="card" style="text-align:center;color:var(--muted);">今日、対応が必要なことはありません 🎉</div>';
       return;
     }
     el.innerHTML = actionable.map((r) => {
@@ -11393,6 +11405,8 @@ async function openLoanDetail(id) {
 // 大きく表示するよう分離した(経費の一覧→詳細と同じ構成)。
 let loanAdminStatusFilter = 'applied';
 let loanAdminDetailId = null;
+let loanAdminFlash = null; // { id, kind: 'approved' | 'scheduled' } 詳細画面を開き直したとき、次にやることの案内を出す
+let loanAdminUserPicked = false; // 利用者が自分でタブを選んだか(選ぶまでは、承認待ちが0件で支払い待ちがあれば支払い待ちを開く)
 
 function wireLoanAdminStatusFilter() {
   const row = document.getElementById('loan-admin-status-filter');
@@ -11403,6 +11417,7 @@ function wireLoanAdminStatusFilter() {
       row.querySelectorAll('.filter-chip').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
       loanAdminStatusFilter = btn.dataset.status;
+      loanAdminUserPicked = true;
       loadLoanAdminList();
     });
   });
@@ -11419,6 +11434,21 @@ async function loadLoanAdminList() {
     // 支払い待ちっていう枠がいるはず」: 承認済み(status='approved')のうち、まだ
     // 支払いが完了していない(payment_status!=='paid')ものだけを横断的に見られるようにする。
     // 履歴タブからは取り除かない(全履歴を見たいときの経路はそのまま残す)。
+    // 2026-09-21 Shota指摘「支払い待ちに反映されていない・払ったのに登録を忘れた」: タブに件数を出し、
+    // 支払予定日が未設定・超過のものを赤く示す。承認待ちが0件で支払い待ちがあれば、最初から支払い待ちを開く。
+    const isUnpaid = (r) => r.status === 'approved' && r.payment_status !== 'paid';
+    const nApplied = (rows || []).filter((r) => r.status === 'applied').length;
+    const nUnpaid = (rows || []).filter(isUnpaid).length;
+    if (!loanAdminUserPicked && nApplied === 0 && nUnpaid > 0 && loanAdminStatusFilter === 'applied') loanAdminStatusFilter = 'payment_pending';
+    const chipRow = document.getElementById('loan-admin-status-filter');
+    if (chipRow) {
+      chipRow.querySelectorAll('.filter-chip').forEach((b) => {
+        const st = b.dataset.status;
+        if (st === 'applied') b.textContent = `承認待ち(${nApplied})`;
+        else if (st === 'payment_pending') b.textContent = `支払い待ち(${nUnpaid})`;
+        b.classList.toggle('active', st === loanAdminStatusFilter);
+      });
+    }
     const filtered = (rows || []).filter((r) => {
       if (loanAdminStatusFilter === 'applied') return r.status === 'applied';
       if (loanAdminStatusFilter === 'payment_pending') return r.status === 'approved' && r.payment_status !== 'paid';
@@ -11433,7 +11463,7 @@ async function loadLoanAdminList() {
       <div class="history-item" data-id="${r.id}" style="cursor:pointer;">
         <div class="row1"><span style="font-weight:700;">${(r.employee_name || '').replace(/</g, '&lt;')}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${LOAN_STATUS_LABEL[r.status] || r.status}</span></div>
         <div class="row2">申請日 ${r.request_date}　希望 ${yen(r.amount)}　必要日 ${r.needed_by_date}</div>
-        ${r.status === 'approved' ? `<div class="row2">支払状況: ${LOAN_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status}</div>` : ''}
+        ${r.status === 'approved' ? `<div class="row2">支払状況: ${LOAN_PAYMENT_STATUS_LABEL[r.payment_status] || r.payment_status}${isUnpaid(r) ? `　<span style="color:var(--danger,#d9534f);font-weight:700;">${r.scheduled_payment_date ? `支払予定 ${String(r.scheduled_payment_date).slice(0, 10)}${String(r.scheduled_payment_date).slice(0, 10) < todayJST() ? '(期日超過)' : ''}` : '支払予定日 未設定'}</span>` : ''}</div>` : ''}
       </div>`).join('');
     listEl.querySelectorAll('.history-item').forEach((el) => {
       el.addEventListener('click', () => openLoanAdminDetail(Number(el.dataset.id)));
@@ -11496,6 +11526,9 @@ async function loadLoanAdminDetail() {
         btn.disabled = true;
         try {
           await rpc('admin_decide_loan_request', { p_admin_employee_code: session.employeeCode, p_id: r.id, p_action: act, p_comment: comment || null });
+          // 2026-09-21 Shota指摘(2度目)「承認を押したらそのまま支払い期日を決める画面に行く」:
+          // 承認したら一覧へ戻さず、同じ詳細画面を開き直して「支払」欄(支払予定日の入力)を先頭に出す。
+          if (act === 'approve') { loanAdminFlash = { id: r.id, kind: 'approved' }; await loadLoanAdminDetail(); return; }
           showScreen('loan-admin');
         } catch (e) { btn.disabled = false; alert(e.message || '処理に失敗しました。'); }
       });
@@ -11509,6 +11542,27 @@ async function loadLoanAdminDetail() {
       });
     });
     wireLoanPaymentSection(body, session, () => loadLoanAdminDetail());
+    // 承認直後・支払予定日の記録直後は、次にやることを先頭に出し、支払欄へスクロールして日付入力に合わせる。
+    if (loanAdminFlash && Number(loanAdminFlash.id) === Number(r.id)) {
+      const kind = loanAdminFlash.kind; loanAdminFlash = null;
+      const msg = kind === 'approved'
+        ? '承認しました。続けて<strong>支払予定日</strong>を決めて記録してください。支払を記録するまで、この借入は「支払い待ち」に残ります。'
+        : (kind === 'scheduled' ? '支払予定日を記録しました。<strong>支払い待ち</strong>に入っています。実際に支払ったら「支払を記録する」を押してください(押すまで完了になりません)。' : '');
+      if (msg && r.status === 'approved') {
+        const banner = document.createElement('div');
+        banner.className = 'exd-pay-top-alert';
+        banner.style.cssText = 'border-left:4px solid var(--primary);padding:8px 10px;margin:0 0 10px;background:rgba(255,255,255,0.06);border-radius:6px;';
+        banner.innerHTML = msg;
+        const dateInput = body.querySelector('.loan-schedule-date');
+        const payCard = dateInput ? dateInput.closest('.card') : null;
+        // 案内は「支払」欄の先頭に置く(支払欄へスクロールしたとき、案内と日付入力が同時に見えるように)。
+        (payCard || body).insertBefore(banner, (payCard || body).firstChild);
+        if (payCard && r.payment_status !== 'paid') {
+          payCard.scrollIntoView({ block: 'start' });
+          if (kind === 'approved' && dateInput) { try { dateInput.focus({ preventScroll: true }); } catch (_) { dateInput.focus(); } }
+        }
+      }
+    }
   } catch (e) { body.innerHTML = '<div class="hint">読み込みに失敗しました。</div>'; }
 }
 
@@ -11587,7 +11641,10 @@ function loanBuildPaymentSectionHtml(r) {
       ${exdRowText('支払処理をした人', r.paid_by)}
     </div>`;
   if (!paid) {
-    html += `<div class="exd-pay-form">
+    html += `<div class="hint" style="margin:8px 0;${r.scheduled_payment_date ? '' : 'color:var(--danger,#d9534f);font-weight:700;'}">${r.scheduled_payment_date
+      ? '支払い待ちです。実際に支払ったら、下の「支払を記録する」を押してください(押すまで完了にはなりません)。'
+      : '支払予定日がまだ決まっていません。下で支払予定日を決めて記録してください。'}</div>
+    <div class="exd-pay-form">
       <label>支払予定日</label>
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
         <input type="date" class="loan-schedule-date" style="width:160px;" value="${exdEsc(dOnly(r.scheduled_payment_date))}">
@@ -11729,6 +11786,7 @@ function wireLoanPaymentSection(containerEl, session, onDone) {
       btn.disabled = true;
       try {
         await rpc('admin_set_loan_payment_schedule', { p_admin_employee_code: session.employeeCode, p_id: id, p_scheduled_payment_date: v });
+        loanAdminFlash = { id, kind: 'scheduled' };
         reload();
       } catch (e) { btn.disabled = false; if (errEl) errEl.textContent = e.message || '記録できませんでした。'; }
     });
@@ -14457,6 +14515,81 @@ async function loadExpensePaymentPending() {
     `).join('');
     listEl.querySelectorAll('.history-item').forEach((el) => {
       el.addEventListener('click', () => openRequestDetail('expense_reimbursement', el.dataset.id));
+    });
+  } catch (e) {
+    listEl.innerHTML = `<div class="hint">読み込みに失敗しました: ${exdEsc(e.message || '')}</div>`;
+  }
+}
+
+// 支払い・受け渡し待ち(経費立替・借入・支給品を横断)。2026-09-21 Shota指示
+// 「支払い期日を決めて支払い完了するまで、待ちのタブは残す。支払うまで・渡すまで完了扱いにしない。全ての項目で共通」。
+// 既存の3つの一覧RPC(経費 admin_list_expense_payment_pending / 借入 admin_list_loan_requests /
+// 支給品 admin_list_supply_pending_delivery)をそのまま使い、新しい判定ロジックは持たない。
+// 権限が無い種類はその種類だけ読み飛ばす(経理・貸付・日報管理の各権限が別のため)。
+async function fetchFulfillmentPending(session) {
+  const code = session.employeeCode;
+  const today = todayJST();
+  const d10 = (v) => (v ? String(v).slice(0, 10) : '');
+  const [exp, loan, sup] = await Promise.allSettled([
+    rpc('admin_list_expense_payment_pending', { p_admin_employee_code: code }),
+    rpc('admin_list_loan_requests', { p_admin_employee_code: code, p_status: null }),
+    rpc('admin_list_supply_pending_delivery', { p_admin_employee_code: code }),
+  ]);
+  const items = [];
+  if (exp.status === 'fulfilled') {
+    (exp.value || []).forEach((r) => items.push({
+      kind: 'expense', kindLabel: '経費', id: r.employee_request_id, name: r.employee_name, money: Number(r.remaining_amount || 0),
+      detail: `経費立替 ${Number(r.item_count || 0)}件${r.batch_title ? `・${r.batch_title}` : ''}`,
+      scheduled: d10(r.scheduled_payment_date), approvedAt: d10(r.approved_at), dateWord: '支払予定',
+    }));
+  }
+  if (loan.status === 'fulfilled') {
+    (loan.value || []).filter((r) => r.status === 'approved' && r.payment_status !== 'paid').forEach((r) => items.push({
+      kind: 'loan', kindLabel: '借入', id: r.id, name: r.employee_name, money: Number(r.amount || 0),
+      detail: `借入 必要日 ${d10(r.needed_by_date)}　${LOAN_RECEIPT_LABEL[r.receipt_method] || ''}`,
+      scheduled: d10(r.scheduled_payment_date), approvedAt: d10(r.decided_at), dateWord: '支払予定',
+    }));
+  }
+  if (sup.status === 'fulfilled') {
+    (sup.value || []).forEach((r) => items.push({
+      kind: 'supply', kindLabel: '支給品', id: r.item_request_id, name: r.employee_name, money: null,
+      detail: `${r.item_name}${r.size ? `・${r.size}` : ''}　数量${r.quantity}`,
+      scheduled: d10(r.scheduled_issue_date), approvedAt: d10(r.decided_at), dateWord: '渡す予定',
+    }));
+  }
+  items.forEach((it) => { it.alert = !it.scheduled ? 'unset' : (it.scheduled < today ? 'overdue' : null); });
+  const rank = (it) => (it.alert === 'overdue' ? 0 : (it.alert === 'unset' ? 1 : 2));
+  items.sort((a, b) => rank(a) - rank(b) || (a.scheduled || '9999').localeCompare(b.scheduled || '9999') || (a.approvedAt || '').localeCompare(b.approvedAt || ''));
+  return { items, allFailed: [exp, loan, sup].every((x) => x.status === 'rejected') };
+}
+
+async function loadFulfillmentPending() {
+  const session = getSession();
+  const listEl = document.getElementById('fp-list');
+  const yenF = (n) => `${Number(n || 0).toLocaleString('ja-JP')}円`;
+  listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const { items, allFailed } = await fetchFulfillmentPending(session);
+    if (allFailed) { listEl.innerHTML = '<div class="hint">この画面には経理・貸付・日報管理のいずれかの管理権限が必要です。</div>'; return; }
+    document.getElementById('fp-count').textContent = `${items.length}件`;
+    document.getElementById('fp-alert').textContent = `${items.filter((x) => x.alert).length}件`;
+    document.getElementById('fp-total').textContent = yenF(items.reduce((a, x) => a + (x.money || 0), 0));
+    if (!items.length) { listEl.innerHTML = '<div class="hint">支払い・受け渡しを待っているものはありません。</div>'; return; }
+    listEl.innerHTML = items.map((it, i) => `
+      <div class="history-item fp-row" data-idx="${i}" style="cursor:pointer;">
+        <div class="row1"><span><span class="status-badge">${exdEsc(it.kindLabel)}</span> ${exdEsc(it.name)}</span><span>${it.money === null ? '' : yenF(it.money)}</span></div>
+        <div class="row2">${exdEsc(it.detail)}${it.approvedAt ? `　承認 ${exdEsc(it.approvedAt)}` : ''}</div>
+        <div class="row2" style="${it.alert ? 'color:var(--danger,#d9534f);font-weight:700;' : ''}">${it.scheduled
+          ? `${it.dateWord} ${exdEsc(it.scheduled)}${it.alert === 'overdue' ? '(期日超過)' : ''}`
+          : `${it.dateWord}日 未設定(タップして決めてください)`}</div>
+      </div>`).join('');
+    listEl.querySelectorAll('.fp-row').forEach((el) => {
+      el.addEventListener('click', () => {
+        const it = items[Number(el.dataset.idx)];
+        if (it.kind === 'loan') { loanAdminDetailId = Number(it.id); showScreen('loan-admin-detail'); }
+        else if (it.kind === 'expense') openRequestDetail('expense_reimbursement', it.id);
+        else showScreen('supply-request-admin');
+      });
     });
   } catch (e) {
     listEl.innerHTML = `<div class="hint">読み込みに失敗しました: ${exdEsc(e.message || '')}</div>`;
@@ -17921,6 +18054,7 @@ function init() {
     loadAdminDashboard();
   };
   SCREEN_ENTER_HOOKS['expense-payment-pending'] = () => { loadExpensePaymentPending(); };
+  SCREEN_ENTER_HOOKS['fulfillment-pending'] = () => { loadFulfillmentPending(); };
   SCREEN_ENTER_HOOKS['admin-request-list'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminRequestList();
@@ -18593,3 +18727,62 @@ function init() {
 }
 
 document.addEventListener('DOMContentLoaded', init);
+
+// ==================== 用紙(.settlement-sheet)を画面の幅に合わせる ====================
+// 2026-09-21 Shota指摘「用紙をPCと携帯で見えるサイズに変えて。PCだと半分しか見えない」。
+// 用紙は紙と同じ比率を保つため横720px固定で作ってあり、入れ物が狭いと右側が切れる(スマホ・PC共通)。
+// 入れ物の幅に合わせて用紙ごと縮小・拡大し、常に全体が見えるようにする(貸付金台帳の紙 .ll-sheet は元から可変幅なので対象外)。
+(function setupSettlementSheetFit() {
+  const NATURAL_WIDTH = 720;
+  function fit(sheet) {
+    if (!sheet || sheet.classList.contains('ll-sheet')) return;
+    const box = sheet.parentElement;
+    if (!box) return;
+    const cs = getComputedStyle(box);
+    const avail = box.clientWidth - (parseFloat(cs.paddingLeft) || 0) - (parseFloat(cs.paddingRight) || 0);
+    if (!(avail > 0)) return; // 非表示中。表示されたときにResizeObserverがもう一度呼ぶ
+    let scale = Math.max(0.3, Math.min(1.6, avail / NATURAL_WIDTH));
+    // 狭い画面では全体表示だと文字が小さいので、タップで原寸(横スクロール)へ切り替えられる。
+    sheet.style.cursor = scale < 0.85 ? 'zoom-in' : '';
+    const zoomed = sheet.dataset.zoomed === '1' && scale < 0.85;
+    if (zoomed) { scale = 1; sheet.style.cursor = 'zoom-out'; }
+    box.style.overflowX = zoomed ? 'auto' : 'hidden';
+    sheet.style.transformOrigin = 'top left';
+    sheet.style.transform = Math.abs(scale - 1) < 0.005 ? '' : 'scale(' + scale + ')';
+    // transformは占有面積を変えないので、縮小・拡大した分だけ下の余白を詰める/足す。
+    sheet.style.marginBottom = Math.abs(scale - 1) < 0.005 ? '' : (sheet.offsetHeight * (scale - 1)) + 'px';
+  }
+  const seen = new WeakSet();
+  let ro = null;
+  function watch(sheet) {
+    if (seen.has(sheet) || sheet.classList.contains('ll-sheet')) return;
+    seen.add(sheet);
+    sheet.addEventListener('click', () => {
+      if (sheet.style.cursor === '') return; // 元から全体が見えている(拡大不要)
+      sheet.dataset.zoomed = sheet.dataset.zoomed === '1' ? '0' : '1';
+      fit(sheet);
+    });
+    if (ro) { ro.observe(sheet); if (sheet.parentElement) ro.observe(sheet.parentElement); }
+    fit(sheet);
+  }
+  function scan(root) {
+    if (!root || root.nodeType !== 1) return;
+    if (root.classList && root.classList.contains('settlement-sheet')) watch(root);
+    root.querySelectorAll && root.querySelectorAll('.settlement-sheet').forEach(watch);
+  }
+  function start() {
+    if (typeof ResizeObserver === 'function') {
+      // 用紙の高さ余白を変える処理が、そのまま次の観測を呼ばないよう、次のフレームにまとめて行う。
+      let queued = false;
+      ro = new ResizeObserver(() => {
+        if (queued) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; document.querySelectorAll('.settlement-sheet').forEach(fit); });
+      });
+    }
+    new MutationObserver((muts) => muts.forEach((m) => m.addedNodes.forEach(scan))).observe(document.body, { childList: true, subtree: true });
+    window.addEventListener('resize', () => document.querySelectorAll('.settlement-sheet').forEach(fit));
+    scan(document.body);
+  }
+  if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+})();

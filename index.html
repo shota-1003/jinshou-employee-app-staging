@@ -2225,6 +2225,11 @@
 
     <div class="section-title">管理メニュー</div>
     <div class="menu-list">
+      <button type="button" class="menu-item" data-nav="fulfillment-pending">
+        <span class="icon-slot" data-icon="banknote"></span>
+        <div class="menu-item-body">支払い・受け渡し待ち<span class="desc">承認したあと、まだ支払っていない・渡していないもの(経費・借入・支給品)を全部ここに</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="device-approval-admin">
         <span class="icon-slot" data-icon="smartphone"></span>
         <div class="menu-item-body">端末承認<span class="desc">新しい端末からの利用申請を承認/却下</span></div>
@@ -2648,6 +2653,21 @@
       <div class="stat-mini"><span class="stat-mini-label">未払い合計</span><span class="stat-mini-value" id="epp-total">-</span></div>
     </div>
     <div id="epp-list"></div>
+  </section>
+
+  <!-- 支払い・受け渡し待ち(管理者、全項目共通)。2026-09-21 Shota指示「支払い期日を決めて支払い完了するまで、
+       待ちのタブは残す。支払うまで・渡すまで完了扱いにしない。これは全ての項目で共通」。
+       承認したあとの経費立替・借入・支給品を1か所に集め、払った・渡した記録が入るまで消さない。 -->
+  <section id="screen-fulfillment-pending" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">支払い・受け渡し待ち</div>
+    <div class="hint" style="margin-bottom:10px;">承認が済んでも、支払った・渡した記録が入るまではここに残ります。タップすると、支払予定日の設定と支払・受け渡しの記録ができます。</div>
+    <div class="stat-mini-row">
+      <div class="stat-mini"><span class="stat-mini-label">待ちの件数</span><span class="stat-mini-value" id="fp-count">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">期日未設定・超過</span><span class="stat-mini-value" id="fp-alert">-</span></div>
+      <div class="stat-mini"><span class="stat-mini-label">未払い合計(金銭)</span><span class="stat-mini-value" id="fp-total">-</span></div>
+    </div>
+    <div id="fp-list"></div>
   </section>
 
   <!-- 個人情報の変更申請確認(管理者) -->

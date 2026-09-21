@@ -1282,6 +1282,8 @@ button.link {
 .jd-print-signature-value { font-size: 13px; }
 
 @media print {
+  /* 画面用の用紙の拡縮は印刷には持ち込まない */
+  .settlement-sheet { transform: none !important; margin-bottom: 0 !important; }
   body * { visibility: hidden; }
   #screen-joyo-denpyo-print, #screen-joyo-denpyo-print * { visibility: visible; }
   #screen-joyo-denpyo-print { position: absolute; left: 0; top: 0; width: 100%; max-width: none; }
