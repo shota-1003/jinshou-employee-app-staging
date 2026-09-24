@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v201-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T01:55:19.200Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v202-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T06:21:27.711Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7400,6 +7400,25 @@ async function renderExpenseRequestDetailInto(containerId, requestId, opts) {
   return full;
 }
 
+// 承認する/差し戻す(要修正)/却下する/確定する ボタンの配線(2026-09-24新設、詳細は呼び出し側のコメント参照)。
+// この画面の描画(初回・reload問わず)のたびに毎回呼ばれる前提で、要素が無ければ何もしない
+// (処理済み・自己申請等でボタン自体が描画されていない場合)。
+function wireExpenseDecisionButtons(el) {
+  const approveBtn = el.querySelector('#rdetail-approve');
+  if (!approveBtn) return;
+  approveBtn.addEventListener('click', () => doRequestDetailDecide('approved', null));
+  const needsInfoBtn = el.querySelector('#rdetail-needs-info');
+  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_info'; revealReasonBox(b); });
+  const rejectBtn = el.querySelector('#rdetail-reject');
+  if (rejectBtn) rejectBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'rejected'; revealReasonBox(b); });
+  const reasonConfirmBtn = el.querySelector('#rdetail-reason-confirm');
+  if (reasonConfirmBtn) reasonConfirmBtn.addEventListener('click', () => {
+    const reason = el.querySelector('#rdetail-reason').value.trim();
+    if (!reason) { showError('rdetail-error', '理由を入力してください。'); return; }
+    doRequestDetailDecide(el.querySelector('#rdetail-reason-box').dataset.action, reason);
+  });
+}
+
 function wireExpenseRequestDetail(el, full, ctx) {
   const session = getSession();
   const requestId = Number(ctx.requestId);
@@ -7434,6 +7453,19 @@ function wireExpenseRequestDetail(el, full, ctx) {
   }
 
   if (ctx.mode !== 'admin') return;
+
+  // 承認/差し戻し/却下ボタンの配線(2026-09-24修正)。
+  // 【発覚した不具合】この配線は元々 renderRequestDetailActions() 側(画面の一番下、#rdetail-actionsを
+  // 描画する共通関数)だけが行っていた。そちらは loadRequestDetailContent() から初回表示時に1回だけ
+  // 呼ばれる。ところがこの画面で「原本を回収した」「勘定科目を確定する」「明細を除外する」等どれか
+  // 1つでも押すと、wireExpenseRequestDetail自身のreload()がこのコンテナ(#rdetail-receipts)を
+  // 丸ごと再描画し、その中にある承認/差し戻す/却下するボタンも新しいDOM要素として作り直される。
+  // しかしreload()の後にrenderRequestDetailActions()は再度呼ばれないため、以後この画面では
+  // 承認/差し戻す/却下するボタンにイベントリスナーが一切付いていない状態になる
+  // (Shota報告「差し戻しができない、確認を押しても進まない」の原因)。再描画のたびに必ず
+  // ここで配線し直すことで直す(初回表示時もこの中で配線するため、renderRequestDetailActions側の
+  // 重複配線は削除済み。ここでの1回だけになるよう二重configureしない)。
+  wireExpenseDecisionButtons(el);
 
   // 勘定科目をまとめて確定する。人が押すのは例外(除外)のときだけにするための入口。
   const bulkBtn = el.querySelector('#exd-bulk-confirm-cats');
@@ -15102,19 +15134,11 @@ function renderRequestDetailActions(sourceType, r) {
   if (sourceType === 'expense_reimbursement') {
     // 2026-09-12 Shota指摘対応: 承認/差し戻し/却下ボタンは、明細のスクロールなしで見える
     // よう画面の一番上(renderExpenseRequestDetailHtml側)へ移設済み。ここ(画面の一番下)には
-    // 二重に描画せず、上のボタンへ配線するだけにする(処理済み・自己申請等でボタンが
-    // 出ていない場合は何もしない)。
+    // 二重に描画しない。配線も2026-09-24以降はwireExpenseDecisionButtons()側(この画面が
+    // 再描画されるたびに必ず呼ばれる)へ一本化したため、ここでは何もしない
+    // (以前はここでも配線しており、reload後に配線されない不具合の原因になっていた。
+    // 詳細はwireExpenseRequestDetail呼び出し箇所のコメント参照)。
     box.innerHTML = '';
-    const approveBtn = document.getElementById('rdetail-approve');
-    if (!approveBtn) return;
-    approveBtn.addEventListener('click', () => doRequestDetailDecide('approved', null));
-    document.getElementById('rdetail-needs-info').addEventListener('click', () => { const b = document.getElementById('rdetail-reason-box'); b.dataset.action = 'needs_info'; revealReasonBox(b); });
-    document.getElementById('rdetail-reject').addEventListener('click', () => { const b = document.getElementById('rdetail-reason-box'); b.dataset.action = 'rejected'; revealReasonBox(b); });
-    document.getElementById('rdetail-reason-confirm').addEventListener('click', () => {
-      const reason = document.getElementById('rdetail-reason').value.trim();
-      if (!reason) { showError('rdetail-error', '理由を入力してください。'); return; }
-      doRequestDetailDecide(document.getElementById('rdetail-reason-box').dataset.action, reason);
-    });
   } else if (['paid_leave', 'meeting'].includes(sourceType)) {
     if (r.status_group !== 'pending') { box.innerHTML = '<div class="hint">この申請は既に処理済みです。</div>'; return; }
     box.innerHTML = `
