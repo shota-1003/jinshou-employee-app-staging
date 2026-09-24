@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v207-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T11:15:30.114Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v208-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T11:23:34.276Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -13016,12 +13016,34 @@ async function loadAllSitesList() {
     const rows = await rpc('admin_list_sites', { p_admin_employee_code: session.employeeCode, p_include_inactive: true, p_query: siteListQuery || null });
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する現場はありません。</div>'; return; }
     const statusLabel = { active: '有効', pending: '承認待ち', inactive: '無効', merged: '統合済み' };
+    // 2026-09-24 Shota指摘「現場の編集ができないから変えれない」対応。都道府県が県内/県外の
+    // 自動判定(derive_is_out_of_prefecture)の元になっており、ここが空欄・誤りだと日報シート側の
+    // 実態とずれる(平野浄水場・錦城京都・鳥羽浄水場・豊田乳業で実際に発生)。既存のadmin_update_
+    // site_details(admin_register_siteが内部で使っていたのみで画面側の導線が無かった)をそのまま
+    // 使い、新しいRPCは追加しない。
+    const addrOf = (notes) => {
+      const m = /住所:\s*([^\n]*)/.exec(notes || '');
+      return m ? m[1].trim() : '';
+    };
     listEl.innerHTML = rows.map((s) => `
       <div class="qual-item" data-id="${s.id}">
-        <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"><span class="mini-tag ${s.status === 'active' ? 'info' : (s.status === 'pending' ? 'danger' : '')}">${statusLabel[s.status] || s.status}</span></div>
+        <div class="row1"><input type="text" class="site-rename-input" value="${exdEsc(s.site_name)}"><span class="mini-tag ${s.status === 'active' ? 'info' : (s.status === 'pending' ? 'danger' : '')}">${statusLabel[s.status] || s.status}</span></div>
+        <div class="row2">${s.prefecture ? exdEsc(s.prefecture) : '都道府県未設定'}・${s.is_out_of_prefecture ? '県外' : (s.is_out_of_prefecture === false ? '県内' : '県内/県外 未判定')}</div>
         <div class="qual-verify-btns">
           <button type="button" class="site-save-btn">名前を保存</button>
+          <button type="button" class="secondary site-edit-toggle-btn">詳細を編集</button>
           ${s.status === 'active' || s.status === 'inactive' ? `<button type="button" class="reject-btn toggle-site-active-btn" data-active="${s.status === 'active'}">${s.status === 'active' ? '無効化する(アーカイブ)' : '有効化する'}</button>` : ''}
+        </div>
+        <div class="site-edit-form" style="display:none;margin-top:8px;">
+          <label>都道府県</label>
+          <select class="site-edit-prefecture"><option value="">選択してください</option></select>
+          <div class="hint-inline">都道府県を選ぶと、県内(徳島県)/県外は自動で判定されます。</div>
+          <label>住所</label>
+          <input type="text" class="site-edit-address" value="${exdEsc(addrOf(s.notes))}" placeholder="例: 徳島市南昭和町1-23">
+          <label>元請</label>
+          <input type="text" class="site-edit-prime-contractor" value="${exdEsc(s.prime_contractor || '')}" placeholder="例: 〇〇建設株式会社">
+          <button type="button" class="site-edit-save-btn">詳細を保存</button>
+          <div class="error site-edit-error"></div>
         </div>
       </div>
     `).join('');
@@ -13034,6 +13056,49 @@ async function loadAllSitesList() {
           await rpc('admin_update_site_name', { p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id), p_site_name: newName });
           await loadAllSitesList();
         } catch (e2) { window.alert(e2.message || '保存に失敗しました。'); }
+      });
+    });
+    listEl.querySelectorAll('.site-edit-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        const item = e.target.closest('.qual-item');
+        const form = item.querySelector('.site-edit-form');
+        const hidden = form.style.display === 'none';
+        if (hidden) {
+          const sel = form.querySelector('.site-edit-prefecture');
+          if (sel.options.length <= 1) {
+            JAPAN_PREFECTURES.forEach((p) => {
+              const opt = document.createElement('option');
+              opt.value = p; opt.textContent = p;
+              sel.appendChild(opt);
+            });
+          }
+          const row = rows.find((x) => Number(x.id) === Number(item.dataset.id));
+          if (row) sel.value = row.prefecture || '';
+        }
+        form.style.display = hidden ? '' : 'none';
+        btn.textContent = hidden ? '詳細を閉じる' : '詳細を編集';
+      });
+    });
+    listEl.querySelectorAll('.site-edit-save-btn').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        const item = e.target.closest('.qual-item');
+        const form = item.querySelector('.site-edit-form');
+        const errEl = form.querySelector('.site-edit-error');
+        if (errEl) errEl.textContent = '';
+        const prefecture = form.querySelector('.site-edit-prefecture').value || null;
+        const address = form.querySelector('.site-edit-address').value.trim() || null;
+        const primeContractor = form.querySelector('.site-edit-prime-contractor').value.trim() || null;
+        btn.disabled = true;
+        try {
+          await rpc('admin_update_site_details', {
+            p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id),
+            p_prefecture: prefecture, p_address: address, p_prime_contractor: primeContractor,
+          });
+          await loadAllSitesList();
+        } catch (e2) {
+          btn.disabled = false;
+          if (errEl) errEl.textContent = e2.message || '保存に失敗しました。';
+        }
       });
     });
     listEl.querySelectorAll('.toggle-site-active-btn').forEach((btn) => {
