@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v204-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T06:31:25.975Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v205-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T10:57:41.672Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11910,6 +11910,9 @@ function loanBuildPaymentSectionHtml(r) {
       <label>支払日<span class="required-mark">(必須)</span></label>
       <div class="hint-inline">銀行振込の予約など、これから振り込む日(未来の日付)も入れられます。</div>
       <input type="date" class="loan-paid-date" value="${exdEsc(dOnly(r.scheduled_payment_date) || todayJST())}">
+      <label>貸付実行金額<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">通常は申請時の承認額(${yen(r.amount)})のままで構いません。承認時に気づかなかった申請ミスを支払の時点で経理が見つけた場合は、ここで正しい金額に直せます(貸付金台帳にはここで入れた金額が記録されます)。</div>
+      <input type="number" class="loan-paid-amount" min="1" step="1" value="${exdEsc(r.amount)}">
       <label>支払方法</label>
       <select class="loan-paid-method">
         <option value="">選択してください</option>
@@ -12049,6 +12052,7 @@ function wireLoanPaymentSection(containerEl, session, onDone) {
     });
   });
   containerEl.querySelectorAll('.loan-paid-save').forEach((btn) => {
+    const originalLabel = btn.textContent;
     btn.addEventListener('click', async () => {
       const item = btn.closest('.card');
       const id = Number(item.dataset.id);
@@ -12056,13 +12060,29 @@ function wireLoanPaymentSection(containerEl, session, onDone) {
       const v = item.querySelector('.loan-paid-date').value;
       const method = item.querySelector('.loan-paid-method').value;
       const note = item.querySelector('.loan-paid-note').value;
+      const amountInput = item.querySelector('.loan-paid-amount');
+      const disbursedAmount = amountInput ? Number(amountInput.value || 0) : null;
       const feeInput = item.querySelector('.loan-paid-fee');
       const feeCountsInput = item.querySelector('.loan-paid-fee-counts');
       const fee = feeInput ? Number(feeInput.value || 0) : 0;
       const feeCounts = feeCountsInput ? feeCountsInput.checked : true;
       if (errEl) errEl.textContent = '';
       if (!v) { if (errEl) errEl.textContent = '支払日を入力してください。'; return; }
-      if (!confirm('支払を記録します。よろしいですか?')) return;
+      if (amountInput && (!disbursedAmount || disbursedAmount <= 0)) { if (errEl) errEl.textContent = '貸付実行金額を入力してください。'; return; }
+      // 2026-09-24: window.confirm()を使わない(Shota報告「支払い記録するのボタン押しても反応せん」
+      // への対応。原因は特定できなかったが、端末・ブラウザによってはネイティブconfirm()ダイアログが
+      // 出ない/反応しないことがあり得るため、ページ内蔵の2回押し確認へ変更した)。
+      if (btn.dataset.armed !== '1') {
+        btn.dataset.armed = '1';
+        btn.textContent = '本当に記録しますか？もう一度押してください';
+        clearTimeout(Number(btn.dataset.armTimer) || 0);
+        const timer = setTimeout(() => { btn.dataset.armed = ''; btn.textContent = originalLabel; }, 6000);
+        btn.dataset.armTimer = String(timer);
+        return;
+      }
+      clearTimeout(Number(btn.dataset.armTimer) || 0);
+      btn.dataset.armed = '';
+      btn.textContent = originalLabel;
       btn.disabled = true;
       try {
         // 貸付実行の正本はadmin_disburse_loan(貸付金台帳loan_ledger_entriesへ記録)。
@@ -12070,6 +12090,7 @@ function wireLoanPaymentSection(containerEl, session, onDone) {
         const result = await rpc('admin_disburse_loan', {
           p_admin_employee_code: session.employeeCode, p_loan_request_id: id, p_disbursed_on: v,
           p_payment_method: method || null, p_fee_amount: fee || 0, p_fee_counts_toward_balance: feeCounts, p_note: note || null,
+          p_disbursed_amount: disbursedAmount || null,
         });
         if (result && result.ok === false) {
           btn.disabled = false;
