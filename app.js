@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v202-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T06:21:27.711Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v204-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T06:31:25.975Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6358,7 +6358,7 @@ function expenseRequestLedgerCardHtml(g, opts) {
       <div class="row2">申請日: ${dateTimeText(g.requested_at)}　区分: ${g.expense_category === 'employee_advance' ? '立替' : '会社払い'}</div>
       <div class="row2">支払予定日: ${dateText(g.scheduled_payment_date)}　支払完了日: ${dateText(g.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[g.payment_status] || g.payment_status || '-'}</div>
       <span class="status-badge ${statusClass}">${statusLabel}</span>
-      ${showName && g.original_uncollected_count > 0 ? `<span class="status-badge warn">原本未回収 ${g.original_uncollected_count}件</span>` : ''}
+      ${g.original_uncollected_count > 0 ? `<span class="status-badge warn">原本未提出 ${g.original_uncollected_count}件</span>` : ''}
       <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">経費精算書を開く</button>
     </div>
   `;
