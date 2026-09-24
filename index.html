@@ -1558,8 +1558,8 @@
 
           <!-- 打ち合わせ・接待交際費の追加項目 -->
           <div class="item-meeting-block" style="display:none;">
-            <label>取引先参加者</label>
-            <div class="hint-inline">氏名が分かれば1名ずつ追加してください(任意、複数名登録可)</div>
+            <label>取引先参加者(誰と行ったか)<span class="required-mark">(必須)</span></label>
+            <div class="hint-inline">先方の氏名を1名以上、1名ずつ追加してください(人数ぶん全員が分からなくても申請できます)</div>
             <div class="item-partner-participant-add-row">
               <input type="text" class="item-partner-participant-input" placeholder="例: 山田様">
               <button type="button" class="item-partner-participant-add-btn">追加</button>
@@ -2302,7 +2302,7 @@
       </button>
       <button type="button" class="menu-item" data-nav="entertainment-admin">
         <span class="icon-slot" data-icon="users-round"></span>
-        <div class="menu-item-body">接待交際費 事前申請<span class="desc">承認待ちの接待予定を確認</span></div>
+        <div class="menu-item-body">接待交際費 事前申請<span class="desc">事前申請の履歴(いつ申請・いくらの予定・誰と)と、その事前申請に使われた経費を確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
       <button type="button" class="menu-item" data-nav="loan-admin">
@@ -2872,12 +2872,12 @@
   <section id="screen-entertainment-admin" class="screen">
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">接待交際費 事前申請</div>
-    <select id="entertainment-admin-filter">
-      <option value="pending">確認待ち</option>
-      <option value="approved">承認済み</option>
-      <option value="rejected">却下</option>
-      <option value="">すべて</option>
-    </select>
+    <div class="filter-row" id="ent-admin-status-filter">
+      <button type="button" class="filter-chip active" data-status="pending">確認待ち</button>
+      <button type="button" class="filter-chip" data-status="approved">承認済み</button>
+      <button type="button" class="filter-chip" data-status="rejected">却下</button>
+      <button type="button" class="filter-chip" data-status="">すべて</button>
+    </div>
     <div id="entertainment-admin-list"></div>
   </section>
 

@@ -1281,6 +1281,25 @@ button.link {
 .jd-print-signature-label { font-size: 11px; color: #555; font-weight: 700; margin-bottom: 30px; }
 .jd-print-signature-value { font-size: 13px; }
 
+/* 経費の承認画面: 事前申請との照合(2026-09-21) */
+.exd-preapp { margin: 8px 0; padding: 8px 10px; border-radius: 8px; border-left: 4px solid #4caf50; background: rgba(76, 175, 80, 0.10); font-size: 13px; }
+.exd-preapp-warn { border-left-color: #ffb300; background: rgba(255, 179, 0, 0.12); }
+.exd-preapp-bad { border-left-color: #ff5252; background: rgba(255, 82, 82, 0.14); }
+.exd-preapp-title { font-weight: 800; margin-bottom: 4px; }
+.exd-preapp-box-ok { border-left-color: #4caf50; background: rgba(76, 175, 80, 0.10); }
+.exd-preapp-box-warn { border-left-color: #ffb300; background: rgba(255, 179, 0, 0.12); }
+.exd-preapp-box-bad { border-left-color: #ff5252; background: rgba(255, 82, 82, 0.14); }
+.exd-preapp-list { list-style: none; margin: 4px 0; padding: 0; }
+.exd-preapp-list li { padding: 2px 0; line-height: 1.5; }
+.exd-preapp-list li.exd-preapp-ok { color: inherit; }
+.exd-preapp-list li.exd-preapp-warn { color: #ffd180; }
+.exd-preapp-list li.exd-preapp-bad { color: #ff8a80; font-weight: 700; }
+.exd-preapp-detail { margin-top: 6px; }
+.exd-preapp-detail summary { cursor: pointer; font-size: 12.5px; opacity: 0.9; }
+.exd-preapp-alert { font-weight: 700; margin-bottom: 6px; }
+.exd-preapp-table { width: 100%; border-collapse: collapse; }
+.exd-preapp-table th, .exd-preapp-table td { border-top: 1px solid rgba(255, 255, 255, 0.15); padding: 4px 6px; text-align: left; vertical-align: top; font-size: 12.5px; }
+.exd-preapp-table th { white-space: nowrap; font-weight: 600; width: 1%; }
 @media print {
   /* 画面用の用紙の拡縮は印刷には持ち込まない */
   .settlement-sheet { transform: none !important; margin-bottom: 0 !important; }

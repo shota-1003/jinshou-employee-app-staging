@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v199-staging';
-const BUILD_DEPLOYED_AT = '2026-09-21T06:27:27.243Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v201-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T01:55:19.200Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2206,7 +2206,11 @@ function wirePartnerParticipantChips(card) {
   });
 
   return {
-    getNames() { return names.slice(); },
+    // 入力欄に打ちかけて「追加」を押し忘れた名前も、送信時には1名として数える(押し忘れで「未入力」扱いにしない)。
+    getNames() {
+      const pending = input.value.trim();
+      return pending && !names.includes(pending) ? names.concat(pending) : names.slice();
+    },
     // 接待事前申請の紐付け時、取引先参加者名(「、」区切りの文字列)から事前反映するために使う。
     setNames(namesText) {
       names.length = 0;
@@ -3076,6 +3080,9 @@ async function doSubmitExpense() {
       if (!businessPartnerId && !newBusinessPartnerName) { showError('expense-error', `${label}: ${purposeCategory}の場合は取引先を入力してください。`); return; }
       const chipNames = state.partnerParticipantChips ? state.partnerParticipantChips.getNames() : [];
       partnerParticipants = chipNames.length > 0 ? chipNames.join('、') : null;
+      // 2026-09-21 Shota指摘: 「誰と行ったか」を書かずに接待交際費・打ち合わせを申請できていた。1名以上を必須にする
+      // (人数ぶん全員が分からなくても可。サーバー側 trg_expense_item_requires_client でも同じ条件を強制する)。
+      if (chipNames.length === 0) { showError('expense-error', `${label}: ${purposeCategory}の場合は、取引先の参加者名(誰と行ったか)を1名以上入力してください。`); return; }
       partnerCount = Number(card.querySelector('.item-partner-count').value || 0);
       if (!partnerCount) { showError('expense-error', `${label}: 取引先の参加人数を入力してください。`); return; }
       const pSelect = participantSelects.get(itemId);
@@ -3895,6 +3902,11 @@ async function submitBulkExpenseDecision(decision, reason) {
     document.getElementById('bed-reason-box').style.display = 'none';
     await loadBulkExpenseDetail();
   } catch (e) {
+    // 事前申請の予定金額と大きく違う明細は、承認する理由がないとサーバーが拒否する。理由を聞いてやり直す。
+    if (decision === 'approved' && !reason && /事前申請の予定金額と大きく異なる/.test(e.message || '')) {
+      const r = window.prompt('事前申請の予定金額と大きく違う明細があります。承認する理由を入力してください。', '');
+      if (r && r.trim()) { await submitBulkExpenseDecision('approved', r.trim()); return; }
+    }
     showError('bed-error', e.message || '処理に失敗しました。');
   }
 }
@@ -6969,6 +6981,146 @@ function exdBuildPaymentSectionHtml(full, opts) {
   return html;
 }
 
+// ---------- 経費の承認画面: 事前申請との照合 ----------
+// 2026-09-21 Shota指摘「事前申請の履歴はどこで見えるのか。接待交際費が入ってきた時点で、この交際費はこの日に
+// 事前申請していますというのを領収書と一緒に確認できないと意味がない。12円と20,053円は違うと分かるはず」。
+// それまで承認画面には事前申請の情報が一切出ておらず(差異の判定は保存されていたが表示されていなかった)、
+// 承認者は事前申請と照合できなかった。RPC admin_get_expense_item_preapprovals を明細ごとに並べて出す。
+function exdPreappFmt() {
+  return {
+    y: (n) => (n == null || n === '' ? '-' : `${Number(n).toLocaleString('ja-JP')}円`),
+    d10: (v) => (v ? String(v).slice(0, 10) : '-'),
+    jp: (v) => (v ? new Date(v).toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo', year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-'),
+    day: (v) => (v ? new Date(v).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' }) : ''),
+  };
+}
+
+// 名前の照合(事前申請の参加者名と実際の参加者名)。「様・さん・殿」の違いや区切りの違いは同じ人として扱う。
+function exdNameSet(text) {
+  return new Set(String(text || '').split(/[、,，\s/／・]+/).map((n) => n.trim().replace(/(様|さん|殿|氏)$/, '')).filter(Boolean));
+}
+function exdCompareNames(preText, actText) {
+  const a = exdNameSet(preText); const b = exdNameSet(actText);
+  if (!b.size) return 'none_actual';
+  if (!a.size) return 'none_pre';
+  const inter = Array.from(b).filter((x) => a.has(x)).length;
+  if (inter === b.size && inter === a.size) return 'same';
+  if (inter === 0) return 'diff';
+  return 'partial';
+}
+function exdCompanyKey(s) {
+  return String(s || '').replace(/[\s　]/g, '').replace(/株式会社|有限会社|合同会社|\(株\)|（株）|\(有\)|（有）/g, '').toLowerCase();
+}
+
+// 経費1明細と、それに紐づく事前申請を照合して、承認する人が一目で判断できる形にする。
+// 金額が多少変わるのは現場の流れとして許容(警告のみ)。人が違う・事前申請が承認されていない・日付が違う、は赤。
+function exdPreappChecks(cmp) {
+  const pre = cmp && cmp.preapproval;
+  if (!cmp) return null;
+  const act = cmp.actual || {};
+  if (!pre) {
+    if (cmp.purpose_category !== '接待交際費') return null;
+    return { level: 'bad', pre: null, checks: [{ s: 'bad', t: '事前申請が紐づいていません(接待交際費は事前申請が必要です)' }] };
+  }
+  const f = exdPreappFmt();
+  const checks = [];
+  const disc = cmp.discrepancy || {};
+  // 1. 事前申請そのものが承認されているか
+  if (pre.status === 'approved') checks.push({ s: 'ok', t: `事前申請は承認済み(${pre.approved_by || '承認者不明'}・${f.jp(pre.approved_at)})` });
+  else checks.push({ s: 'bad', t: `事前申請が承認されていません(状態: ${pre.status === 'rejected' ? '却下' : (pre.status === 'pending' ? '承認待ち' : (pre.status || '不明'))})` });
+  // 2. 日付
+  const plannedDay = f.day(pre.planned_datetime);
+  const actDay = act.date ? String(act.date).slice(0, 10) : '';
+  if (plannedDay && actDay) {
+    if (plannedDay === actDay) checks.push({ s: 'ok', t: `日付が一致(${actDay})` });
+    else checks.push({ s: 'bad', t: `日付が違います(事前申請 ${plannedDay} / 領収書 ${actDay})` });
+  }
+  // 3. どの会社と
+  const preCompanies = (pre.companies && pre.companies.length) ? pre.companies.map((c) => c.name) : [pre.partner_name];
+  const actCompany = exdCompanyKey(act.partner_name);
+  if (actCompany) {
+    // 会社名は自由入力で表記がゆれる(「フジハラ工業」と「フジハラ ツヅラノ」など複数社の略記)。
+    // 完全一致・包含、または先頭3文字が同じなら同じ会社とみなす。それ以外は「表記が違う」として△で示す
+    // (会社が本当に違うかどうかの最終判断は人が行う。赤にして誤警報を出さない)。
+    const hit = preCompanies.some((n) => {
+      const k = exdCompanyKey(n);
+      return k && (k === actCompany || k.includes(actCompany) || actCompany.includes(k) || (k.length >= 3 && actCompany.length >= 3 && k.slice(0, 3) === actCompany.slice(0, 3)));
+    });
+    checks.push(hit ? { s: 'ok', t: `相手の会社が一致(${act.partner_name})` }
+      : { s: 'warn', t: `相手の会社の表記が事前申請と違います(事前申請 ${preCompanies.filter(Boolean).join('・') || '-'} / 経費 ${act.partner_name})` });
+  }
+  // 4. 誰と(相手の参加者名)
+  const preNames = (pre.companies && pre.companies.length) ? pre.companies.map((c) => c.names).filter(Boolean).join('、') : (pre.partner_names || '');
+  const who = exdCompareNames(preNames, act.partner_names);
+  if (who === 'same') checks.push({ s: 'ok', t: `相手の参加者が一致(${act.partner_names})` });
+  else if (who === 'partial') checks.push({ s: 'warn', t: `相手の参加者が一部違います(事前申請 ${preNames} / 経費 ${act.partner_names})` });
+  else if (who === 'diff') checks.push({ s: 'bad', t: `相手の参加者が違います(事前申請 ${preNames} / 経費 ${act.partner_names})` });
+  else if (who === 'none_actual') checks.push({ s: 'bad', t: '相手の参加者名(誰と行ったか)が入っていません' });
+  else checks.push({ s: 'warn', t: `事前申請に相手の参加者名がありません(経費: ${act.partner_names})` });
+  // 5. 自社の参加者
+  const our = exdCompareNames(pre.our_names, act.our_names);
+  if (our === 'same') checks.push({ s: 'ok', t: `自社の参加者が一致(${act.our_names})` });
+  else if (our === 'partial') checks.push({ s: 'warn', t: `自社の参加者が一部違います(事前申請 ${pre.our_names} / 経費 ${act.our_names})` });
+  else if (our === 'diff') checks.push({ s: 'bad', t: `自社の参加者が違います(事前申請 ${pre.our_names} / 経費 ${act.our_names})` });
+  // 6. 金額(多少の差は現場の流れとして許容。大きく違うときだけ赤)
+  const ev = cmp.event || {};
+  const multi = Number(ev.item_count || 0) > 1;
+  const amtText = `事前申請の予定 ${f.y(pre.planned_amount)} / 実際 ${f.y(multi ? ev.actual_total : act.amount)}${multi ? `(この事前申請に紐づく経費${ev.item_count}件の合計)` : ''}`;
+  if (disc.level === 'major') checks.push({ s: 'bad', t: `金額が大きく違います(${amtText})` });
+  else if (disc.level === 'attention') checks.push({ s: 'warn', t: `金額に差があります(${amtText})` });
+  else checks.push({ s: 'ok', t: `金額は予定の範囲内(${amtText})` });
+  const level = checks.some((c) => c.s === 'bad') ? 'bad' : (checks.some((c) => c.s === 'warn') ? 'warn' : 'ok');
+  return { level, pre, checks };
+}
+
+function exdPreapprovalCompareHtml(cmp) {
+  const r = exdPreappChecks(cmp);
+  if (!r) return '';
+  const f = exdPreappFmt();
+  const icon = { ok: '✓', warn: '△', bad: '✗' };
+  const head = r.level === 'ok' ? '✓ 事前申請と一致しています'
+    : (r.level === 'warn' ? '△ 事前申請とほぼ一致(確認点があります)' : `✗ 事前申請と食い違いがあります(${r.checks.filter((c) => c.s === 'bad').length}点)`);
+  const pre = r.pre;
+  const act = cmp.actual || {};
+  const bodyLines = `<ul class="exd-preapp-list">${r.checks.map((c) => `<li class="exd-preapp-${c.s}"><b>${icon[c.s]}</b> ${exdEsc(c.t)}</li>`).join('')}</ul>`;
+  const detail = pre ? `<details class="exd-preapp-detail"><summary>事前申請の内容を見る(#${exdEsc(pre.id)}・${exdEsc(f.jp(pre.applied_at))}に申請)</summary>
+    <table class="exd-preapp-table">
+      <tr><th></th><th>事前申請</th><th>この経費(実際)</th></tr>
+      <tr><th>申請</th><td colspan="2">${exdEsc(f.jp(pre.applied_at))}・${exdEsc(pre.submission_timing || '')}・申請者 ${exdEsc(pre.applicant || '')}</td></tr>
+      <tr><th>日付</th><td>${exdEsc(f.day(pre.planned_datetime) || '-')}</td><td>${exdEsc(f.d10(act.date))}</td></tr>
+      <tr><th>金額</th><td>${exdEsc(f.y(pre.planned_amount))}</td><td>${exdEsc(f.y(act.amount))}</td></tr>
+      <tr><th>お店</th><td>${exdEsc(pre.planned_store || '-')}</td><td>${exdEsc(act.store || '-')}</td></tr>
+      <tr><th>会社・相手</th><td>${(pre.companies && pre.companies.length) ? pre.companies.map((c) => `${exdEsc(c.name || '')}(${exdEsc(c.count ?? '-')}名${c.names ? `: ${exdEsc(c.names)}` : ''})`).join('<br>') : `${exdEsc(pre.partner_name || '')}(${exdEsc(pre.partner_count ?? '-')}名${pre.partner_names ? `: ${exdEsc(pre.partner_names)}` : ''})`}</td><td>${exdEsc(act.partner_name || '-')}(${exdEsc(act.partner_count ?? '-')}名${act.partner_names ? `: ${exdEsc(act.partner_names)}` : ''})</td></tr>
+      <tr><th>自社</th><td>${exdEsc(pre.our_names || '-')}</td><td>${exdEsc(act.our_names || '-')}</td></tr>
+    </table></details>` : '';
+  return `<div class="exd-preapp exd-preapp-box-${r.level}">
+    <div class="exd-preapp-title">${exdEsc(head)}</div>
+    ${bodyLines}
+    ${detail}
+  </div>`;
+}
+
+// 承認ボタンの直前に出す、事前申請との照合の要約。予定金額と大きく違う明細があれば、承認する理由の入力欄を出す
+// (サーバー側 admin_decide_expense_items も理由なしの承認を拒否する)。
+function exdPreappDecisionNoteHtml(full) {
+  const cmps = (full && full.items ? full.items : []).map((it) => it.preapp_cmp).filter(Boolean);
+  if (!cmps.length) return '';
+  const res = cmps.map((c) => ({ c, r: exdPreappChecks(c) })).filter((x) => x.r);
+  const bad = res.filter((x) => x.r.level === 'bad');
+  const major = cmps.filter((c) => c.discrepancy && c.discrepancy.level === 'major');
+  const noNames = cmps.filter((c) => !((c.actual || {}).partner_names || '').trim());
+  const lines = [];
+  if (bad.length) lines.push(`事前申請と食い違いのある明細が${bad.length}件あります(各明細の「事前申請との照合」で、どこが違うかを確認してください)`);
+  if (noNames.length) lines.push(`取引先の参加者名(誰と行ったか)が入っていない明細が${noNames.length}件あります(このままでは支払えません。差し戻して入力し直してもらってください)`);
+  if (!lines.length) return `<div class="hint-inline" style="margin-bottom:8px;">✓ 接待・打ち合わせの明細は、事前申請と照合済みで食い違いはありません(各明細で確認できます)。</div>`;
+  return `<div class="exd-preapp exd-preapp-box-bad" style="margin-bottom:8px;">
+    <div class="exd-preapp-title">⚠ 承認の前に確認してください</div>
+    <ul style="margin:4px 0 4px 18px;padding:0;">${lines.map((l) => `<li>${exdEsc(l)}</li>`).join('')}</ul>
+    ${major.length ? `<label>予定金額と大きく違うのに承認する理由<span class="required-mark">(必須)</span></label>
+    <textarea id="exd-major-reason" placeholder="例: 事前申請の金額が誤りだった。宿泊も含む"></textarea>` : ''}
+  </div>`;
+}
+
 function renderExpenseRequestDetailHtml(full, opts) {
   const isAdmin = ((opts && opts.mode) || 'admin') === 'admin';
   // 明細は利用日順に並べる。申請された順のままだと日付が前後して確認しづらい
@@ -7032,6 +7184,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
   if (showDecisionAtTop) {
     html += `<div class="card exd-card exd-decision-top-alert">
       <div class="hint-inline" style="font-weight:800; margin-bottom:8px;">この申請はまだ承認されていません。下の経費精算書・明細で内容を確認してから決定してください。</div>
+      ${exdPreappDecisionNoteHtml(full)}
       <div class="qual-verify-btns">
         <button type="button" class="approve-btn" id="rdetail-approve">承認する</button>
         <button type="button" class="reject-btn" id="rdetail-needs-info">差し戻す(要修正)</button>
@@ -7117,6 +7270,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
       const attached = r0 && (!r0.status || r0.status === 'attached');
       return `<div class="history-item exd-item" data-item-id="${exdEsc(it.expense_item_id)}" data-document-id="${exdEsc(r0 ? r0.document_id : '')}">
         <div class="row1"><span>明細${idx + 1}: ${exdText(it.vendor)}</span><span>${yen(it.amount)}</span></div>
+        ${exdPreapprovalCompareHtml(it.preapp_cmp)}
         <div class="field-group">
           ${exdRow('利用日', dOnly(it.usage_date))}
           ${exdRowText('支払先', it.vendor)}
@@ -7233,6 +7387,13 @@ async function renderExpenseRequestDetailInto(containerId, requestId, opts) {
   } catch (e) {
     el.innerHTML = `<div class="hint">経費申請の内容を読み込めませんでした: ${exdEsc(e.message || '')}</div>`;
     return null;
+  }
+  if (mode !== 'employee') {
+    try {
+      const cmpRows = await rpc('admin_get_expense_item_preapprovals', { p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(requestId) });
+      const byItem = new Map((cmpRows || []).map((c) => [String(c.expense_item_id), c]));
+      (full.items || []).forEach((it) => { it.preapp_cmp = byItem.get(String(it.expense_item_id)) || null; });
+    } catch (e) { /* 照合情報が取れなくても、申請の詳細そのものは表示する */ }
   }
   el.innerHTML = renderExpenseRequestDetailHtml(full, { mode, canDecide: opts && opts.canDecide });
   wireExpenseRequestDetail(el, full, { mode, requestId, onChanged: opts && opts.onChanged });
@@ -8354,10 +8515,12 @@ function renderEmploymentSection(e, code, session) {
   }
 }
 
-// 外注登録完了(引き渡し)画面: 外注ID + 初回登録コード + 有効期限 + 登録リンク/QR + 共有・コピー。
-// 管理者はPINを決めない/見ない。「初回登録の権利」だけを本人へ渡す。
-function renderSubcontractorHandoff(h) {
-  const resEl = document.getElementById('ed-to-sub-result');
+// 外注ID+初回登録コード+有効期限+登録リンク/QR+共有・コピーの「引き渡しカード」を、指定した入れ物へ描画する。
+// admin_issue_subcontractor_handoff(元社員からの移行/新規登録)と、後述の「暗証番号をお忘れの方」再発行の
+// 両方から呼ぶ共通部品(2026-09-24、外注の方が暗証番号を忘れてログインできなくなった実例への対応で
+// 後者を追加した際、同じカードUIを重複実装しないためここへ切り出した)。管理者はPINを決めない/見ない。
+// title: カード見出し(「外注作業員 登録完了」/「暗証番号の再設定コードを発行しました」等)を呼び出し側で変える。
+function renderSubcontractorHandoffCard(resEl, h, title) {
   if (!resEl || !h) return;
   const loginCode = h.out_login_code || '';
   const code = h.out_code || '';
@@ -8368,31 +8531,37 @@ function renderSubcontractorHandoff(h) {
   resEl.style.display = 'block';
   resEl.innerHTML = `
     <div class="card" style="border:1px solid var(--border); margin-top:6px;">
-      <div style="font-weight:700; margin-bottom:6px;">外注作業員 登録完了</div>
+      <div style="font-weight:700; margin-bottom:6px;">${title || '外注作業員 登録完了'}</div>
       <div class="row2">氏名：${(h.out_worker_name || '')}</div>
       <div class="row2">所属：${(h.out_company_name || '')}</div>
       <div class="row2">外注ID：<b style="font-size:16px; letter-spacing:1px;">${loginCode}</b></div>
       <div class="row2">初回登録コード：<b style="font-size:18px; letter-spacing:2px;">${code}</b></div>
       <div class="hint" style="margin:6px 0;">有効期限: ${expires}。このコードは本人が最初のログインで暗証番号を設定すると無効になります。暗証番号は本人だけが決めます(管理者は設定・閲覧できません)。</div>
-      <div id="ed-sub-qr" style="margin:10px 0; text-align:center;"></div>
+      <div class="sch-qr" style="margin:10px 0; text-align:center;"></div>
       <div style="display:flex; flex-direction:column; gap:8px;">
-        <button type="button" class="secondary" id="ed-sub-copy-btn">外注ID・コードをコピー</button>
-        <button type="button" class="secondary" id="ed-sub-copylink-btn">初回登録リンクをコピー</button>
-        <button type="button" id="ed-sub-share-btn">本人へ共有する</button>
+        <button type="button" class="secondary sch-copy-btn">外注ID・コードをコピー</button>
+        <button type="button" class="secondary sch-copylink-btn">初回登録リンクをコピー</button>
+        <button type="button" class="sch-share-btn">本人へ共有する</button>
       </div>
-      <div class="hint" style="margin-top:8px;">本人は外注ポータルの「会社で登録済みの方（登録コードではじめる）」からQR読取、または外注ID＋初回登録コードを入力して初回登録します。</div>
+      <div class="hint" style="margin-top:8px;">本人は外注ポータルの「会社で登録済みの方（登録コードではじめる）」からQR読取、または外注ID＋初回登録コードを入力して登録します。</div>
     </div>`;
   // QRは自己完結の軽量エンコーダが読み込まれていれば描画(無ければリンク共有で代替)。
+  const qrEl = resEl.querySelector('.sch-qr');
   try {
-    if (window.renderQrInto) window.renderQrInto(document.getElementById('ed-sub-qr'), link, 180);
-    else document.getElementById('ed-sub-qr').innerHTML = '<div class="hint">初回登録リンク（下の「共有」「リンクをコピー」から本人へ渡せます）</div>';
+    if (window.renderQrInto) window.renderQrInto(qrEl, link, 180);
+    else qrEl.innerHTML = '<div class="hint">初回登録リンク（下の「共有」「リンクをコピー」から本人へ渡せます）</div>';
   } catch (e) { /* QR描画失敗はリンク共有で代替 */ }
-  const shareText = `迅翔興業 外注ポータル 初回登録\n外注ID: ${loginCode}\n初回登録コード: ${code}\n登録リンク: ${link}`;
-  document.getElementById('ed-sub-copy-btn').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(`外注ID: ${loginCode} / 初回登録コード: ${code}`); };
-  document.getElementById('ed-sub-copylink-btn').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(link); };
-  document.getElementById('ed-sub-share-btn').onclick = async () => {
-    try { if (navigator.share) await navigator.share({ title: '外注ポータル 初回登録', text: shareText }); else { navigator.clipboard && navigator.clipboard.writeText(shareText); alert('共有に非対応のため、内容をコピーしました。本人へ送ってください。'); } } catch (e) { /* キャンセル */ }
+  const shareText = `迅翔興業 外注ポータル\n外注ID: ${loginCode}\n初回登録コード: ${code}\n登録リンク: ${link}`;
+  resEl.querySelector('.sch-copy-btn').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(`外注ID: ${loginCode} / 初回登録コード: ${code}`); };
+  resEl.querySelector('.sch-copylink-btn').onclick = () => { navigator.clipboard && navigator.clipboard.writeText(link); };
+  resEl.querySelector('.sch-share-btn').onclick = async () => {
+    try { if (navigator.share) await navigator.share({ title: '外注ポータル', text: shareText }); else { navigator.clipboard && navigator.clipboard.writeText(shareText); alert('共有に非対応のため、内容をコピーしました。本人へ送ってください。'); } } catch (e) { /* キャンセル */ }
   };
+}
+
+// 外注登録完了(引き渡し)画面: 元社員からの移行/新規登録の直後に呼ぶ(既存呼び出し口を維持)。
+function renderSubcontractorHandoff(h) {
+  renderSubcontractorHandoffCard(document.getElementById('ed-to-sub-result'), h, '外注作業員 登録完了');
 }
 
 // ================= 初回登録コード管理(管理者) =================
@@ -10162,8 +10331,8 @@ function createEntCompanyList(containerId, addBtnId, summaryId, getOurCount) {
       <input type="text" class="ent-company-name" list="vendor-list">
       <label>参加人数<span class="required-mark">(必須)</span></label>
       <input type="number" class="ent-company-count" min="1">
-      <label>参加者名(分かる範囲・任意)</label>
-      <div class="hint-inline">人数ぶん全員の氏名が分からなくても申請できます(例: 5名中2名だけ判明でも可)</div>
+      <label>参加者名(誰と行ったか)<span class="required-mark">(必須・1名以上)</span></label>
+      <div class="hint-inline">人数ぶん全員の氏名が分からなくても申請できます(例: 5名中2名だけ判明でも可)。ただし、分かる方の氏名は必ず入力してください</div>
       <input type="text" class="ent-company-names" placeholder="例: 山田様、佐藤様">`;
     container.appendChild(block);
     block.querySelector('.ent-company-count').addEventListener('input', recalcSummary);
@@ -10203,6 +10372,7 @@ function validateEntCompanies(companies, errorElId) {
   for (const c of companies) {
     if (!c.__name) { showError(errorElId, '取引先の会社名を入力してください。'); return false; }
     if (!c.participant_count) { showError(errorElId, '各取引先の参加人数を入力してください。'); return false; }
+    if (!c.participant_names) { showError(errorElId, `${c.__name}: 参加者名(誰と行ったか)を1名以上入力してください。`); return false; }
   }
   return true;
 }
@@ -10994,20 +11164,75 @@ async function doUpdateEntertainmentActuals() {
 
 // ---------- 接待事前申請の承認(管理者) ----------
 
+// 事前申請の一覧に「誰と(会社ごとの参加者名)」と「この事前申請に使われた経費」を添える。
+// 2026-09-21 Shota指摘: 事前申請の履歴を見ても、誰と行く予定で・いくらで・実際にどの経費が紐づいたのかが分からなかった。
+function entPreappUsageHtml(r, u) {
+  if (!u) return '';
+  const y = (n) => `${Number(n || 0).toLocaleString('ja-JP')}円`;
+  const companies = (u.companies && u.companies.length)
+    ? u.companies.map((c) => `${exdEsc(c.name || '')}(${exdEsc(c.count ?? '-')}名${c.names ? `: ${exdEsc(c.names)}` : ''})`).join(' / ')
+    : (u.partner_names ? exdEsc(u.partner_names) : '');
+  const used = Array.isArray(u.used) ? u.used : [];
+  const live = used.filter((x) => x.approval_status !== 'rejected');
+  const total = live.reduce((s, x) => s + Number(x.amount || 0), 0);
+  const planned = r.planned_amount == null ? null : Number(r.planned_amount);
+  const diff = planned == null ? 0 : total - planned;
+  const pct = planned ? Math.abs(diff) / planned * 100 : null;
+  const major = live.length > 0 && planned != null && (Math.abs(diff) >= 30000 || (pct != null && pct >= 50));
+  const tiny = planned != null && planned < 1000;
+  const bad = 'color:#ff8a80;font-weight:700;';
+  return `
+    <div class="row2">誰と: ${companies || `<span style="${bad}">参加者名なし</span>`}${u.our_names ? `　自社: ${exdEsc(u.our_names)}` : ''}</div>
+    ${tiny ? `<div class="row2" style="${bad}">⚠ 予定金額が${exdEsc(y(planned))}です。入力ミスの可能性があります(承認する前に確認してください)</div>` : ''}
+    <div class="row2">この事前申請に紐づいた経費: ${live.length ? `${live.length}件 合計${exdEsc(y(total))}` : 'まだありません'}</div>
+    ${live.map((x) => `<div class="row2" style="margin-left:12px;">・${exdEsc(String(x.date || '').slice(0, 10))} ${exdEsc(x.store || '')} ${exdEsc(y(x.amount))}(${x.approval_status === 'approved' ? '承認済み' : '承認待ち'})</div>`).join('')}
+    ${major ? `<div class="row2" style="${bad}">⚠ 予定${exdEsc(y(planned))}に対し、紐づいた経費の合計が${exdEsc(y(total))}で大きく違います</div>` : ''}`;
+}
+
+let entAdminFilter = 'pending';
+let entAdminUserPicked = false;
+function wireEntAdminFilter() {
+  const row = document.getElementById('ent-admin-status-filter');
+  if (!row || row.dataset.wired) return;
+  row.dataset.wired = '1';
+  row.querySelectorAll('.filter-chip').forEach((btn) => btn.addEventListener('click', () => {
+    entAdminFilter = btn.dataset.status;
+    entAdminUserPicked = true;
+    loadEntertainmentAdminList();
+  }));
+}
+
 async function loadEntertainmentAdminList() {
+  wireEntAdminFilter();
   const session = getSession();
-  const status = document.getElementById('entertainment-admin-filter').value || null;
   const listEl = document.getElementById('entertainment-admin-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('admin_list_entertainment_preapprovals', { p_admin_employee_code: session.employeeCode, p_status: status });
-    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する事前申請はありません。</div>'; return; }
+    // 2026-09-21 Shota指摘「普段は横並びなのに、これだけ一回押して承認済みにしないと見えない。開くと『該当する申請はありません』」。
+    // 全件を1回で取り、絞り込みと件数はこちらで行う。承認待ちが0件なら、最初から「すべて」を出す。
+    const allRows = (await rpc('admin_list_entertainment_preapprovals', { p_admin_employee_code: session.employeeCode, p_status: null })) || [];
+    const cnt = { pending: 0, approved: 0, rejected: 0 };
+    allRows.forEach((r) => { if (cnt[r.status] !== undefined) cnt[r.status] += 1; });
+    if (!entAdminUserPicked && entAdminFilter === 'pending' && cnt.pending === 0 && allRows.length) entAdminFilter = '';
+    document.querySelectorAll('#ent-admin-status-filter .filter-chip').forEach((b) => {
+      const st = b.dataset.status;
+      b.textContent = st === 'pending' ? `確認待ち(${cnt.pending})` : (st === 'approved' ? `承認済み(${cnt.approved})` : (st === 'rejected' ? `却下(${cnt.rejected})` : `すべて(${allRows.length})`));
+      b.classList.toggle('active', st === entAdminFilter);
+    });
+    const rows = entAdminFilter ? allRows.filter((r) => r.status === entAdminFilter) : allRows;
+    if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">この区分の事前申請はありません。</div>'; return; }
+    const usageById = new Map();
+    try {
+      const u = await rpc('admin_get_preapproval_usage', { p_admin_employee_code: session.employeeCode, p_ids: rows.map((r) => Number(r.id)) });
+      (u || []).forEach((x) => usageById.set(String(x.id), x));
+    } catch (e) { /* 使われた経費が取れなくても、事前申請の一覧そのものは出す */ }
     listEl.innerHTML = rows.map((r) => `
       <div class="qual-item" data-id="${r.id}">
         <div class="row1"><span>${r.employee_name}・${r.planned_store || '(店舗未記入)'}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${ENT_STATUS_LABEL[r.status]}</span></div>
         <div class="row2">${new Date(r.planned_datetime).toLocaleString('ja-JP')}・${r.partner_name_snapshot || ''}(取引先${r.partner_participant_count ?? '-'}名/自社${r.our_participant_count ?? '-'}名)</div>
         <div class="row2">${r.purpose || ''}${r.planned_amount != null ? `・予定${Number(r.planned_amount).toLocaleString()}円` : ''}</div>
-        <div class="row2">登録日時: ${new Date(r.created_at).toLocaleString('ja-JP')}</div>
+        <div class="row2">申請日時: ${new Date(r.created_at).toLocaleString('ja-JP')}</div>
+        ${entPreappUsageHtml(r, usageById.get(String(r.id)))}
         <div class="employee-row-flags" style="margin-top:6px;">
           <span class="mini-tag ${ENT_TIMING_TAG_CLASS[r.submission_timing] || 'muted'}">${r.submission_timing || ''}</span>
           ${r.used_backdate_exception ? '<span class="mini-tag warn">本人に過去日提出の特例許可あり</span>' : ''}
@@ -15032,12 +15257,21 @@ async function doRequestDetailDecide(action, reason) {
     ? Array.from(document.querySelectorAll('#rdetail-receipts .exd-item'))
       .map((el) => Number(el.dataset.itemId)).filter((n) => Number.isFinite(n) && n > 0)
     : [];
+  // 予定金額と大きく違う明細(画面に理由欄が出ている)は、承認する理由を書かないと承認できない。
+  let approveReason = null;
+  if (isExpense && action === 'approved') {
+    const majorBox = document.getElementById('exd-major-reason');
+    if (majorBox) {
+      approveReason = majorBox.value.trim();
+      if (!approveReason) { showError('rdetail-error', '事前申請の予定金額と大きく違う明細があります。承認する理由を入力してください。'); majorBox.focus(); return; }
+    }
+  }
   try {
     await rpc('admin_decide_request', { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_rejection_reason: reason });
     if (isExpense && itemIds.length && (action === 'approved' || action === 'rejected')) {
       await rpc('admin_decide_expense_items', {
         p_admin_employee_code: session.employeeCode, p_item_ids: itemIds,
-        p_decision: action, p_reason: reason || null,
+        p_decision: action, p_reason: reason || approveReason || null,
       }).catch((e2) => { showError('rdetail-error', `申請は承認しましたが、明細の承認に失敗しました: ${e2.message || ''}`); });
     }
     if (isExpense) {
@@ -16257,9 +16491,11 @@ async function loadSubcontractorWorkerAdmin() {
         <div class="row2">状態: ${w.status === 'active' ? '<span style="color:#2e7d32;font-weight:700;">在籍</span>' : '<span style="color:#b26a00;font-weight:700;">退職・停止</span>'}</div>
         <div class="qual-verify-btns">
           <button type="button" class="edit-sc-worker-btn" data-id="${w.id}">編集</button>
+          <button type="button" class="secondary pin-reset-sc-worker-btn" data-id="${w.id}" data-name="${(w.worker_name || '').replace(/"/g, '&quot;')}">暗証番号をお忘れの方(再設定コードを発行)</button>
           <button type="button" class="reject-btn toggle-sc-worker-btn" data-active="${w.status === 'active'}">${w.status === 'active' ? '退職・停止にする' : '再有効化する'}</button>
           <button type="button" class="reject-btn delete-sc-worker-btn" data-id="${w.id}" data-name="${w.worker_name}" data-code="${w.login_code || ''}" data-company="${(w.company_name || '').replace(/"/g, '&quot;')}">完全削除</button>
         </div>
+        <div class="sc-worker-handoff-result" data-id="${w.id}" style="display:none;"></div>
       </div>
     `;
     }).join('');
@@ -16291,6 +16527,33 @@ async function loadSubcontractorWorkerAdmin() {
         const item = btn.closest('.supply-item');
         await rpc('admin_set_subcontractor_worker_active', { p_admin_employee_code: session.employeeCode, p_id: Number(item.dataset.id), p_active: btn.dataset.active !== 'true' });
         loadSubcontractorWorkerAdmin();
+      });
+    });
+    // 2026-09-24 Shota報告「外注の方が暗証番号分からんくなってログインできなくなった」への対応。
+    // 外注ポータルには本人が暗証番号を思い出せないときの復帰手段が無く(機種変更用の「relink」画面は
+    // 現在の暗証番号を知っている前提)、社員側のような管理者リセットも無かった。既存の
+    // admin_issue_subcontractor_handoff(既に「元社員の移行」で使っている初回登録コード発行RPC)は
+    // 対象作業員が既に暗証番号を登録済みでも新しいコードを発行でき、本人がそのコードで初回登録画面から
+    // 新しい暗証番号を設定し直せる(既存の端末ログインは無効化されない)ため、新しいRPCは追加せず、
+    // ここに入口を1つ足すだけで対応する。
+    listEl.querySelectorAll('.pin-reset-sc-worker-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = Number(btn.dataset.id);
+        const name = btn.dataset.name || '';
+        if (!confirm(`【暗証番号の再設定コード発行】\n\n氏名: ${name}\n\n新しい初回登録コードを発行します。本人はこのコードで新しい暗証番号を設定できます(以前の暗証番号は使えなくなります)。\n\nよろしいですか?`)) return;
+        btn.disabled = true;
+        const item = btn.closest('.supply-item');
+        const target = item.querySelector('.sc-worker-handoff-result');
+        try {
+          const res = await rpc('admin_issue_subcontractor_handoff', { p_admin_employee_code: session.employeeCode, p_worker_id: id, p_ttl_hours: 72 });
+          const h = Array.isArray(res) ? res[0] : res;
+          renderSubcontractorHandoffCard(target, h, '暗証番号の再設定コードを発行しました');
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        } catch (e) {
+          alert(`発行に失敗しました: ${e.message || ''}`);
+        } finally {
+          btn.disabled = false;
+        }
       });
     });
     listEl.querySelectorAll('.delete-sc-worker-btn').forEach((btn) => {
@@ -17608,7 +17871,6 @@ function init() {
 
   document.getElementById('ent-submit').addEventListener('click', doSubmitEntertainmentPreapproval);
   document.getElementById('ent-update-submit').addEventListener('click', doUpdateEntertainmentActuals);
-  document.getElementById('entertainment-admin-filter').addEventListener('change', loadEntertainmentAdminList);
   document.getElementById('ent-late-submit').addEventListener('click', doSubmitEntertainmentLatePreapproval);
   document.getElementById('ent-late-ack').addEventListener('change', (e) => {
     document.getElementById('ent-late-submit').disabled = !e.target.checked;
