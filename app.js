@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v205-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T10:57:41.672Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v207-staging';
+const BUILD_DEPLOYED_AT = '2026-09-24T11:15:30.114Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6940,7 +6940,7 @@ function exdBuildPaymentSectionHtml(full, opts) {
       const btn = (isAdmin && p.can_void)
         ? `<button type="button" class="secondary danger exd-void-pay-btn" data-payment-id="${exdEsc(p.payment_id)}" style="margin-top:6px;">この支払を取り消す</button>` : '';
       const feeLine = (p.transfer_fee != null && Number(p.transfer_fee) > 0)
-        ? `<div class="row2">振込手数料: ${yen(p.transfer_fee)}差引き・実際の振込額: ${yen(p.net_amount)}</div>` : '';
+        ? `<div class="row2">振込手数料: ${yen(p.transfer_fee)}(${p.fee_borne_by_company ? '会社負担' : '本人負担'})・実際の振込額: ${yen(p.net_amount)}</div>` : '';
       return `<div class="change-request-item"><div class="row1"><span>${dOnly(p.paid_at)}　${yen(p.paid_amount)}${tag}</span><span>${exdText(p.payment_method)}</span></div><div class="row2">処理者: ${exdText(p.processed_by)}${p.note ? `・備考: ${exdEsc(p.note)}` : ''}</div>${feeLine}${voidLine}${btn}</div>`;
     }).join('');
   if (isAdmin) {
@@ -6968,8 +6968,12 @@ function exdBuildPaymentSectionHtml(full, opts) {
       </select>
       <div class="exd-paid-fee-block" style="display:none;">
         <label for="exd-paid-fee">振込手数料</label>
-        <div class="hint-inline">銀行振込の場合、振込手数料は社員の受取金額から差し引きます(支払金額〔${yen(a.remaining)}〕はそのまま記録し、実際に口座へ振り込む金額だけが手数料分少なくなります)。</div>
         <input type="number" id="exd-paid-fee" min="0" step="1" value="0">
+        <label style="display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" id="exd-paid-fee-borne-by-company" style="width:auto;margin:0;">
+          <span>手数料は会社負担にする(本人の受取額を減らさない)</span>
+        </label>
+        <div class="hint-inline">チェックを外すと、これまでどおり手数料は本人負担になります(支払金額〔${yen(a.remaining)}〕はそのまま記録し、実際に口座へ振り込む金額だけが手数料分少なくなります)。チェックを入れると、本人は手数料分を減らされず満額受け取ります(会社が手数料を別に負担します)。</div>
       </div>
       <label for="exd-paid-note">備考</label>
       <input type="text" id="exd-paid-note" placeholder="例: 8月分まとめて振込">
@@ -7633,6 +7637,8 @@ function wireExpenseRequestDetail(el, full, ctx) {
       const feeInput = el.querySelector('#exd-paid-fee');
       const feeVisible = feeInput && feeInput.closest('.exd-paid-fee-block').style.display !== 'none';
       const fee = feeVisible && feeInput.value !== '' ? Number(feeInput.value) : null;
+      const feeBorneByCompanyInput = el.querySelector('#exd-paid-fee-borne-by-company');
+      const feeBorneByCompany = feeBorneByCompanyInput ? feeBorneByCompanyInput.checked : false;
       if (!amount || amount <= 0) { showError('exd-pay-error', '支払金額を入力してください。'); return; }
       if (!date) { showError('exd-pay-error', '支払日を入力してください。'); return; }
       if (fee !== null && (fee < 0 || fee >= amount)) { showError('exd-pay-error', '振込手数料は0円以上、支払金額未満で入力してください。'); return; }
@@ -7643,7 +7649,7 @@ function wireExpenseRequestDetail(el, full, ctx) {
             const payRes = await rpc('admin_record_expense_payment', {
               p_admin_employee_code: session.employeeCode, p_employee_request_id: requestId,
               p_paid_at: date, p_paid_amount: amount, p_payment_method: method, p_note: note,
-              p_transfer_fee: fee,
+              p_transfer_fee: fee, p_fee_borne_by_company: feeBorneByCompany,
             });
             expenseRecordPaymentRpcAvailable = true;
             // 2026-09-06 独立レビュー指摘(中1): DB が支払不可(不足項目あり / 承認額超過)を返した場合は握りつぶさず表示する。
@@ -11921,12 +11927,12 @@ function loanBuildPaymentSectionHtml(r) {
       </select>
       <div class="loan-paid-fee-block" style="display:none;">
         <label>振込手数料</label>
-        <div class="hint-inline">銀行振込は振込手数料を本人負担にする決まりのため、貸付金台帳(残高・履歴)へ足して記録します。手数料を残高に加算するかは下のチェックで選べます。</div>
         <input type="number" class="loan-paid-fee" min="0" step="1" value="0">
         <label style="display:flex;align-items:center;gap:6px;">
           <input type="checkbox" class="loan-paid-fee-counts" checked style="width:auto;margin:0;">
-          <span>手数料を貸付残高に加算する</span>
+          <span>手数料は本人負担にする(本人の借入残高に手数料分を足す＝本人負担)</span>
         </label>
+        <div class="hint-inline">チェックを外すと、手数料は会社負担になります(本人の借入残高には足しません)。どちらの場合も、貸付表(台帳)に記録される貸付実行金額は上の「貸付実行金額」欄そのままで変わりません。</div>
       </div>
       <label>備考</label>
       <input type="text" class="loan-paid-note" placeholder="例: 9月分まとめて振込">
