@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v208-staging';
-const BUILD_DEPLOYED_AT = '2026-09-24T11:23:34.276Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v209-staging';
+const BUILD_DEPLOYED_AT = '2026-09-25T06:13:19.859Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7412,7 +7412,11 @@ function wireExpenseDecisionButtons(el) {
   if (!approveBtn) return;
   approveBtn.addEventListener('click', () => doRequestDetailDecide('approved', null));
   const needsInfoBtn = el.querySelector('#rdetail-needs-info');
-  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_info'; revealReasonBox(b); });
+  // 【2026-09-25修正】'needs_info'はDB側(admin_decide_request)が受け付けない値だった
+  // (「不正な操作です」で必ず失敗する不具合、Shota報告)。システム全体で「差し戻し(要修正)」を
+  // 表す既存の正しい値は'needs_review'(list_pending_requests_admin・STATUS_GROUP_LABEL・
+  // 申請管理画面の状態フィルタが既にこの値を前提にしている)。
+  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_review'; revealReasonBox(b); });
   const rejectBtn = el.querySelector('#rdetail-reject');
   if (rejectBtn) rejectBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'rejected'; revealReasonBox(b); });
   const reasonConfirmBtn = el.querySelector('#rdetail-reason-confirm');
@@ -15244,7 +15248,8 @@ function renderRequestDetailActions(sourceType, r) {
       </div>
     `;
     document.getElementById('rdetail-approve').addEventListener('click', () => doRequestDetailDecide('approved', null));
-    document.getElementById('rdetail-needs-info').addEventListener('click', () => { const box = document.getElementById('rdetail-reason-box'); box.dataset.action = 'needs_info'; revealReasonBox(box); });
+    // 【2026-09-25修正】同上(このブロックはpaid_leave/meeting向けの配線)。
+    document.getElementById('rdetail-needs-info').addEventListener('click', () => { const box = document.getElementById('rdetail-reason-box'); box.dataset.action = 'needs_review'; revealReasonBox(box); });
     document.getElementById('rdetail-reject').addEventListener('click', () => { const box = document.getElementById('rdetail-reason-box'); box.dataset.action = 'rejected'; revealReasonBox(box); });
     document.getElementById('rdetail-reason-confirm').addEventListener('click', () => {
       const reason = document.getElementById('rdetail-reason').value.trim();
