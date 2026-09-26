@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v211-staging';
-const BUILD_DEPLOYED_AT = '2026-09-26T04:29:15.474Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v212-staging';
+const BUILD_DEPLOYED_AT = '2026-09-26T06:41:28.859Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -1900,6 +1900,46 @@ async function isAnyAdmin() {
     return false;
   }
   return _anyAdminRoleCache;
+}
+
+// 2026-09-26追加: 「何らかの管理者かどうか」(isAnyAdmin)だけでなく「具体的にどの機能別ロールを
+// 持っているか」を見て、権限が無い管理機能のカード・メニューを隠すために使う
+// (坂本が借入・経理の管理機能を持たないのに画面上は見えてしまい、タップすると必ず
+// 失敗する導線になっていたインシデントの再発防止)。
+let _myAdminCapsCache = null;
+async function getMyAdminCapabilities() {
+  if (_myAdminCapsCache) return _myAdminCapsCache;
+  const session = getSession();
+  try {
+    const rows = await rpc('get_my_admin_capabilities', { p_employee_code: session.employeeCode });
+    const r = rows && rows[0];
+    _myAdminCapsCache = { isExecutive: !!(r && r.is_executive), roleTypes: (r && r.role_types) || [] };
+  } catch (e) {
+    _myAdminCapsCache = { isExecutive: false, roleTypes: [] };
+  }
+  return _myAdminCapsCache;
+}
+function hasAdminCap(caps, ...roleTypes) {
+  if (!caps) return false;
+  if (caps.isExecutive || caps.roleTypes.includes('general_admin')) return true;
+  return roleTypes.some((r) => caps.roleTypes.includes(r));
+}
+// 権限が無い機能の管理メニュー項目(data-nav)を隠す。表示側の判断は変えず、既存のRPC側の
+// 権限チェック(is_loan_admin_or_executive等)と同じロールをそのまま使う。
+async function applyAdminMenuVisibility() {
+  const caps = await getMyAdminCapabilities();
+  const RULES = [
+    { navs: ['loan-admin', 'loan-ledger-admin'], caps: ['loan_admin'] },
+    { navs: ['expense-payment-pending'], caps: ['accounting_admin'] },
+  ];
+  RULES.forEach(({ navs, caps: needed }) => {
+    const allowed = hasAdminCap(caps, ...needed);
+    navs.forEach((nav) => {
+      document.querySelectorAll(`.menu-item[data-nav="${nav}"]`).forEach((el) => {
+        el.style.display = allowed ? '' : 'none';
+      });
+    });
+  });
 }
 async function renderHomeAdminBanner(session) {
   const bannerArea = document.getElementById('admin-banner-area');
@@ -5462,7 +5502,7 @@ async function loadAnnouncements(includeArchived) {
 const DASH_CARDS = [
   { key: 'pending_expense_approvals', filter: 'expense', label: '経費立替 承認待ち', icon: 'receipt', status: 'pending' },
   { key: 'pending_leave_approvals', filter: 'leave', label: '有給申請 承認待ち', icon: 'calendar', status: 'pending' },
-  { key: 'pending_loan_requests', filter: null, label: '借入申請 承認待ち', icon: 'banknote', nav: 'loan-admin', status: 'pending' },
+  { key: 'pending_loan_requests', filter: null, label: '借入申請 承認待ち', icon: 'banknote', nav: 'loan-admin', status: 'pending', requiresCap: ['loan_admin'] },
   { key: 'pending_meeting_approvals', filter: 'meeting', label: '会議申請 承認待ち', icon: 'users-round', status: 'pending' },
   { key: 'pending_supply_requests', filter: 'supply', label: '支給品申請 確認待ち', icon: 'package', status: 'pending' },
   { key: 'needs_correction_count', filter: 'needs_correction', label: '確認・修正が必要な申請', icon: 'edit', status: 'pending' },
@@ -5588,17 +5628,24 @@ async function renderAdminTodayTasks(session) {
 async function loadAdminDashboard() {
   const session = getSession();
   renderAdminTodayTasks(session);
+  applyAdminMenuVisibility();
   const grid = document.getElementById('admin-dashboard-grid');
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
-    const rows = await rpc('get_admin_dashboard', { p_admin_employee_code: session.employeeCode });
+    const [rows, caps] = await Promise.all([
+      rpc('get_admin_dashboard', { p_admin_employee_code: session.employeeCode }),
+      getMyAdminCapabilities(),
+    ]);
     const d = rows && rows[0];
-    grid.innerHTML = DASH_CARDS.map((c, i) => {
+    // 権限が無い機能別ロール専用カード(例: 借入は loan_admin)は表示しない
+    // (2026-09-26、坂本の借入・経理カードのタップ→権限エラーの再発防止)。
+    const visibleCards = DASH_CARDS.filter((c) => !c.requiresCap || hasAdminCap(caps, ...c.requiresCap));
+    grid.innerHTML = visibleCards.map((c) => {
       const count = d ? d[c.key] : 0;
       return `
         <!-- data-card-key: どのカードかを配列の並び順に依存せず特定できるようにする
              (意味整合パトロールがカードを名指しでタップし、件数を遷移先と突き合わせるため)。 -->
-        <button type="button" class="dash-card" data-idx="${i}" data-card-key="${c.key}">
+        <button type="button" class="dash-card" data-card-key="${c.key}">
           <span class="dash-card-top">${icon(c.icon)}<span class="dash-card-count ${dashCardColorClass(c.status, count)}">${count}</span></span>
           <span class="dash-card-label">${c.label}</span>
         </button>
@@ -5606,7 +5653,7 @@ async function loadAdminDashboard() {
     }).join('');
     grid.querySelectorAll('.dash-card').forEach((el) => {
       el.addEventListener('click', () => {
-        const c = DASH_CARDS[Number(el.dataset.idx)];
+        const c = DASH_CARDS.find((x) => x.key === el.dataset.cardKey);
         // 健診カードは絞り込みを持つ。持たないカードから来たときに前回の絞り込みが
         // 残らないよう、health-admin へ行くカードは必ず絞り込みを明示指定する。
         if (c.nav === 'health-admin') setHealthAdminFilter(c.healthFilter || '');
@@ -18482,7 +18529,10 @@ function init() {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadAdminDashboard();
   };
-  SCREEN_ENTER_HOOKS['expense-payment-pending'] = () => { loadExpensePaymentPending(); };
+  SCREEN_ENTER_HOOKS['expense-payment-pending'] = async () => {
+    if (!hasAdminCap(await getMyAdminCapabilities(), 'accounting_admin')) { showScreen('admin-dashboard'); return; }
+    loadExpensePaymentPending();
+  };
   SCREEN_ENTER_HOOKS['fulfillment-pending'] = () => { loadFulfillmentPending(); };
   SCREEN_ENTER_HOOKS['admin-request-list'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
@@ -18664,11 +18714,17 @@ function init() {
   SCREEN_ENTER_HOOKS['propose-site'] = resetProposeSiteForm;
   SCREEN_ENTER_HOOKS['loan-request'] = initLoanRequestForm;
   SCREEN_ENTER_HOOKS['loan-history'] = loadLoanHistory;
-  SCREEN_ENTER_HOOKS['loan-admin'] = loadLoanAdminList;
+  SCREEN_ENTER_HOOKS['loan-admin'] = async () => {
+    if (!hasAdminCap(await getMyAdminCapabilities(), 'loan_admin')) { showScreen('admin-dashboard'); return; }
+    loadLoanAdminList();
+  };
   SCREEN_ENTER_HOOKS['loan-admin-detail'] = loadLoanAdminDetail;
   SCREEN_ENTER_HOOKS['loan-monthly-ledger'] = initLoanMonthlyLedger;
   SCREEN_ENTER_HOOKS['loan-balance'] = loadMyLoanBalance;
-  SCREEN_ENTER_HOOKS['loan-ledger-admin'] = loadLoanLedgerAdminList;
+  SCREEN_ENTER_HOOKS['loan-ledger-admin'] = async () => {
+    if (!hasAdminCap(await getMyAdminCapabilities(), 'loan_admin')) { showScreen('admin-dashboard'); return; }
+    loadLoanLedgerAdminList();
+  };
   SCREEN_ENTER_HOOKS['loan-ledger-detail'] = loadLoanLedgerDetail;
   SCREEN_ENTER_HOOKS['lucky-month'] = () => { wireLucky(); const now = todayJST(); luckyYM = { y: Number(now.slice(0, 4)), m: Number(now.slice(5, 7)) }; loadLuckyMonth(); };
   // 本番(IS_STAGING=false)ではラッキー賞管理を開かせない(直リンク・履歴復元でも RPC を呼ばずホームへ戻す)。
