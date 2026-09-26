@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v209-staging';
-const BUILD_DEPLOYED_AT = '2026-09-25T06:13:19.859Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v210-staging';
+const BUILD_DEPLOYED_AT = '2026-09-26T03:54:33.516Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -5542,6 +5542,9 @@ async function renderAdminTodayTasks(session) {
       expense_payment_overdue: 'payment_overdue',   // bulk-expense-admin
       supply_delivery_overdue: 'delivery_overdue',  // supply-request-admin
       qualification_expiry: 'expiring',             // qual-admin(admin_list_qualifications の p_filter と同じ値)
+      // 2026-09-26追加: expense-ledger-admin(経費の履歴台帳)に既にある「原本未回収」フィルタ
+      // チップ(data-status="original_uncollected")と同じ値を渡す。
+      original_receipt_uncollected: 'original_uncollected',
     };
     el.querySelectorAll('.admin-today-task').forEach((btn) => btn.addEventListener('click', () => {
       // 2026-09-05: 「今日やること」の件数は admin_home_today_tasks が v_today(JST)で数えている。
@@ -18502,6 +18505,12 @@ function init() {
   // 経費の履歴台帳(管理者)。人別・月別・状態別。
   SCREEN_ENTER_HOOKS['expense-ledger-admin'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
+    // 遷移元(「今日やること」の「領収書の原本未回収」カード)が nav.filter で渡した絞り込みを
+    // 反映する(2026-09-26追加)。前回の絞り込みが残っていると「カード件数 ≠ 表示件数」に
+    // なるため、filter を持たない経路で入ったときは必ず「すべて」へ戻す。
+    const navf = navCurrent() && navCurrent().screen === 'expense-ledger-admin' ? (navCurrent().filter || '') : '';
+    expenseLedgerAdminFilters.statusGroup = navf === 'original_uncollected' ? 'original_uncollected' : '';
+    document.querySelectorAll('#ela-status-filter .filter-chip').forEach((c) => c.classList.toggle('active', (c.dataset.status || '') === expenseLedgerAdminFilters.statusGroup));
     // 台帳本体を先に読む(社員絞り込み用の名簿取得を待たせない。名簿が取れなくても
     // 「全員」のまま台帳は使えるようにする)。
     loadExpenseLedgerAdmin();
