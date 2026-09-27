@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v213-staging';
-const BUILD_DEPLOYED_AT = '2026-09-27T17:01:12.895Z';
+const BUILD_DEPLOYED_AT = '2026-09-27T17:05:51.449Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14886,7 +14886,9 @@ async function loadDailyReportNeedsReviewAdmin() {
 const DR_EDIT_DIFF_FIELDS = [
   ['site_raw_name', '現場', (v) => v || '-'],
   ['work_type', '勤務区分', (v) => v || '-'],
+  ['headcount', '人工', (v) => (v == null || v === '' ? '-' : `${v}`)],
   ['overtime_hours', '残業', (v) => (v == null || v === '' ? 'なし' : `${v}h`)],
+  ['early_start_hours', '早出', (v) => (v == null || v === '' ? 'なし' : `${v}h`)],
   ['early_commute_hours', '通勤早出', (v) => (v ? `${v}h` : 'なし')],
   ['commute_overtime_hours', '通勤残業', (v) => (v ? `${v}h` : 'なし')],
   ['is_leader', 'リーダー', (v) => (v ? 'あり' : 'なし')],
@@ -14895,6 +14897,7 @@ const DR_EDIT_DIFF_FIELDS = [
   ['is_transport', '運搬', (v) => (v ? 'あり' : 'なし')],
   ['is_field_duty', '現場作業', (v) => (v ? 'あり' : 'なし')],
   ['is_sales', '営業', (v) => (v ? 'あり' : 'なし')],
+  ['is_business_trip', '出張', (v) => (v ? 'あり' : 'なし')],
   ['notes', '備考', (v) => v || '-'],
 ];
 function dailyReportEditDiffHtml(oldData, newData) {
