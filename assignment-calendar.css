@@ -937,7 +937,10 @@
 /* ---------------- PC(1200px〜) ---------------- */
 .ac-root[data-layout="wide"] .ac-bodywrap {
   display: grid;
-  grid-template-columns: minmax(0, 62fr) minmax(0, 38fr);
+  /* 2026-09-29 Shota実機指摘: 右の日別パネルが狭くて見づらい。月グリッドは
+     日付+色帯だけで文字量が少なく、右側の現場カード(役割・確認状況・氏名まで
+     文字で出す)ほど幅を必要としないため、右側の比率を増やす。 */
+  grid-template-columns: minmax(0, 54fr) minmax(0, 46fr);
   gap: 14px;
   padding: 14px;
   /* 2560px級のモニターでも横へ間延びさせない。 */
