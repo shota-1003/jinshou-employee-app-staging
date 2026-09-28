@@ -1199,6 +1199,10 @@ button.link {
      column-widthへ変えて、空いている横幅ぶんだけ列数が自動で増えるようにする。 */
   body:has(#screen-loan-admin.active) main { max-width: 1400px; }
   #loan-admin-list { column-width: 260px; column-count: initial; }
+  /* 2026-09-29 Shota指摘「明細２を右における」「右の空白を空けるな」: 経費申請の詳細
+     (明細が複数件並ぶ#exd-items-list)も、既存の申請管理等と同じ考え方でPC幅を広く使う。 */
+  body:has(#screen-request-detail.active) main,
+  body:has(#screen-my-request-detail.active) main { max-width: 1400px; }
 }
 
 @media (min-width: 1280px) {
@@ -1207,6 +1211,8 @@ button.link {
   body:has(#screen-supply-holdings-admin.active) main,
   body:has(#screen-qual-admin.active) main { max-width: 1600px; }
   body:has(#screen-loan-admin.active) main { max-width: 1600px; }
+  body:has(#screen-request-detail.active) main,
+  body:has(#screen-my-request-detail.active) main { max-width: 1600px; }
   [id$="-list"], [id$="-results"] { column-count: 3; }
   #today-list, #daily-report-entry-list, #expense-item-list,
   .home-card-grid, .main-menu-grid, .dash-card-grid, .supply-select-grid, .menu-list {

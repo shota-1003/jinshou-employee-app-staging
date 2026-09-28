@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v219-staging';
-const BUILD_DEPLOYED_AT = '2026-09-28T17:47:25.961Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v221-staging';
+const BUILD_DEPLOYED_AT = '2026-09-28T18:11:58.360Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7446,6 +7446,10 @@ function renderExpenseRequestDetailHtml(full, opts) {
     </div>`;
   }
 
+    // 2026-09-29 Shota指摘「明細２を右における」「右の空白を空けるな」。id末尾"-list"には
+    // 既存の共通ルール([id$="-list"]{column-count:3}、1280px以上)が既に効くため、
+    // 経費の履歴台帳などと同じ考え方で明細もこのidを付けるだけで自動的に多列になる。
+    html += '<div id="exd-items-list">';
     html += full.items.map((it, idx) => {
       const c = it.category || {}; const o = it.ocr || {};
       const r0 = (it.receipts || [])[0] || null;
@@ -7505,11 +7509,18 @@ function renderExpenseRequestDetailHtml(full, opts) {
     : '<div class="hint-inline"><span class="mini-tag warn">領収書なし</span> この明細には領収書の原本が添付されていません(税理士へ出す証拠がありません)。</div>'}</div>
       </div>`;
     }).join('');
+    html += '</div>'; // #exd-items-list
   }
   html += '</div>';
 
-  // 6. 経費精算書(まとめ精算の表紙)
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経費精算書(まとめ精算の表紙)</div>
+  // 6. 経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付した場合のみ)。
+  // 2026-09-29 Shota指摘「この経費精算書って書いてるだけのやつなに」。「1件ずつの申請」
+  // (このカードの元になる添付が最初から存在しない申請方式)では、合計も申請者名も画像も
+  // すべて空になり、「添付されていません」しか出ない意味のないカードになっていた。
+  // 何も添付が無い場合はカードごと出さない(空のカードで画面を埋めない)。
+  const hasCoverSheet = !!(cover.file_id || cover.declared_total != null || cover.applicant_name || full.source === 'fallback');
+  if (hasCoverSheet) {
+    html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付したもの)</div>
     <div class="field-group">
       ${exdRowText('経費精算書に書かれた合計', cover.declared_total != null ? yen(cover.declared_total) : null)}
       ${exdRowText('申請者名(経費精算書の記載)', cover.applicant_name)}
@@ -7517,6 +7528,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
     <div class="exd-cover-sheet-box">${cover.file_id || full.source === 'fallback'
     ? `<img class="secure-proxy-thumb exd-cover-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${exdEsc(h.employee_request_id)}" alt="経費精算書" loading="lazy">`
     : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
+  }
 
   // 7〜9. 短い情報カード群その2(PC幅では2列に並べる、exd-info-grid参照)
   html += '<div class="exd-info-grid">';
