@@ -1634,19 +1634,22 @@ body.assignment-calendar-open .app-header { display: none; }
   .exd-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
   .exd-info-grid > .exd-card { margin-bottom: 0; }
 }
+/* 2026-09-29 Shota指摘「この時点で誰とか見たい」「領収書じゃなくてこの用紙の横ってことだし」。
+   経費精算書(税理士へ渡す用紙)の横に、申請の概要(誰との交際費か含む)を並べる。
+   モバイルは経費精算書→概要の縦一列のまま(DOM順を変えていない)。 */
+.exd-top-split { }
+@media (min-width: 900px) {
+  .exd-top-split { display: grid; grid-template-columns: minmax(380px, 55%) 1fr; gap: 16px; align-items: start; margin-bottom: 10px; }
+  .exd-top-split > .exd-top-side { position: sticky; top: 8px; margin-bottom: 0; }
+}
 .exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .exd-card .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
 .exd-item { margin-bottom: 10px; }
-/* 2026-09-29 Shota指摘「こういう感じのほうがみやすい」(別アプリの領収書画像+情報を
-   横並びにしたレイアウトを参照)。PC幅では領収書画像を左、明細の項目を右に並べる。
-   モバイルは.exd-item-media(画像)が.exd-item-infoより後のDOM順のまま(既存の見た目を維持)。 */
-@media (min-width: 900px) {
-  .exd-item { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 4px 16px; align-items: start; }
-  .exd-item > .row1, .exd-item > .exd-preapp { grid-column: 1 / -1; }
-  .exd-item > .exd-item-media { grid-column: 1; grid-row: 2; position: sticky; top: 8px; }
-  .exd-item > .exd-item-info { grid-column: 2; grid-row: 2; }
-}
+/* 2026-09-29 Shota指摘「領収書じゃなくてこの用紙の横ってことだし」「領収書もそれにするにしても
+   こんなの見えるか」により、明細1件ごとを画像+項目の2列に分ける案は撤回した(領収書サムネイルを
+   狭い列に収めると小さすぎて読めない)。.exd-item-media/.exd-item-infoの区分自体は残すが、
+   常に縦一列(画像は下、既存のまま)で表示する。2列化はexd-top-split(下記、経費精算書の横)のみ。 */
 .exd-item .field-group { margin: 4px 0; }
 .exd-item .field-row { padding: 6px 2px; align-items: flex-start; gap: 10px; font-size: 13px; }
 .exd-item .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
