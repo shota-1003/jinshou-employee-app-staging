@@ -2255,6 +2255,11 @@
         <div class="menu-item-body">経費の履歴台帳<span class="desc">申請者・科目・領収書・承認・支払・税理士送信を人別/月別に確認しCSV出力</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="entertainment-monthly-report">
+        <span class="icon-slot" data-icon="file"></span>
+        <div class="menu-item-body">接待交際費・会議費・福利厚生費(月次)<span class="desc">経理が確定した勘定科目でまとめた月次一覧。印刷・PDF保存できます</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="info-change-admin">
         <span class="icon-slot" data-icon="edit"></span>
         <div class="menu-item-body">個人情報の変更申請<span class="desc">住所・電話番号等の変更を確認</span></div>
@@ -2551,6 +2556,20 @@
         <tbody id="ela-table-body"></tbody>
       </table>
     </div>
+  </section>
+
+  <section id="screen-entertainment-monthly-report" class="screen">
+    <div class="no-print">
+      <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+      <div class="form-title">接待交際費・会議費・福利厚生費(月次)</div>
+      <div class="hint" style="margin-bottom:10px;">経理が確定した勘定科目(接待交際費・会議費・福利厚生費)で、承認済みの明細を1件ずつ並べます。税理士へ渡す資料として、そのまま印刷・PDF保存できます。「時間」「場所」は現在のシステムには入力欄が無いため、この一覧には含めていません。</div>
+      <label for="emr-month">対象月</label>
+      <input type="month" id="emr-month">
+      <div class="hint" id="emr-summary" style="margin:10px 0;"></div>
+      <button type="button" id="emr-print-btn">印刷する / PDFとして保存する</button>
+      <div class="error" id="emr-error"></div>
+    </div>
+    <div id="emr-content"></div>
   </section>
 
   <section id="screen-admin-all-requests" class="screen">

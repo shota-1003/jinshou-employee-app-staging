@@ -1304,11 +1304,14 @@ button.link {
   /* 画面用の用紙の拡縮は印刷には持ち込まない */
   .settlement-sheet { transform: none !important; margin-bottom: 0 !important; }
   body * { visibility: hidden; }
-  #screen-joyo-denpyo-print, #screen-joyo-denpyo-print * { visibility: visible; }
-  #screen-joyo-denpyo-print { position: absolute; left: 0; top: 0; width: 100%; max-width: none; }
+  #screen-joyo-denpyo-print, #screen-joyo-denpyo-print *,
+  #screen-entertainment-monthly-report, #screen-entertainment-monthly-report * { visibility: visible; }
+  #screen-joyo-denpyo-print, #screen-entertainment-monthly-report { position: absolute; left: 0; top: 0; width: 100%; max-width: none; }
   .no-print { display: none !important; }
   .bottom-nav, .app-header { display: none !important; }
   .jd-print-page { box-shadow: none; margin: 0; border-radius: 0; }
+  #screen-entertainment-monthly-report .areq-table { font-size: 10.5px; color: #000; }
+  #screen-entertainment-monthly-report .areq-table th, #screen-entertainment-monthly-report .areq-table td { border: 1px solid #999; padding: 3px 5px; }
 }
 
 /* ===== Staging/Production取り違え防止(2026-08-28) =====

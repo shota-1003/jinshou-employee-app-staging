@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v215-staging';
-const BUILD_DEPLOYED_AT = '2026-09-28T15:59:13.463Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v216-staging';
+const BUILD_DEPLOYED_AT = '2026-09-28T16:44:22.815Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -552,7 +552,7 @@ const ADMIN_SCREENS = new Set([
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
-  'vehicle-admin', 'expense-ledger-admin',
+  'vehicle-admin', 'expense-ledger-admin', 'entertainment-monthly-report',
 ]);
 // 2026-09-12: admin-action-item-create/list/detail は専務・社長限定を撤廃し全社員が使う画面に
 // なったため、ADMIN_SCREENSから外す(在籍中の社員なら誰でも管理者用ボトムナビへ切り替わらずに
@@ -578,6 +578,7 @@ const PARENT_ROUTE = Object.freeze({
   'employee-summary': 'admin-dashboard', 'attendance-matrix': 'admin-dashboard', 'bulk-expense-admin': 'admin-dashboard',
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
   'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard', 'fulfillment-pending': 'admin-dashboard',
+  'entertainment-monthly-report': 'admin-dashboard',
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
@@ -6515,6 +6516,66 @@ async function loadExpenseLedgerAdmin() {
     listEl.innerHTML = '';
     bodyEl.innerHTML = '';
     showError('ela-error', e.message || '読み込みに失敗しました。');
+  }
+}
+
+// 接待交際費・会議費・福利厚生費(月次、印刷用)。経理が確定した勘定科目(effective_category)で
+// 絞り込んだ、承認済み明細の一覧を1件1行で表示する(税理士へ渡す資料として、そのまま
+// 印刷・PDF保存できる形)。「時間」「場所」はシステムに入力欄が無いため出さない(2026-09-28)。
+async function loadEntertainmentMonthlyReport() {
+  const session = getSession();
+  const monthEl = document.getElementById('emr-month');
+  const contentEl = document.getElementById('emr-content');
+  const summaryEl = document.getElementById('emr-summary');
+  hideError('emr-error');
+  const ym = (monthEl && monthEl.value) || todayJST().slice(0, 7);
+  const [year, month] = ym.split('-').map(Number);
+  contentEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const r = await rpc('admin_get_entertainment_expense_monthly', {
+      p_admin_employee_code: session.employeeCode, p_year: year, p_month: month,
+    });
+    const items = (r && r.items) || [];
+    const byCat = (r && r.by_category) || [];
+    if (summaryEl) {
+      summaryEl.textContent = items.length
+        ? `${year}年${month}月・${items.length}件・合計${yenText(r.total)}(${byCat.map((c) => `${c.account_category} ${c.count}件 ${yenText(c.total)}`).join('・')})`
+        : `${year}年${month}月は対象の明細がありません。`;
+    }
+    if (!items.length) { contentEl.innerHTML = '<div class="hint">この月は接待交際費・会議費・福利厚生費に確定した明細がありません。</div>'; return; }
+    contentEl.innerHTML = `
+      <div class="form-title" style="font-size:15px;">${exdEsc(String(year))}年${exdEsc(String(month))}月 接待交際費・会議費・福利厚生費</div>
+      <div class="areq-table-wrap" style="overflow-x:auto;">
+        <table class="areq-table">
+          <thead>
+            <tr>
+              <th>日付</th><th>勘定科目</th><th>店名</th><th>金額</th><th>取引先</th>
+              <th>取引先の参加者</th><th>自社の参加者</th><th>人数</th><th>申請者</th><th>備考</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items.map((it) => `
+              <tr>
+                <td>${dateText(it.document_date)}</td>
+                <td>${exdEsc(it.account_category || '-')}</td>
+                <td>${exdEsc(it.store || '-')}</td>
+                <td>${yenText(it.amount)}</td>
+                <td>${exdEsc(it.partner_name || '-')}</td>
+                <td>${exdEsc(it.partner_participants || '-')}${it.partner_participant_count ? `(${it.partner_participant_count}名)` : ''}</td>
+                <td>${exdEsc((it.our_participant_names || []).join('、') || '-')}</td>
+                <td>${it.our_participant_count != null ? `${it.our_participant_count}名` : '-'}</td>
+                <td>${exdEsc(it.submitted_by || '-')}</td>
+                <td>${exdEsc(it.note || '')}</td>
+              </tr>
+            `).join('')}
+            <tr><td colspan="3" style="text-align:right; font-weight:700;">合計</td><td style="font-weight:700;">${yenText(r.total)}</td><td colspan="6"></td></tr>
+          </tbody>
+        </table>
+      </div>`;
+  } catch (e) {
+    contentEl.innerHTML = '';
+    if (summaryEl) summaryEl.textContent = '';
+    showError('emr-error', e.message || '読み込みに失敗しました。');
   }
 }
 
@@ -18720,6 +18781,19 @@ function init() {
   }
   const elaCsvEl = document.getElementById('ela-export-csv');
   if (elaCsvEl) elaCsvEl.addEventListener('click', downloadExpenseLedgerCsv);
+
+  // 接待交際費・会議費・福利厚生費(月次、印刷用)。2026-09-28 Shota指示への対応
+  // (「接待交際費や会議費、福利厚生費は月ごとにこのようなデータを作ってください」)。
+  SCREEN_ENTER_HOOKS['entertainment-monthly-report'] = async () => {
+    if (!hasAdminCap(await getMyAdminCapabilities(), 'accounting_admin')) { showScreen('admin-dashboard'); return; }
+    const monthEl = document.getElementById('emr-month');
+    if (monthEl && !monthEl.value) monthEl.value = todayJST().slice(0, 7);
+    loadEntertainmentMonthlyReport();
+  };
+  const emrMonthEl = document.getElementById('emr-month');
+  if (emrMonthEl) emrMonthEl.addEventListener('change', loadEntertainmentMonthlyReport);
+  const emrPrintEl = document.getElementById('emr-print-btn');
+  if (emrPrintEl) emrPrintEl.addEventListener('click', () => window.print());
 
   // 休暇履歴(管理者)の絞り込み: 月・社員・種別・状態。
   const alhMonthEl = document.getElementById('alh-month');
