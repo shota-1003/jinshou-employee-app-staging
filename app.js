@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v218-staging';
-const BUILD_DEPLOYED_AT = '2026-09-28T17:25:45.477Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v219-staging';
+const BUILD_DEPLOYED_AT = '2026-09-28T17:45:45.463Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7233,7 +7233,9 @@ function exdPreapprovalCompareHtml(cmp) {
       <tr><th>お店</th><td>${exdEsc(pre.planned_store || '-')}</td><td>${exdEsc(act.store || '-')}</td></tr>
       <tr><th>会社・相手</th><td>${(pre.companies && pre.companies.length) ? pre.companies.map((c) => `${exdEsc(c.name || '')}(${exdEsc(c.count ?? '-')}名${c.names ? `: ${exdEsc(c.names)}` : ''})`).join('<br>') : `${exdEsc(pre.partner_name || '')}(${exdEsc(pre.partner_count ?? '-')}名${pre.partner_names ? `: ${exdEsc(pre.partner_names)}` : ''})`}</td><td>${exdEsc(act.partner_name || '-')}(${exdEsc(act.partner_count ?? '-')}名${act.partner_names ? `: ${exdEsc(act.partner_names)}` : ''})</td></tr>
       <tr><th>自社</th><td>${exdEsc(pre.our_names || '-')}</td><td>${exdEsc(act.our_names || '-')}</td></tr>
-    </table></details>` : '';
+    </table>
+    <button type="button" class="secondary exd-preapp-open-link" data-preapproval-id="${exdEsc(pre.id)}" style="margin-top:6px;">事前申請の一覧でこの申請(#${exdEsc(pre.id)})を開く</button>
+    </details>` : '';
   return `<div class="exd-preapp exd-preapp-box-${r.level}">
     <div class="exd-preapp-title">${exdEsc(head)}</div>
     ${bodyLines}
@@ -7293,6 +7295,14 @@ function renderExpenseRequestDetailHtml(full, opts) {
   const uniqueOurNames = [...new Set(partnerItems.flatMap((it) => it.our_participant_names || []))];
   const partnerSummaryRow = partnerItems.length
     ? exdRowText('誰との接待・打ち合わせか', `${uniquePartnerNames.join('・') || '(取引先不明)'}${uniqueOurNames.length ? `(自社: ${uniqueOurNames.join('、')})` : ''}`)
+    : '';
+
+  // 2026-09-29 Shota指摘「なんで全体の所に領収書回収したかださないの」。明細まで開かないと
+  // 原本回収状況が分からなかったため、概要にも件数で出す。
+  const itemsWithReceipt = (full.items || []).filter((it) => (it.receipts || []).length);
+  const collectedCount = itemsWithReceipt.filter((it) => it.original_receipt_collected_at).length;
+  const receiptSummaryRow = itemsWithReceipt.length
+    ? exdRowText('領収書の原本回収状況', `${collectedCount}/${itemsWithReceipt.length}件 回収済み${collectedCount < itemsWithReceipt.length ? '(未回収あり)' : ''}`)
     : '';
 
   // 2026-09-10 Shota指摘(原文)「支払うボタンなくないえどう対応するの…支払うボタンなかったら
@@ -7355,22 +7365,34 @@ function renderExpenseRequestDetailHtml(full, opts) {
   html += `<div class="exd-top-doc">${exdSettlementSheetHtml(full)}</div>`;
 
   // 1. だれの・どの申請か
-  html += `<div class="card exd-card exd-top-side"><div class="form-title" style="font-size:15px;">この経費申請の全体</div>
+  html += `<div class="exd-top-side">
+    <div class="card exd-card"><div class="form-title" style="font-size:15px;">この経費申請の全体</div>
     <div class="field-group">
       ${exdRowText('申請番号', h.expense_no)}
       ${exdRowText('申請者', h.employee_name ? `${h.employee_name}(社員番号 ${h.employee_code || '-'})` : null)}
       ${exdRowText('経費区分', h.expense_category_label)}
-      ${exdRowText('申請の出し方', h.submission_mode === 'bulk' ? `まとめて精算${h.batch_title ? `(${h.batch_title})` : ''}` : (h.submission_mode ? '1件ずつの申請' : null))}
       ${exdRowText('帰属月', h.belonging_year_month || (d.usage_date ? String(d.usage_date).slice(0, 7) : null))}
       ${exdRowText('いまどこまで進んだか', EXD_STATE_LABEL[full.state] || full.state || (EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status))}
       ${exdRowText('明細件数', `${full.items.length}件`)}
       ${partnerSummaryRow}
+      ${receiptSummaryRow}
       ${ap.rejection_reason ? exdRowText('却下・差戻しの理由', ap.rejection_reason) : ''}
-    </div></div>`;
+    </div></div>
+    <div class="card exd-card"><div class="form-title" style="font-size:15px;">承認</div>
+    <div class="field-group">
+      ${exdRow('承認の状態', `<span class="status-badge ${ap.status === 'approved' ? 'done' : (ap.status === 'rejected' ? 'rejected' : '')}">${exdEsc(EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status || '承認待ち')}</span>`)}
+      ${exdRowText('承認者', ap.approver_name || (ap.status === 'approved' ? '(承認者の記録なし)' : 'まだ誰も承認していません'))}
+      ${exdRow('承認日時', dt(ap.approved_at))}
+      ${exdRowText('承認方式', ap.method_label || (ap.method === 'none' ? '未承認' : ap.method))}
+      ${exdRowText('承認したのは人かAIか', ap.actor_type === 'system' ? 'AI・システムによる自動承認' : (ap.actor_type === 'human' ? '人が承認画面で承認' : null))}
+    </div>
+    ${approvalMethodNoteHtml(ap.method)}
+    </div>
+  </div>`;
 
-  html += '</div>'; // .exd-top-split(経費精算書+この経費申請の全体)
+  html += '</div>'; // .exd-top-split(経費精算書+この経費申請の全体+承認)
 
-  // 2〜4. 短い情報カード群(PC幅では2列に並べる、exd-info-grid参照)
+  // 2〜3. 短い情報カード群(PC幅では2列に並べる、exd-info-grid参照)
   html += '<div class="exd-info-grid">';
 
   // 2. 日付(必ず何の日付かを書く)
@@ -7397,19 +7419,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
       ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
     </div></div>`;
 
-  // 4. 承認(だれが・いつ・どの方式で)
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">承認</div>
-    <div class="field-group">
-      ${exdRow('承認の状態', `<span class="status-badge ${ap.status === 'approved' ? 'done' : (ap.status === 'rejected' ? 'rejected' : '')}">${exdEsc(EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status || '承認待ち')}</span>`)}
-      ${exdRowText('承認者', ap.approver_name || (ap.status === 'approved' ? '(承認者の記録なし)' : 'まだ誰も承認していません'))}
-      ${exdRow('承認日時', dt(ap.approved_at))}
-      ${exdRowText('承認方式', ap.method_label || (ap.method === 'none' ? '未承認' : ap.method))}
-      ${exdRowText('承認したのは人かAIか', ap.actor_type === 'system' ? 'AI・システムによる自動承認' : (ap.actor_type === 'human' ? '人が承認画面で承認' : null))}
-    </div>
-    ${approvalMethodNoteHtml(ap.method)}
-  </div>`;
-
-  html += '</div>'; // .exd-info-grid(2〜4)
+  html += '</div>'; // .exd-info-grid(2〜3、承認はexd-top-sideへ移動済み)
 
   // 5. 明細と領収書の原本(勘定科目3層つき)
   html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">明細と領収書の原本</div>';
@@ -7640,6 +7650,15 @@ function wireExpenseRequestDetail(el, full, ctx) {
       setTimeout(() => { if (!box.querySelector('img[src]')) box.innerHTML = noAttach; }, 6000);
     }
   }
+
+  // 2026-09-29 Shota指摘「事前承認の内容もクリックで飛べるようにしとかないと」。比較の詳細
+  // (<details>)内から、実際の接待事前申請の一覧画面(該当行をハイライト)へ遷移できるようにする。
+  el.querySelectorAll('.exd-preapp-open-link').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      entertainmentAdminHighlightId = Number(btn.dataset.preapprovalId);
+      showScreen('entertainment-admin');
+    });
+  });
 
   if (ctx.mode !== 'admin') return;
 
@@ -11448,6 +11467,9 @@ function entPreappUsageHtml(r, u) {
 
 let entAdminFilter = 'pending';
 let entAdminUserPicked = false;
+// 2026-09-29追加: 経費申請の詳細から「事前申請の詳細を開く」で来たとき、この一覧の中の
+// 該当行までスクロールしてハイライトする(1回使ったらnullへ戻す)。
+let entertainmentAdminHighlightId = null;
 function wireEntAdminFilter() {
   const row = document.getElementById('ent-admin-status-filter');
   if (!row || row.dataset.wired) return;
@@ -11471,6 +11493,8 @@ async function loadEntertainmentAdminList() {
     const cnt = { pending: 0, approved: 0, rejected: 0 };
     allRows.forEach((r) => { if (cnt[r.status] !== undefined) cnt[r.status] += 1; });
     if (!entAdminUserPicked && entAdminFilter === 'pending' && cnt.pending === 0 && allRows.length) entAdminFilter = '';
+    // 経費申請詳細から特定の事前申請を指定して来た場合、その行が絞り込みで隠れないよう「すべて」にする。
+    if (entertainmentAdminHighlightId != null) { entAdminFilter = ''; entAdminUserPicked = true; }
     document.querySelectorAll('#ent-admin-status-filter .filter-chip').forEach((b) => {
       const st = b.dataset.status;
       b.textContent = st === 'pending' ? `確認待ち(${cnt.pending})` : (st === 'approved' ? `承認済み(${cnt.approved})` : (st === 'rejected' ? `却下(${cnt.rejected})` : `すべて(${allRows.length})`));
@@ -11527,6 +11551,15 @@ async function loadEntertainmentAdminList() {
         doDecideEntertainment(item.dataset.id, 'rejected', reasonEl ? reasonEl.value.trim() : null);
       });
     });
+    if (entertainmentAdminHighlightId != null) {
+      const target = listEl.querySelector(`.qual-item[data-id="${entertainmentAdminHighlightId}"]`);
+      if (target) {
+        target.classList.add('qual-item-highlight');
+        target.scrollIntoView({ block: 'center' });
+        setTimeout(() => target.classList.remove('qual-item-highlight'), 4000);
+      }
+      entertainmentAdminHighlightId = null;
+    }
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
