@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v213-staging';
-const BUILD_DEPLOYED_AT = '2026-09-27T17:05:51.449Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v214-staging';
+const BUILD_DEPLOYED_AT = '2026-09-28T14:41:56.503Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -6594,6 +6594,7 @@ function downloadExpenseLedgerCsv() {
 //   同じキーの形を組み立てて描画する(項目が「-」になるものがあることを画面に明記する)。
 
 let expenseFullRpcAvailable = null; // null=未判定 / true=契約RPCあり / false=組み立て経路
+let expenseFullRpcAvailableEmployee = null; // 同上、社員本人向け(get_my_expense_request_full)
 let expenseSetFinalCategoryRpcAvailable = null;
 let expenseRecordPaymentRpcAvailable = null;
 
@@ -6694,7 +6695,32 @@ async function buildExpenseFullFromAdminRpcs(session, requestId) {
   });
 }
 
+// 社員本人向け: 契約RPC(get_my_expense_request_full、admin版と同じ内容を本人の申請のみ返す)を
+// 優先し、無ければ従来の組み立て経路(buildExpenseFullFromEmployeeRpcs)へ落とす
+// (fetchExpenseRequestFullAdminと同じ「契約RPC優先・無ければ組み立て」パターン、2026-09-28追加。
+// 従来の組み立て経路には取引先参加者・自社参加者・原本受け取り状況を渡す手段が無く、
+// 社員本人の画面でこれらが常に空欄になっていたため)。
+async function fetchExpenseRequestFullEmployee(session, requestId) {
+  if (expenseFullRpcAvailableEmployee !== false) {
+    try {
+      const res = await rpc('get_my_expense_request_full', {
+        p_employee_code: session.employeeCode, p_employee_request_id: Number(requestId),
+      });
+      const full = Array.isArray(res) ? res[0] : res;
+      if (full && (full.items || full.header)) {
+        expenseFullRpcAvailableEmployee = true;
+        return normalizeExpenseFull(full, 'contract');
+      }
+    } catch (e) {
+      if (/PGRST202|Could not find the function|does not exist/i.test(e.message || '')) expenseFullRpcAvailableEmployee = false;
+      else throw e;
+    }
+  }
+  return buildExpenseFullFromEmployeeRpcs(session, requestId);
+}
+
 // 社員本人側(管理者RPCは呼べない)。同じ形を本人向けRPCから組み立て、同じ描画関数へ渡す。
+// (契約RPCが使えない場合のみのフォールバック経路。上のfetchExpenseRequestFullEmployeeから呼ばれる)
 async function buildExpenseFullFromEmployeeRpcs(session, requestId) {
   const rid = Number(requestId);
   const [detailRows, ledgerAll, methodMap] = await Promise.all([
@@ -7344,6 +7370,12 @@ function renderExpenseRequestDetailHtml(full, opts) {
           ${exdRowText('インボイス番号', o.invoice_registration_number)}
           ${exdRowText('OCR読取の確信度', o.item_ocr_confidence ? (EXD_CONFIDENCE_LABEL[o.item_ocr_confidence] || o.item_ocr_confidence) : null)}
         </div>
+        ${(it.partner_participants || it.business_partner_id || (it.our_participant_names || []).length) ? `<div class="field-group">
+          <div class="hint-inline"><strong>誰との接待・打ち合わせか</strong></div>
+          ${exdRowText('取引先', it.partner_name)}
+          ${exdRowText('取引先の参加者', it.partner_participants ? `${it.partner_participants}${it.partner_participant_count ? `(${it.partner_participant_count}名)` : ''}` : null)}
+          ${exdRowText('自社の参加者', (it.our_participant_names || []).length ? `${it.our_participant_names.join('、')}${it.our_participant_count ? `(${it.our_participant_count}名)` : ''}` : null)}
+        </div>` : ''}
         <div class="exd-category">
           <div class="hint-inline"><strong>勘定科目(社員入力 / AI推定 / 経理確定)</strong></div>
           <div class="field-group">
@@ -7445,7 +7477,7 @@ async function renderExpenseRequestDetailInto(containerId, requestId, opts) {
   let full;
   try {
     full = mode === 'employee'
-      ? await buildExpenseFullFromEmployeeRpcs(session, requestId)
+      ? await fetchExpenseRequestFullEmployee(session, requestId)
       : await fetchExpenseRequestFullAdmin(session, requestId);
   } catch (e) {
     el.innerHTML = `<div class="hint">経費申請の内容を読み込めませんでした: ${exdEsc(e.message || '')}</div>`;
