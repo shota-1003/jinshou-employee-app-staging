@@ -1638,6 +1638,15 @@ body.assignment-calendar-open .app-header { display: none; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .exd-card .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
 .exd-item { margin-bottom: 10px; }
+/* 2026-09-29 Shota指摘「こういう感じのほうがみやすい」(別アプリの領収書画像+情報を
+   横並びにしたレイアウトを参照)。PC幅では領収書画像を左、明細の項目を右に並べる。
+   モバイルは.exd-item-media(画像)が.exd-item-infoより後のDOM順のまま(既存の見た目を維持)。 */
+@media (min-width: 900px) {
+  .exd-item { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 4px 16px; align-items: start; }
+  .exd-item > .row1, .exd-item > .exd-preapp { grid-column: 1 / -1; }
+  .exd-item > .exd-item-media { grid-column: 1; grid-row: 2; position: sticky; top: 8px; }
+  .exd-item > .exd-item-info { grid-column: 2; grid-row: 2; }
+}
 .exd-item .field-group { margin: 4px 0; }
 .exd-item .field-row { padding: 6px 2px; align-items: flex-start; gap: 10px; font-size: 13px; }
 .exd-item .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }

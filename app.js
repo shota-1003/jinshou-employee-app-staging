@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v216-staging';
-const BUILD_DEPLOYED_AT = '2026-09-28T16:44:22.815Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v217-staging';
+const BUILD_DEPLOYED_AT = '2026-09-28T17:06:12.210Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7285,6 +7285,16 @@ function renderExpenseRequestDetailHtml(full, opts) {
     ? (d.usage_date_last && d.usage_date_last !== d.usage_date ? `${dOnly(d.usage_date)} 〜 ${dOnly(d.usage_date_last)}` : dOnly(d.usage_date))
     : '未実施';
 
+  // 2026-09-29 Shota指摘(原文)「この時点で誰とか見たい」。「誰との交際費か」が明細を
+  // 開くまで(下の「明細と領収書の原本」節)見えず、申請全体の概要では分からなかった。
+  // 明細をまたいで重複を除いた「取引先」「自社の参加者」を、概要(この経費申請の全体)にも出す。
+  const partnerItems = (full.items || []).filter((it) => it.partner_participants || it.business_partner_id || (it.our_participant_names || []).length);
+  const uniquePartnerNames = [...new Set(partnerItems.map((it) => it.partner_name).filter(Boolean))];
+  const uniqueOurNames = [...new Set(partnerItems.flatMap((it) => it.our_participant_names || []))];
+  const partnerSummaryRow = partnerItems.length
+    ? exdRowText('誰との接待・打ち合わせか', `${uniquePartnerNames.join('・') || '(取引先不明)'}${uniqueOurNames.length ? `(自社: ${uniqueOurNames.join('、')})` : ''}`)
+    : '';
+
   // 2026-09-10 Shota指摘(原文)「支払うボタンなくないえどう対応するの…支払うボタンなかったら
   // これもう解消できんやん」への対応。支払ボタン自体(#exd-pay-submit)は実在・有効だったが、
   // 明細9件を含む15,000px超の画面の一番下に埋もれていて実質発見できなかった
@@ -7353,6 +7363,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
       ${exdRowText('帰属月', h.belonging_year_month || (d.usage_date ? String(d.usage_date).slice(0, 7) : null))}
       ${exdRowText('いまどこまで進んだか', EXD_STATE_LABEL[full.state] || full.state || (EXD_APPROVAL_STATUS_LABEL[ap.status] || ap.status))}
       ${exdRowText('明細件数', `${full.items.length}件`)}
+      ${partnerSummaryRow}
       ${ap.rejection_reason ? exdRowText('却下・差戻しの理由', ap.rejection_reason) : ''}
     </div></div>`;
 
@@ -7426,6 +7437,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
       return `<div class="history-item exd-item" data-item-id="${exdEsc(it.expense_item_id)}" data-document-id="${exdEsc(r0 ? r0.document_id : '')}">
         <div class="row1"><span>明細${idx + 1}: ${exdText(it.vendor)}</span><span>${yen(it.amount)}</span></div>
         ${exdPreapprovalCompareHtml(it.preapp_cmp)}
+        <div class="exd-item-info">
         <div class="field-group">
           ${exdRow('利用日', dOnly(it.usage_date))}
           ${exdRowText('支払先', it.vendor)}
@@ -7471,9 +7483,10 @@ function renderExpenseRequestDetailHtml(full, opts) {
           ${it.original_receipt_collected_at ? exdRowText('回収した人・日時', `${it.original_receipt_collected_by || ''}・${dt(it.original_receipt_collected_at)}`) : ''}
           ${isAdmin ? `<div style="margin-top:6px;"><button type="button" class="secondary exd-item-collect-original" data-collected="${it.original_receipt_collected_at ? '1' : '0'}">${it.original_receipt_collected_at ? '回収を取り消す' : '原本を回収した'}</button></div>` : ''}
         </div>
-        ${attached
+        </div>
+        <div class="exd-item-media">${attached
     ? `<div class="receipt-thumb-wrap"><img class="secure-proxy-thumb exd-receipt-thumb" data-secure-kind="receipt" data-secure-id="${exdEsc(r0.document_id)}" alt="領収書" loading="lazy"><div class="hint-inline">領収書(書類ID ${exdEsc(r0.document_id)})・タップで拡大</div></div>`
-    : '<div class="hint-inline"><span class="mini-tag warn">領収書なし</span> この明細には領収書の原本が添付されていません(税理士へ出す証拠がありません)。</div>'}
+    : '<div class="hint-inline"><span class="mini-tag warn">領収書なし</span> この明細には領収書の原本が添付されていません(税理士へ出す証拠がありません)。</div>'}</div>
       </div>`;
     }).join('');
   }
