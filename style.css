@@ -1621,6 +1621,16 @@ body.assignment-calendar-open .app-header { display: none; }
    開いても同じ項目が同じ見た目で出る。iPhone 375px で横に溢れないよう、ラベルと値は
    折り返し可・値は右寄せで幅を分け合う。 */
 .exd-card { padding: 12px 14px; margin-bottom: 10px; }
+/* 2026-09-29 Shota指摘: PC幅の広い画面で経費申請詳細が縦に長すぎ、右側が空欄のまま。
+   短い情報カード(この経費申請の全体・日付・金額・承認・支払・経理処理と税理士への提出・変更履歴)
+   だけを対象に、900px以上では2列に並べて縦スクロールを減らす。明細一覧・経費精算書等の
+   横に広いブロックはexd-info-gridの対象外のまま(モバイルは従来通り縦一列、display:contents
+   でラッパー自体は見た目に影響しない)。 */
+.exd-info-grid { display: contents; }
+@media (min-width: 900px) {
+  .exd-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
+  .exd-info-grid > .exd-card { margin-bottom: 0; }
+}
 .exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .exd-card .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
