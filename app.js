@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v225-staging';
-const BUILD_DEPLOYED_AT = '2026-09-29T03:18:53.166Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v226-staging';
+const BUILD_DEPLOYED_AT = '2026-09-29T03:37:52.476Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7392,6 +7392,97 @@ function renderExpenseRequestDetailHtml(full, opts) {
 
   html += '</div>'; // .exd-top-split(経費精算書+この経費申請の全体+承認)
 
+  // 6. 経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付した場合のみ)。
+  // 2026-09-29 Shota指摘「この経費精算書って書いてるだけのやつなに」。「1件ずつの申請」
+  // (このカードの元になる添付が最初から存在しない申請方式)では、合計も申請者名も画像も
+  // すべて空になり、「添付されていません」しか出ない意味のないカードになっていた。
+  // 何も添付が無い場合はカードごと出さない(空のカードで画面を埋めない)。
+  const hasCoverSheet = !!(cover.file_id || cover.declared_total != null || cover.applicant_name || full.source === 'fallback');
+  if (hasCoverSheet) {
+    html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付したもの)</div>
+    <div class="field-group">
+      ${exdRowText('経費精算書に書かれた合計', cover.declared_total != null ? yen(cover.declared_total) : null)}
+      ${exdRowText('申請者名(経費精算書の記載)', cover.applicant_name)}
+    </div>
+    <div class="exd-cover-sheet-box">${cover.file_id || full.source === 'fallback'
+    ? `<img class="secure-proxy-thumb exd-cover-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${exdEsc(h.employee_request_id)}" alt="経費精算書" loading="lazy">`
+    : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
+  }
+
+  // 2〜9. 短い情報カード群(日付・金額・支払・経理処理・変更履歴)を1つのリストにまとめる。
+  // 2026-09-29 Shota指摘「なんでここ開けるん？空白って分からんの」: 日付(6行)と金額(4行)を
+  // 単純な2列グリッドで並べると、丈の低い金額カードの下に埋まらない空白ができる
+  // (grid/flexは"同じ行"の高さを揃えるため)。#exd-items-listと同じ[id$="-list"]の多列に
+  // 5枚まとめて流し込むと、短いカードの下の余白へ次のカードが続けて詰まるため、空白が残らない。
+  // 2026-09-29 Shota指摘「この明細より上に持ってきて」: 日付・金額・支払・経理処理・変更履歴は
+  // 申請の概要情報であり、写真付きで長くなる明細(#exd-items-list)より先に読めるほうが分かりやすい
+  // ため、明細セクションより前に出す(以前は明細の後ろだった)。
+  html += '<div id="exd-info-list">';
+
+  // 2. 日付(必ず何の日付かを書く)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">日付</div>
+    <div class="field-group">
+      ${(full.items || []).length > 1
+    ? exdRow('利用日(実際に使った日)', '明細ごとに記載しています(下の「明細と領収書の原本」を見てください)')
+    : exdRow('利用日(実際に使った日)', exdEsc(usageText))}
+      ${exdRow('申請日(社員が申請した日)', dt(d.submitted_at))}
+      ${exdRow('登録日(システムに登録された日)', dt(d.registered_at))}
+      ${exdRow('承認日(承認された日)', dt(d.approved_at))}
+      ${exdRow('支払日(本人へ支払った日)', dOnly(d.paid_at))}
+      ${exdRow('経理処理日', dt(d.accounting_processed_at))}
+      ${exdRow('税理士送信日(税理士へ渡した日)', dt(d.tax_submitted_at))}
+    </div></div>`;
+
+  // 3. 金額
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">金額</div>
+    <div class="field-group">
+      ${exdRow('申請金額(明細の合計)', yen(a.requested))}
+      ${exdRow('承認金額(支払対象)', yen(a.approved))}
+      ${exdRow('支払済み金額', yen(a.paid))}
+      ${exdRow('未払い残額', yen(a.remaining))}
+      ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
+    </div></div>`;
+
+  // 7. 支払(承認とは別の状態)。承認済みでまだ未払いの間は、この節を画面の一番上(概要の直後)へ
+  // 移動して表示済み(payShowAtTop、上記2.の直前を参照)。ここで重複させるとid="exd-pay-submit"等が
+  // ページ内に2つできてwireExpenseRequestDetailの配線が壊れるため、その場合はここでは出さない。
+  // 支払済み、または社員本人の閲覧(mode !== 'admin')のときだけ、従来どおりここに表示する。
+  if (!payShowAtTop) {
+    html += `<div class="card exd-card">${paymentSectionHtml}</div>`;
+  }
+
+  // 8. 経理・税理士への提出
+  // 2026-09-06 独立レビュー指摘(重大5): 契約RPCの category.status は confirmed_by_accounting / confirmed_by_ai_high /
+  // needs_review_* を返し、'confirmed' は組み立て経路(expense_ledger_rows)だけが返す。両経路の「確定」を同じ扱いにする。
+  const CATEGORY_CONFIRMED = new Set(['confirmed', 'confirmed_by_accounting', 'confirmed_by_ai_high']);
+  const catUnconfirmed = full.items.filter((i) => i.category && i.category.status && !CATEGORY_CONFIRMED.has(i.category.status)).length;
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経理処理と税理士への提出</div>
+    <div class="field-group">
+      ${exdRowText('経理処理', EXD_ACCOUNTING_LABEL[acc.status] || acc.status)}
+      ${exdRow('経理処理日', dt(acc.processed_at))}
+      ${exdRowText('経理処理をした人', acc.processed_by)}
+      ${exdRowText('税理士への提出状態', TAX_SUBMISSION_STATE_LABEL[tax.state] || tax.state)}
+      ${exdRow('税理士 初回送信日', dt(tax.first_sent_at))}
+      ${exdRow('税理士 最終送信日', dt(tax.last_sent_at))}
+      ${exdRowText('追送回数', tax.send_count != null ? `${tax.send_count}回` : null)}
+      ${exdRowText('送信バッチID', tax.batch_id)}
+      ${exdRowText('勘定科目の確定状況', `${full.items.length - catUnconfirmed}/${full.items.length}件が確定済み`)}
+    </div>
+    ${catUnconfirmed > 0
+    ? '<div class="hint-inline"><span class="mini-tag warn">税理士へ出す前に経理の確定が必要です</span> 上の明細で勘定科目を確定してください。</div>'
+    : '<div class="hint-inline">勘定科目はすべて確定済みです。</div>'}
+  </div>`;
+
+  // 9. 変更履歴(いつ・誰が・何をしたか)
+  const hist = (ap.history || []).concat(pay.history || []);
+  html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">変更履歴(いつ・誰が・何をしたか)</div>';
+  html += hist.length === 0
+    ? '<div class="hint">この申請の変更履歴はまだありません。</div>'
+    : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}</span></div><div class="row2">${exdText(x.actor || x.actor_name)}・${(x.at || x.created_at) ? new Date(x.at || x.created_at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
+  html += '</div>';
+
+  html += '</div>'; // #exd-info-list(2,3,7,8,9)
+
   // 5. 明細と領収書の原本(勘定科目3層つき)
   html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">明細と領収書の原本</div>';
   if (!full.items.length) {
@@ -7483,95 +7574,6 @@ function renderExpenseRequestDetailHtml(full, opts) {
     html += '</div>'; // #exd-items-list
   }
   html += '</div>';
-
-  // 6. 経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付した場合のみ)。
-  // 2026-09-29 Shota指摘「この経費精算書って書いてるだけのやつなに」。「1件ずつの申請」
-  // (このカードの元になる添付が最初から存在しない申請方式)では、合計も申請者名も画像も
-  // すべて空になり、「添付されていません」しか出ない意味のないカードになっていた。
-  // 何も添付が無い場合はカードごと出さない(空のカードで画面を埋めない)。
-  const hasCoverSheet = !!(cover.file_id || cover.declared_total != null || cover.applicant_name || full.source === 'fallback');
-  if (hasCoverSheet) {
-    html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経費精算書(まとめ精算の表紙、社員が手書き用紙を撮影して添付したもの)</div>
-    <div class="field-group">
-      ${exdRowText('経費精算書に書かれた合計', cover.declared_total != null ? yen(cover.declared_total) : null)}
-      ${exdRowText('申請者名(経費精算書の記載)', cover.applicant_name)}
-    </div>
-    <div class="exd-cover-sheet-box">${cover.file_id || full.source === 'fallback'
-    ? `<img class="secure-proxy-thumb exd-cover-thumb" data-secure-kind="expense_cover_sheet" data-secure-id="${exdEsc(h.employee_request_id)}" alt="経費精算書" loading="lazy">`
-    : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
-  }
-
-  // 2〜9. 短い情報カード群(日付・金額・支払・経理処理・変更履歴)を1つのリストにまとめる。
-  // 2026-09-29 Shota指摘「なんでここ開けるん？空白って分からんの」: 日付(6行)と金額(4行)を
-  // 単純な2列グリッドで並べると、丈の低い金額カードの下に埋まらない空白ができる
-  // (grid/flexは"同じ行"の高さを揃えるため)。#exd-items-listと同じ[id$="-list"]の多列
-  // (column-count:3)に5枚まとめて流し込むと、短いカードの下の余白へ次のカードが続けて
-  // 詰まるため、空白が残らない。
-  html += '<div id="exd-info-list">';
-
-  // 2. 日付(必ず何の日付かを書く)
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">日付</div>
-    <div class="field-group">
-      ${(full.items || []).length > 1
-    ? exdRow('利用日(実際に使った日)', '明細ごとに記載しています(下の「明細と領収書の原本」を見てください)')
-    : exdRow('利用日(実際に使った日)', exdEsc(usageText))}
-      ${exdRow('申請日(社員が申請した日)', dt(d.submitted_at))}
-      ${exdRow('登録日(システムに登録された日)', dt(d.registered_at))}
-      ${exdRow('承認日(承認された日)', dt(d.approved_at))}
-      ${exdRow('支払日(本人へ支払った日)', dOnly(d.paid_at))}
-      ${exdRow('経理処理日', dt(d.accounting_processed_at))}
-      ${exdRow('税理士送信日(税理士へ渡した日)', dt(d.tax_submitted_at))}
-    </div></div>`;
-
-  // 3. 金額
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">金額</div>
-    <div class="field-group">
-      ${exdRow('申請金額(明細の合計)', yen(a.requested))}
-      ${exdRow('承認金額(支払対象)', yen(a.approved))}
-      ${exdRow('支払済み金額', yen(a.paid))}
-      ${exdRow('未払い残額', yen(a.remaining))}
-      ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
-    </div></div>`;
-
-  // 7. 支払(承認とは別の状態)。承認済みでまだ未払いの間は、この節を画面の一番上(概要の直後)へ
-  // 移動して表示済み(payShowAtTop、上記2.の直前を参照)。ここで重複させるとid="exd-pay-submit"等が
-  // ページ内に2つできてwireExpenseRequestDetailの配線が壊れるため、その場合はここでは出さない。
-  // 支払済み、または社員本人の閲覧(mode !== 'admin')のときだけ、従来どおりここに表示する。
-  if (!payShowAtTop) {
-    html += `<div class="card exd-card">${paymentSectionHtml}</div>`;
-  }
-
-  // 8. 経理・税理士への提出
-  // 2026-09-06 独立レビュー指摘(重大5): 契約RPCの category.status は confirmed_by_accounting / confirmed_by_ai_high /
-  // needs_review_* を返し、'confirmed' は組み立て経路(expense_ledger_rows)だけが返す。両経路の「確定」を同じ扱いにする。
-  const CATEGORY_CONFIRMED = new Set(['confirmed', 'confirmed_by_accounting', 'confirmed_by_ai_high']);
-  const catUnconfirmed = full.items.filter((i) => i.category && i.category.status && !CATEGORY_CONFIRMED.has(i.category.status)).length;
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">経理処理と税理士への提出</div>
-    <div class="field-group">
-      ${exdRowText('経理処理', EXD_ACCOUNTING_LABEL[acc.status] || acc.status)}
-      ${exdRow('経理処理日', dt(acc.processed_at))}
-      ${exdRowText('経理処理をした人', acc.processed_by)}
-      ${exdRowText('税理士への提出状態', TAX_SUBMISSION_STATE_LABEL[tax.state] || tax.state)}
-      ${exdRow('税理士 初回送信日', dt(tax.first_sent_at))}
-      ${exdRow('税理士 最終送信日', dt(tax.last_sent_at))}
-      ${exdRowText('追送回数', tax.send_count != null ? `${tax.send_count}回` : null)}
-      ${exdRowText('送信バッチID', tax.batch_id)}
-      ${exdRowText('勘定科目の確定状況', `${full.items.length - catUnconfirmed}/${full.items.length}件が確定済み`)}
-    </div>
-    ${catUnconfirmed > 0
-    ? '<div class="hint-inline"><span class="mini-tag warn">税理士へ出す前に経理の確定が必要です</span> 上の明細で勘定科目を確定してください。</div>'
-    : '<div class="hint-inline">勘定科目はすべて確定済みです。</div>'}
-  </div>`;
-
-  // 9. 変更履歴(いつ・誰が・何をしたか)
-  const hist = (ap.history || []).concat(pay.history || []);
-  html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">変更履歴(いつ・誰が・何をしたか)</div>';
-  html += hist.length === 0
-    ? '<div class="hint">この申請の変更履歴はまだありません。</div>'
-    : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}</span></div><div class="row2">${exdText(x.actor || x.actor_name)}・${(x.at || x.created_at) ? new Date(x.at || x.created_at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
-  html += '</div>';
-
-  html += '</div>'; // #exd-info-list(2,3,7,8,9)
 
   if (full.source === 'fallback') {
     html += '<div class="hint-inline">※ この環境には経費申請の統合RPC(admin_get_expense_request_full)がまだ無いため、既存データから組み立てて表示しています。支払方法・支払処理者・経理処理日などが「-」になります。</div>';

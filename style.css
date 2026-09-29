@@ -1198,9 +1198,13 @@ button.link {
      [id$="-list"]の固定column-count:2のせいで、mainを広げても2列の間延びにしかならない。
      column-widthへ変えて、空いている横幅ぶんだけ列数が自動で増えるようにする。 */
   body:has(#screen-loan-admin.active) main { max-width: 1400px; }
-  #loan-admin-list { column-width: 260px; column-count: initial; }
+  #loan-admin-list, #exd-items-list { column-width: 260px; column-count: initial; }
   /* 2026-09-29 Shota指摘「明細２を右における」「右の空白を空けるな」: 経費申請の詳細
-     (明細が複数件並ぶ#exd-items-list)も、既存の申請管理等と同じ考え方でPC幅を広く使う。 */
+     (明細が複数件並ぶ#exd-items-list)も、既存の申請管理等と同じ考え方でPC幅を広く使う。
+     2026-09-29再指摘「なんでこの空白使用しないの、横に明細123456って並べたらいいんじゃないん」:
+     [id$="-list"]の固定column-count:3のままだと、明細がそれ以下の枚数のときに列が余って
+     空白が残る。#loan-admin-listと同じcolumn-width指定へ変え、空いている横幅ぶんだけ
+     自動で列数(4列・5列…)が増えるようにする。 */
   body:has(#screen-request-detail.active) main,
   body:has(#screen-my-request-detail.active) main { max-width: 1400px; }
   /* 2026-09-29 Shota指摘「右の黒いとこ狭い、もっと右の欄拡げた方が見やすい」: 配置カレンダーは
@@ -1225,7 +1229,7 @@ button.link {
     column-count: initial;
   }
   /* column-countの3固定を打ち消し、768px側のcolumn-widthだけで自動的に列数を決めさせる */
-  #loan-admin-list { column-count: initial; }
+  #loan-admin-list, #exd-items-list { column-count: initial; }
   .home-card-grid, .main-menu-grid, .dash-card-grid, .supply-select-grid, .menu-list {
     grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   }
