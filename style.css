@@ -1658,17 +1658,20 @@ body.assignment-calendar-open .app-header { display: none; }
    すぐ下に浮かせて、どこまでスクロールしても押せるようにする。 */
 /* 2026-09-29 v2: 半透明+blurの浮き上がるピルにしたところ、Shota指摘(原文)「は？こっちがうえやろ」
    の通り、下からスクロールしてくる表(経費精算書等)の文字が透けて重なって見えた。透明度・blurを
-   やめ、完全な不透明色にして後ろの内容を完全に隠す。画面幅いっぱいの帯にし、左右の隙間から
-   後ろの文字が漏れないようにbox-shadowで画面外まで色を伸ばす(paddingで幅を広げる代わりの
-   一般的な手法。mainの左右paddingが768px境界で16px/32pxと変わるため、negative marginでの
-   幅計算に依存しないやり方を選んだ)。 */
+   やめ、完全な不透明色にした。 */
+/* 2026-09-29 v3緊急修正: v2でbox-shadowのspread(998px)を画面外まで色を伸ばす目的で使ったが、
+   spreadは上下にも同じだけ広がるため、実際には画面のほぼ全体を覆う巨大な不透明の四角形になり、
+   経費申請の詳細画面が(戻るボタンの文字以外)まるごと見えなくなる重大な不具合を起こした
+   (Shota報告「なめてんの 確認したんか」、実機の実際の画面遷移で見えていなかった。前回の
+   確認はボタン自身の位置しか見ておらず、画面全体を実際に見ていなかった)。box-shadowでの
+   画面外への拡張はやめ、main自体の横幅いっぱい(既存のmain左右paddingの内側)に留める
+   安全な形に戻す。 */
 #screen-request-detail > .back-link:first-child,
 #screen-my-request-detail > .back-link:first-child {
   position: sticky; top: 62px; z-index: 9; display: block; width: 100%;
   padding: 10px 0; box-sizing: border-box;
   background: var(--card-bg-solid);
-  box-shadow: -1000px 0 0 998px var(--card-bg-solid), 1000px 0 0 998px var(--card-bg-solid),
-    0 6px 10px -6px oklch(0 0 0 / 45%);
+  box-shadow: 0 6px 10px -6px oklch(0 0 0 / 45%);
 }
 .exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
