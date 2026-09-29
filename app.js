@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v227-staging';
-const BUILD_DEPLOYED_AT = '2026-09-29T04:03:28.800Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v228-staging';
+const BUILD_DEPLOYED_AT = '2026-09-29T07:40:40.521Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14384,6 +14384,7 @@ function setDailyReportView(mode) {
   document.querySelectorAll('.dr-view-tab').forEach((btn) => btn.classList.toggle('active', btn.dataset.view === mode));
   document.getElementById('my-daily-report-list-view').style.display = mode === 'list' ? 'block' : 'none';
   document.getElementById('my-daily-report-calendar-view').style.display = mode === 'calendar' ? 'block' : 'none';
+  document.getElementById('my-daily-report-ledger-view').style.display = mode === 'ledger' ? 'block' : 'none';
   if (mode === 'calendar') {
     if (dailyReportCalYear == null) {
       const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
@@ -14391,6 +14392,51 @@ function setDailyReportView(mode) {
       dailyReportCalMonth = now.getMonth() + 1;
     }
     loadDailyReportCalendar();
+  } else if (mode === 'ledger') {
+    loadDailyReportLedger();
+  }
+}
+
+// 出勤簿(2026-09-29 Shota指示「スプレッドシートの出勤簿のように反映させたい」)。
+// 新しいRPCは作らず、リスト表示と同じget_my_daily_reportsを1日1行の表として並べる
+// (現場・区分・人工・残業・備考はスプレッドシートの出勤簿タブに書かれている内容と同じ)。
+// 月末合計は既存の給与期間集計(#my-daily-report-summary、全タブ共通で上に出ている)をそのまま使う。
+async function loadDailyReportLedger() {
+  const session = getSession();
+  initDailyReportPeriodIfNeeded();
+  const el = document.getElementById('my-daily-report-ledger');
+  el.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const { start, end } = computeDailyReportPeriodBounds(dailyReportPeriodYear, dailyReportPeriodMonth, dailyReportSummaryPeriodType);
+    const rows = await rpc('get_my_daily_reports', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+    if (!rows || rows.length === 0) { el.innerHTML = '<div class="empty-state">この期間の日報はありません</div>'; return; }
+    const sorted = rows.slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
+    el.innerHTML = `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
+      <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>残業</th><th>備考</th></tr></thead>
+      <tbody>${sorted.map((r) => {
+    if (r.report_status === 'cancelled') {
+      return `<tr class="is-cancelled"><td>${r.report_date}</td><td colspan="4">取消済み</td><td></td></tr>`;
+    }
+    if (r.is_system_holiday) {
+      return `<tr class="is-holiday-auto"><td>${r.report_date}</td><td colspan="4">休日（システム自動登録）</td><td></td></tr>`;
+    }
+    const remarks = [];
+    if (r.is_early_commute) remarks.push(`通勤早出${Number(r.early_commute_hours)}h`);
+    if (r.is_commute_overtime) remarks.push(`通勤残業${Number(r.commute_overtime_hours)}h`);
+    if (r.is_over_100km) remarks.push('通勤100km超');
+    if (r.is_special) remarks.push('管理者確認中');
+    return `<tr>
+        <td>${r.report_date}</td>
+        <td>${exdEsc(r.site_names.join('・'))}</td>
+        <td>${exdEsc(r.work_types.join('・'))}</td>
+        <td class="numeral">${Number(r.total_headcount).toFixed(1)}</td>
+        <td class="numeral">${Number(r.overtime_hours) > 0 ? Number(r.overtime_hours) : ''}</td>
+        <td>${exdEsc(remarks.join('・'))}</td>
+      </tr>`;
+  }).join('')}</tbody>
+    </table></div>`;
+  } catch (e) {
+    el.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
 }
 

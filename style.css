@@ -407,6 +407,16 @@ button.link {
 .status-badge.rejected, .history-item .status-badge.rejected { background: var(--danger-bg); color: var(--danger); }
 .status-badge.warn, .history-item .status-badge.warn { background: var(--warn-bg); color: var(--warn); }
 
+/* 出勤簿(2026-09-29追加): スプレッドシートの出勤簿タブと同じ1日1行の表。狭い画面でも
+   表自体は崩さず、必要ならラップ側だけ横スクロールさせる。 */
+.attendance-ledger-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-bg); }
+.attendance-ledger-table { width: 100%; border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
+.attendance-ledger-table th, .attendance-ledger-table td { padding: 8px 10px; text-align: left; border-bottom: 1px solid var(--border); }
+.attendance-ledger-table thead th { position: sticky; top: 0; background: var(--card-bg-solid); color: var(--text-muted); font-size: 11px; font-weight: 700; }
+.attendance-ledger-table tbody tr:last-child td { border-bottom: none; }
+.attendance-ledger-table td.numeral, .attendance-ledger-table th:nth-child(4), .attendance-ledger-table th:nth-child(5) { font-variant-numeric: tabular-nums; text-align: right; }
+.attendance-ledger-table tr.is-cancelled td, .attendance-ledger-table tr.is-holiday-auto td { color: var(--text-muted); }
+
 /* 領収書・経費精算書の画像タップ拡大表示(申請詳細画面、社員本人・管理者共通) */
 .mrd-receipt-thumb {
   width: 72px; height: 72px; object-fit: cover; border-radius: var(--radius-sm); border: 1px solid var(--border);

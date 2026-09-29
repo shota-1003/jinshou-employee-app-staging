@@ -881,10 +881,16 @@
     <div class="dr-view-toggle" style="margin:10px 0;">
       <button type="button" class="secondary dr-view-tab" data-view="list">リスト表示</button>
       <button type="button" class="secondary dr-view-tab" data-view="calendar">カレンダー表示</button>
+      <button type="button" class="secondary dr-view-tab" data-view="ledger">出勤簿</button>
     </div>
 
     <div id="my-daily-report-list-view">
       <div id="my-daily-report-list"></div>
+    </div>
+
+    <div id="my-daily-report-ledger-view" style="display:none;">
+      <div class="hint-inline" style="margin-bottom:8px;">スプレッドシートの出勤簿と同じ、この給与期間(または今月)の1日ごとの記録です。</div>
+      <div id="my-daily-report-ledger"></div>
     </div>
 
     <div id="my-daily-report-calendar-view" style="display:none;">
