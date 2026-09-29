@@ -1656,12 +1656,19 @@ body.assignment-calendar-open .app-header { display: none; }
    いけない」。経費申請の詳細は縦に長く、戻るボタン(画面の一番上、1個目の要素)まで毎回
    スクロールし直す必要があった。app-header(社員ポータルの帯、position:sticky top:0)の
    すぐ下に浮かせて、どこまでスクロールしても押せるようにする。 */
+/* 2026-09-29 v2: 半透明+blurの浮き上がるピルにしたところ、Shota指摘(原文)「は？こっちがうえやろ」
+   の通り、下からスクロールしてくる表(経費精算書等)の文字が透けて重なって見えた。透明度・blurを
+   やめ、完全な不透明色にして後ろの内容を完全に隠す。画面幅いっぱいの帯にし、左右の隙間から
+   後ろの文字が漏れないようにbox-shadowで画面外まで色を伸ばす(paddingで幅を広げる代わりの
+   一般的な手法。mainの左右paddingが768px境界で16px/32pxと変わるため、negative marginでの
+   幅計算に依存しないやり方を選んだ)。 */
 #screen-request-detail > .back-link:first-child,
 #screen-my-request-detail > .back-link:first-child {
-  position: sticky; top: 66px; z-index: 9; width: fit-content;
-  background: color-mix(in oklch, var(--card-bg-solid) 92%, transparent);
-  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
-  border-radius: var(--radius-pill); box-shadow: var(--shadow-sm); padding: 6px 12px 6px 8px;
+  position: sticky; top: 62px; z-index: 9; display: block; width: 100%;
+  padding: 10px 0; box-sizing: border-box;
+  background: var(--card-bg-solid);
+  box-shadow: -1000px 0 0 998px var(--card-bg-solid), 1000px 0 0 998px var(--card-bg-solid),
+    0 6px 10px -6px oklch(0 0 0 / 45%);
 }
 .exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
