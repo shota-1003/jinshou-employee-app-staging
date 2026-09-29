@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v226-staging';
-const BUILD_DEPLOYED_AT = '2026-09-29T03:41:39.916Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v227-staging';
+const BUILD_DEPLOYED_AT = '2026-09-29T03:59:42.886Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7474,11 +7474,11 @@ function renderExpenseRequestDetailHtml(full, opts) {
   </div>`;
 
   // 9. 変更履歴(いつ・誰が・何をしたか)
-  const hist = (ap.history || []).concat(pay.history || []);
+  const hist = groupAuditHistory((ap.history || []).concat(pay.history || []));
   html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">変更履歴(いつ・誰が・何をしたか)</div>';
   html += hist.length === 0
     ? '<div class="hint">この申請の変更履歴はまだありません。</div>'
-    : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}</span></div><div class="row2">${exdText(x.actor || x.actor_name)}・${(x.at || x.created_at) ? new Date(x.at || x.created_at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
+    : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}${x.count > 1 ? `(${x.count}件)` : ''}</span></div><div class="row2">${exdText(x.actor)}・${x.at ? new Date(x.at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
   html += '</div>';
 
   html += '</div>'; // #exd-info-list(2,3,7,8,9)
@@ -15318,6 +15318,25 @@ const AUDIT_ACTION_LABEL = {
   self_approval_exempt_revoked: '承認免除の解除(廃止済みの旧機能)',
 };
 
+// 変更履歴の表示を「同じ操作・同じ人・同じ日時」でまとめる。
+// 2026-09-29 Shota指摘「この見た目もう少しすっきりさせたい」: 明細が複数ある申請では
+// 「勘定科目をまとめて確定する」等のボタン一発で明細の件数ぶん(例:14件)のaudit_logsが
+// 生成され、変更履歴に同じ操作が同じ時刻で延々と並んでいた(audit_logsは明細1件ずつの
+// 実際の操作記録のため、これ自体は正しいデータであり削除・統合はしない。表示だけをまとめる)。
+function groupAuditHistory(list) {
+  const groups = [];
+  const index = new Map();
+  (list || []).forEach((x) => {
+    const action = x.action;
+    const actor = x.actor || x.actor_name;
+    const at = x.at || x.created_at;
+    const key = `${action}|${actor}|${at}`;
+    const existing = index.get(key);
+    if (existing) { existing.count += 1; } else { const g = { action, actor, at, count: 1 }; index.set(key, g); groups.push(g); }
+  });
+  return groups;
+}
+
 // 一覧の「承認済み」バッジの右に付ける自動承認タグ(該当しなければ空文字)。
 function areqAutoApprovalTag(row) {
   const m = areqApprovalMethods.get(String(row.source_id));
@@ -15473,9 +15492,10 @@ async function loadRequestDetailContent() {
     const targetTable = sourceType === 'entertainment_preapproval' ? 'entertainment_preapprovals'
       : sourceType === 'qualification' ? 'employee_qualifications' : 'employee_requests';
     const history = await rpc('admin_get_request_audit_log', { p_admin_employee_code: session.employeeCode, p_target_table: targetTable, p_target_id: Number(sourceId) }).catch(() => []);
+    const historyGrouped = groupAuditHistory(history);
     const historyEl = document.getElementById('rdetail-history');
-    historyEl.innerHTML = history.length === 0 ? '<div class="hint">変更履歴はありません。</div>' : history.map((h) => `
-      <div class="change-request-item"><div class="row1"><span>${AUDIT_ACTION_LABEL[h.action] || h.action}</span></div><div class="row2">${h.actor_name}・${new Date(h.created_at).toLocaleString('ja-JP')}</div></div>
+    historyEl.innerHTML = historyGrouped.length === 0 ? '<div class="hint">変更履歴はありません。</div>' : historyGrouped.map((h) => `
+      <div class="change-request-item"><div class="row1"><span>${AUDIT_ACTION_LABEL[h.action] || h.action}${h.count > 1 ? `(${h.count}件)` : ''}</span></div><div class="row2">${h.actor}・${new Date(h.at).toLocaleString('ja-JP')}</div></div>
     `).join('');
 
     renderRequestDetailActions(sourceType, r);
