@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v227-staging';
-const BUILD_DEPLOYED_AT = '2026-09-29T03:59:42.886Z';
+const BUILD_DEPLOYED_AT = '2026-09-29T04:03:28.800Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -15306,6 +15306,7 @@ const AUDIT_ACTION_LABEL = {
   expense_payment_recorded: '支払いを記録',
   expense_payment_scheduled: '支払予定日を記録',
   expense_account_category_finalized: '勘定科目を確定',
+  expense_original_receipt_collected: '領収書の原本を回収した',
   entertainment_auto_approved_executive: '接待事前申請の自動承認(承認免除ルール)',
   request_cancelled_by_applicant: '申請者本人による取消',
   paid_leave_request_cancelled_by_employee: '有給申請の本人取消',
