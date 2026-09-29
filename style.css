@@ -1652,6 +1652,17 @@ body.assignment-calendar-open .app-header { display: none; }
   .exd-top-split { display: grid; grid-template-columns: minmax(380px, 55%) 1fr; gap: 16px; align-items: start; margin-bottom: 10px; }
   .exd-top-split > .exd-top-side { position: sticky; top: 8px; margin-bottom: 0; }
 }
+/* 2026-09-29 Shota指摘「支払い管理みたいに左うえに戻るほしい」「この戻るボタン上までいかないと
+   いけない」。経費申請の詳細は縦に長く、戻るボタン(画面の一番上、1個目の要素)まで毎回
+   スクロールし直す必要があった。app-header(社員ポータルの帯、position:sticky top:0)の
+   すぐ下に浮かせて、どこまでスクロールしても押せるようにする。 */
+#screen-request-detail > .back-link:first-child,
+#screen-my-request-detail > .back-link:first-child {
+  position: sticky; top: 66px; z-index: 9; width: fit-content;
+  background: color-mix(in oklch, var(--card-bg-solid) 92%, transparent);
+  backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  border-radius: var(--radius-pill); box-shadow: var(--shadow-sm); padding: 6px 12px 6px 8px;
+}
 .exd-card .field-row { padding: 7px 2px; align-items: flex-start; gap: 10px; font-size: 13.5px; }
 .exd-card .field-label { flex: 1 1 auto; min-width: 0; word-break: break-word; }
 .exd-card .field-value { flex: 0 1 auto; min-width: 0; text-align: right; word-break: break-word; }
