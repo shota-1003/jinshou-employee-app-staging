@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v222-staging';
-const BUILD_DEPLOYED_AT = '2026-09-28T18:19:49.926Z';
+const BUILD_DEPLOYED_AT = '2026-09-29T02:49:19.701Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7392,35 +7392,6 @@ function renderExpenseRequestDetailHtml(full, opts) {
 
   html += '</div>'; // .exd-top-split(経費精算書+この経費申請の全体+承認)
 
-  // 2〜3. 短い情報カード群(PC幅では2列に並べる、exd-info-grid参照)
-  html += '<div class="exd-info-grid">';
-
-  // 2. 日付(必ず何の日付かを書く)
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">日付</div>
-    <div class="field-group">
-      ${(full.items || []).length > 1
-    ? exdRow('利用日(実際に使った日)', '明細ごとに記載しています(下の「明細と領収書の原本」を見てください)')
-    : exdRow('利用日(実際に使った日)', exdEsc(usageText))}
-      ${exdRow('申請日(社員が申請した日)', dt(d.submitted_at))}
-      ${exdRow('登録日(システムに登録された日)', dt(d.registered_at))}
-      ${exdRow('承認日(承認された日)', dt(d.approved_at))}
-      ${exdRow('支払日(本人へ支払った日)', dOnly(d.paid_at))}
-      ${exdRow('経理処理日', dt(d.accounting_processed_at))}
-      ${exdRow('税理士送信日(税理士へ渡した日)', dt(d.tax_submitted_at))}
-    </div></div>`;
-
-  // 3. 金額
-  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">金額</div>
-    <div class="field-group">
-      ${exdRow('申請金額(明細の合計)', yen(a.requested))}
-      ${exdRow('承認金額(支払対象)', yen(a.approved))}
-      ${exdRow('支払済み金額', yen(a.paid))}
-      ${exdRow('未払い残額', yen(a.remaining))}
-      ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
-    </div></div>`;
-
-  html += '</div>'; // .exd-info-grid(2〜3、承認はexd-top-sideへ移動済み)
-
   // 5. 明細と領収書の原本(勘定科目3層つき)
   html += '<div class="card exd-card"><div class="form-title" style="font-size:15px;">明細と領収書の原本</div>';
   if (!full.items.length) {
@@ -7530,8 +7501,37 @@ function renderExpenseRequestDetailHtml(full, opts) {
     : '<div class="hint-inline">この申請に経費精算書は添付されていません。</div>'}</div></div>`;
   }
 
-  // 7〜9. 短い情報カード群その2(PC幅では2列に並べる、exd-info-grid参照)
-  html += '<div class="exd-info-grid">';
+  // 2〜9. 短い情報カード群(日付・金額・支払・経理処理・変更履歴)を1つのリストにまとめる。
+  // 2026-09-29 Shota指摘「なんでここ開けるん？空白って分からんの」: 日付(6行)と金額(4行)を
+  // 単純な2列グリッドで並べると、丈の低い金額カードの下に埋まらない空白ができる
+  // (grid/flexは"同じ行"の高さを揃えるため)。#exd-items-listと同じ[id$="-list"]の多列
+  // (column-count:3)に5枚まとめて流し込むと、短いカードの下の余白へ次のカードが続けて
+  // 詰まるため、空白が残らない。
+  html += '<div id="exd-info-list">';
+
+  // 2. 日付(必ず何の日付かを書く)
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">日付</div>
+    <div class="field-group">
+      ${(full.items || []).length > 1
+    ? exdRow('利用日(実際に使った日)', '明細ごとに記載しています(下の「明細と領収書の原本」を見てください)')
+    : exdRow('利用日(実際に使った日)', exdEsc(usageText))}
+      ${exdRow('申請日(社員が申請した日)', dt(d.submitted_at))}
+      ${exdRow('登録日(システムに登録された日)', dt(d.registered_at))}
+      ${exdRow('承認日(承認された日)', dt(d.approved_at))}
+      ${exdRow('支払日(本人へ支払った日)', dOnly(d.paid_at))}
+      ${exdRow('経理処理日', dt(d.accounting_processed_at))}
+      ${exdRow('税理士送信日(税理士へ渡した日)', dt(d.tax_submitted_at))}
+    </div></div>`;
+
+  // 3. 金額
+  html += `<div class="card exd-card"><div class="form-title" style="font-size:15px;">金額</div>
+    <div class="field-group">
+      ${exdRow('申請金額(明細の合計)', yen(a.requested))}
+      ${exdRow('承認金額(支払対象)', yen(a.approved))}
+      ${exdRow('支払済み金額', yen(a.paid))}
+      ${exdRow('未払い残額', yen(a.remaining))}
+      ${a.matched === false ? exdRow('金額の一致', '<span class="mini-tag warn">申請額と承認額が一致していません</span>') : ''}
+    </div></div>`;
 
   // 7. 支払(承認とは別の状態)。承認済みでまだ未払いの間は、この節を画面の一番上(概要の直後)へ
   // 移動して表示済み(payShowAtTop、上記2.の直前を参照)。ここで重複させるとid="exd-pay-submit"等が
@@ -7571,7 +7571,7 @@ function renderExpenseRequestDetailHtml(full, opts) {
     : hist.map((x) => `<div class="change-request-item"><div class="row1"><span>${exdEsc((typeof AUDIT_ACTION_LABEL !== 'undefined' && AUDIT_ACTION_LABEL[x.action]) || x.action)}</span></div><div class="row2">${exdText(x.actor || x.actor_name)}・${(x.at || x.created_at) ? new Date(x.at || x.created_at).toLocaleString('ja-JP') : '-'}</div></div>`).join('');
   html += '</div>';
 
-  html += '</div>'; // .exd-info-grid(7〜9)
+  html += '</div>'; // #exd-info-list(2,3,7,8,9)
 
   if (full.source === 'fallback') {
     html += '<div class="hint-inline">※ この環境には経費申請の統合RPC(admin_get_expense_request_full)がまだ無いため、既存データから組み立てて表示しています。支払方法・支払処理者・経理処理日などが「-」になります。</div>';

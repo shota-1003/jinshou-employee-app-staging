@@ -1638,16 +1638,12 @@ body.assignment-calendar-open .app-header { display: none; }
    開いても同じ項目が同じ見た目で出る。iPhone 375px で横に溢れないよう、ラベルと値は
    折り返し可・値は右寄せで幅を分け合う。 */
 .exd-card { padding: 12px 14px; margin-bottom: 10px; }
-/* 2026-09-29 Shota指摘: PC幅の広い画面で経費申請詳細が縦に長すぎ、右側が空欄のまま。
-   短い情報カード(この経費申請の全体・日付・金額・承認・支払・経理処理と税理士への提出・変更履歴)
-   だけを対象に、900px以上では2列に並べて縦スクロールを減らす。明細一覧・経費精算書等の
-   横に広いブロックはexd-info-gridの対象外のまま(モバイルは従来通り縦一列、display:contents
-   でラッパー自体は見た目に影響しない)。 */
-.exd-info-grid { display: contents; }
-@media (min-width: 900px) {
-  .exd-info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; align-items: start; }
-  .exd-info-grid > .exd-card { margin-bottom: 0; }
-}
+/* 2026-09-29追記: 日付・金額・支払・経理処理・変更履歴の短いカード群は、当初display:gridの
+   2列(exd-info-grid)で並べていたが、日付(6行)と金額(4行)のように高さが違うカードを
+   grid/flexで並べると「同じ行」の高さに揃えられ、丈の低い側の下に空白が残った
+   (Shota指摘「なんでここ開けるん？空白って分からんの」)。#exd-items-listと同じ
+   [id$="-list"]の多列(column-count:3)に5枚まとめて流し込む方式(id="exd-info-list",
+   renderExpenseRequestDetailHtml参照)へ変更し、このgridクラスは使わなくなった。
 /* 2026-09-29 Shota指摘「この時点で誰とか見たい」「領収書じゃなくてこの用紙の横ってことだし」。
    経費精算書(税理士へ渡す用紙)の横に、申請の概要(誰との交際費か含む)を並べる。
    モバイルは経費精算書→概要の縦一列のまま(DOM順を変えていない)。 */
