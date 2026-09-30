@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v229-staging';
-const BUILD_DEPLOYED_AT = '2026-09-30T15:16:11.889Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v230-staging';
+const BUILD_DEPLOYED_AT = '2026-09-30T15:49:12.331Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -5615,6 +5615,10 @@ async function renderAdminTodayTasks(session) {
       // 絞り込みは共通Navigationの nav.filter に載せる(画面ごとの一時変数を増やさない)。
       const destFilter = TASK_TO_DEST_FILTER[btn.dataset.taskKey];
       if (destFilter) { showScreen(btn.dataset.nav, { nav: { ...nav, filter: destFilter } }); return; }
+      // 外注日報の確認待ち: カードの件数(admin_home_today_tasks)は日付を絞らず
+      // worker_type='subcontractor' AND report_status='submitted' だけで数えている。
+      // 遷移先も同じ条件で開く(日付を当日に絞ると件数と食い違う)。2026-10-01追加。
+      if (btn.dataset.taskKey === 'subcontractor_pending_confirmation') { openSubcontractorPendingConfirmation(); return; }
       // 外注 出勤報告不足など、日報管理画面そのものへ行くカードも当日で開く
       // (前回見ていた過去日が残っていると、カード件数と画面の数字がずれる)。
       if (btn.dataset.nav === 'daily-report-management') drmSelectedDate = navDate;
@@ -15942,6 +15946,10 @@ async function doRevokeAdminRole(employeeCode, roleType) {
 
 let drmFilters = { name: '', workerType: '', status: '', dateFrom: '', dateTo: '', site: null, companyId: '' };
 let drmSelectedDate = null; // 日報管理で選択中の1日(YYYY-MM-DD)。日付ナビで前後移動する。
+// 他画面(管理ホーム「今日やること」等)から日報管理画面へ遷移する際、loadDailyReportManagement()
+// 自身の既定リセット(本日1日・絞り込みなし)を上書きしたい場合に使う1回限りの予約。
+// showScreen→SCREEN_ENTER_HOOKの非同期実行と競合しないよう、リセット後にloadDailyReportManagement側で読む。
+let drmPendingFilterOverride = null;
 
 // 日報管理の日付ナビ(＜ 2026年9月2日(水) ＞ 今日)。選択日を1日だけ表示する主軸。
 function renderDrmDateNav() {
@@ -16168,6 +16176,16 @@ async function loadDailyReportManagement() {
   document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
   document.querySelectorAll('#drm-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
 
+  // 他画面からの1回限りの絞り込み予約があれば、既定リセットの直後にそれで上書きする。
+  if (drmPendingFilterOverride) {
+    const ov = drmPendingFilterOverride; drmPendingFilterOverride = null;
+    Object.assign(drmFilters, ov);
+    document.getElementById('drm-date-from').value = drmFilters.dateFrom;
+    document.getElementById('drm-date-to').value = drmFilters.dateTo;
+    document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.workerType || '') === (ov.workerType || '')));
+    document.querySelectorAll('#drm-status-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.status || '') === (ov.status || '')));
+  }
+
   loadDrmMissingBanner();
 
   try {
@@ -16344,6 +16362,18 @@ function applyDrmCardFilter(cardKey) {
   loadDailyReportManagementList();
   const listEl = document.getElementById('drm-list');
   if (listEl) listEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// 外注日報の確認待ち(2026-10-01追加、Shota指示「4手順を毎回組み合わせるのは難しすぎる」への
+// 対応)。今日やることの管理ホームカード1回タップで、日報管理画面を「外注・提出済み・期間指定なし」
+// まで絞り込んだ状態で直接開く(admin_home_today_tasksのsubcontractor_pending_confirmation件数
+// とまったく同じ述語=一覧の母集団を一致させる)。
+function openSubcontractorPendingConfirmation() {
+  // loadDailyReportManagement()自身が画面に入るたびdrmFiltersを既定(本日1日・絞り込みなし)へ
+  // リセットするため、ここで直接drmFiltersへ書いても遷移直後に上書きされて消える。
+  // 予約(drmPendingFilterOverride)へ積んでおき、リセット処理の直後に適用してもらう。
+  drmPendingFilterOverride = { workerType: 'subcontractor', status: 'submitted', dateFrom: '', dateTo: '' };
+  showScreen('daily-report-management');
 }
 
 function drmGroupKey(r) {
