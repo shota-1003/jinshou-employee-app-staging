@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v228-staging';
-const BUILD_DEPLOYED_AT = '2026-09-29T07:40:40.521Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v229-staging';
+const BUILD_DEPLOYED_AT = '2026-09-30T15:14:52.641Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -16538,6 +16538,10 @@ function renderDrmAll() {
     const site1 = g.rows[0] || {};
     const site2 = g.rows[1] || {};
     const personName = f.worker_type === 'subcontractor' ? f.subcontractor_worker_name : f.employee_name;
+    // 外注で個人名が無いのは、外注ポータルの本人提出ではなく社員が会社の人数だけ代理入力した
+    // ケース(subcontractor_worker_id未設定)であり、データ不備ではない。「(不明)」だと
+    // エラーのように見えるため区別する(2026-10-01 Shota指示)。
+    const personNameLabel = personName || (f.worker_type === 'subcontractor' ? '代理管理者報告' : '(不明)');
     const b = drmStatusBadge(f);
     const reflected = g.rows.every((r) => r.reflected_to_sheet_at);
     return `
@@ -16545,7 +16549,7 @@ function renderDrmAll() {
         <td><input type="checkbox" class="drm-row-check" data-key="${g.key}" ${drmSelected.has(g.key) ? 'checked' : ''}></td>
         <td>${f.report_date}</td>
         <td>${f.worker_type === 'subcontractor' ? '外注' : '社員'}</td>
-        <td>${personName || '(不明)'}</td>
+        <td>${personNameLabel}</td>
         <td>${f.subcontractor_company_name || '-'}</td>
         <td>${site1.site_name || '-'}</td>
         <td>${site1.work_type || '-'}</td>
