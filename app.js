@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v232-staging';
-const BUILD_DEPLOYED_AT = '2026-09-30T22:28:22.146Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v233-staging';
+const BUILD_DEPLOYED_AT = '2026-09-30T22:43:37.214Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -16163,34 +16163,42 @@ function drmLateTagHtml(rows) {
   return list.some((r) => drmIsLateSubmission(r)) ? '<span class="mini-tag muted drm-late-tag" title="勤務日から日をおいて提出された日報(照合結果には影響しません)">後日提出</span>' : '';
 }
 
-async function loadDailyReportManagement() {
+async function loadDailyReportManagement(opts) {
   const session = getSession();
-  // 日報管理は「日付」を主軸に。既定は本日の1日だけを表示(過去・未来日は日付ナビで移動)。
-  // 未初期化(null)・壊れた値は必ず本日へ落とす(normalizeNavDate が唯一の関門)。
-  drmSelectedDate = normalizeNavDate(drmSelectedDate);
-  drmFilters = { name: '', workerType: '', status: '', dateFrom: drmSelectedDate, dateTo: drmSelectedDate, site: null, companyId: '' };
-  drmSelected.clear();
-  document.getElementById('drm-search-name').value = '';
-  document.getElementById('drm-search-site').value = '';
-  document.getElementById('drm-selected-site-label').style.display = 'none';
-  document.getElementById('drm-site-candidates').innerHTML = '';
-  document.getElementById('drm-date-from').value = drmSelectedDate;
-  document.getElementById('drm-date-to').value = drmSelectedDate;
-  renderDrmDateNav();
-  document.getElementById('drm-advanced').style.display = 'none';
-  document.getElementById('drm-missing-today-list').style.display = 'none';
-  document.getElementById('drm-missing-toggle').textContent = '未提出者を表示する';
-  document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
-  document.querySelectorAll('#drm-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+  // 「戻る」(ブラウザ/スワイプの戻る・戻るボタン経由のpopstate)でこの画面へ戻ってきた場合は、
+  // 日付・絞り込み(drmFilters/drmSelectedDate)を本日へ巻き戻さない。以前はここへ戻るたびに
+  // 既定リセットが毎回走り、「外注の確認待ち一覧を開く→1件を確認して戻る→最初の絞り込みが
+  // 消えて本日1日に戻る」という不具合になっていた(2026-10-01 Shota報告)。フィルター自体は
+  // 画面遷移をしても消えないモジュール変数のままなので、戻ってきたときはそれをそのまま使い、
+  // データだけ最新へ再読込する。
+  if (!(opts && (opts.fromPopstate || opts.preserveFilters))) {
+    // 日報管理は「日付」を主軸に。既定は本日の1日だけを表示(過去・未来日は日付ナビで移動)。
+    // 未初期化(null)・壊れた値は必ず本日へ落とす(normalizeNavDate が唯一の関門)。
+    drmSelectedDate = normalizeNavDate(drmSelectedDate);
+    drmFilters = { name: '', workerType: '', status: '', dateFrom: drmSelectedDate, dateTo: drmSelectedDate, site: null, companyId: '' };
+    drmSelected.clear();
+    document.getElementById('drm-search-name').value = '';
+    document.getElementById('drm-search-site').value = '';
+    document.getElementById('drm-selected-site-label').style.display = 'none';
+    document.getElementById('drm-site-candidates').innerHTML = '';
+    document.getElementById('drm-date-from').value = drmSelectedDate;
+    document.getElementById('drm-date-to').value = drmSelectedDate;
+    renderDrmDateNav();
+    document.getElementById('drm-advanced').style.display = 'none';
+    document.getElementById('drm-missing-today-list').style.display = 'none';
+    document.getElementById('drm-missing-toggle').textContent = '未提出者を表示する';
+    document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
+    document.querySelectorAll('#drm-status-filter .filter-chip').forEach((c, i) => c.classList.toggle('active', i === 0));
 
-  // 他画面からの1回限りの絞り込み予約があれば、既定リセットの直後にそれで上書きする。
-  if (drmPendingFilterOverride) {
-    const ov = drmPendingFilterOverride; drmPendingFilterOverride = null;
-    Object.assign(drmFilters, ov);
-    document.getElementById('drm-date-from').value = drmFilters.dateFrom;
-    document.getElementById('drm-date-to').value = drmFilters.dateTo;
-    document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.workerType || '') === (ov.workerType || '')));
-    document.querySelectorAll('#drm-status-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.status || '') === (ov.status || '')));
+    // 他画面からの1回限りの絞り込み予約があれば、既定リセットの直後にそれで上書きする。
+    if (drmPendingFilterOverride) {
+      const ov = drmPendingFilterOverride; drmPendingFilterOverride = null;
+      Object.assign(drmFilters, ov);
+      document.getElementById('drm-date-from').value = drmFilters.dateFrom;
+      document.getElementById('drm-date-to').value = drmFilters.dateTo;
+      document.querySelectorAll('#drm-worker-type-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.workerType || '') === (ov.workerType || '')));
+      document.querySelectorAll('#drm-status-filter .filter-chip').forEach((b) => b.classList.toggle('active', (b.dataset.status || '') === (ov.status || '')));
+    }
   }
 
   loadDrmMissingBanner();
@@ -18285,7 +18293,7 @@ function init() {
     if (!session) return;
     const id = currentScreenId();
     if (id === 'menu') refreshHomeData(session);
-    else if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
+    else if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]({ preserveFilters: true });
     const btn = e.currentTarget;
     btn.classList.remove('is-spinning');
     void btn.offsetWidth; // アニメーションを毎回やり直すための強制リフロー
@@ -19476,9 +19484,9 @@ function init() {
     if (!isAdmin()) { enterMenu(); return; }
     loadAdminRoleManagement();
   };
-  SCREEN_ENTER_HOOKS['daily-report-management'] = async () => {
+  SCREEN_ENTER_HOOKS['daily-report-management'] = async (opts) => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
-    loadDailyReportManagement();
+    loadDailyReportManagement(opts);
   };
   SCREEN_ENTER_HOOKS['daily-report-people'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
