@@ -145,6 +145,15 @@ main {
 .login-wrap .card { text-align: left; }
 
 .greeting-block { margin-bottom: 20px; }
+.greeting-hi-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.home-refresh-btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--card-bg); color: var(--text-muted); padding: 0;
+}
+.home-refresh-btn:active { color: var(--text); }
+.home-refresh-btn.is-spinning svg { animation: home-refresh-spin .7s linear; }
+@keyframes home-refresh-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 .greeting-hi { font-size: 13px; color: var(--text-muted); font-weight: 600; }
 .greeting-name { font-size: 21px; font-weight: 800; color: var(--text); margin-top: 2px; letter-spacing: -.01em; }
 .greeting-sub { font-size: 13px; color: var(--text-muted); margin-top: 4px; }
