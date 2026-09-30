@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v231-staging';
-const BUILD_DEPLOYED_AT = '2026-09-30T16:29:32.097Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v232-staging';
+const BUILD_DEPLOYED_AT = '2026-09-30T22:28:22.146Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -18275,12 +18275,17 @@ function init() {
   document.getElementById('pin-forgot-request-submit').addEventListener('click', doPinResetRequest);
   // 弱い暗証番号のお願いから変更画面へ (E-13)
   document.getElementById('pin-weak-change-btn').addEventListener('click', () => showScreen('pin-change'));
-  // ホームの更新ボタン(2026-10-01追加、Shota指示「支払い管理みたいにポータルにも更新ボタンが欲しい」)。
-  // 押すたびにホームの各セクションを再読込する(画面遷移は伴わない)。
-  document.getElementById('home-refresh-btn').addEventListener('click', (e) => {
+  // 更新ボタン(2026-10-01追加、Shota指示「支払い管理みたいにポータルにも更新ボタンが欲しい」→
+  // 「どこでも押せるようにしといて」)。ホームだけの専用ボタンから、全画面共通のヘッダーへ変更。
+  // 画面ごとに専用の更新処理を書かず、各画面が入場時に既に持っている読込処理
+  // (SCREEN_ENTER_HOOKS、home画面だけは例外でrefreshHomeData)を再実行するだけにする
+  // (画面数が増えても個別対応が要らない)。
+  document.getElementById('global-refresh-btn').addEventListener('click', (e) => {
     const session = getSession();
     if (!session) return;
-    refreshHomeData(session);
+    const id = currentScreenId();
+    if (id === 'menu') refreshHomeData(session);
+    else if (SCREEN_ENTER_HOOKS[id]) SCREEN_ENTER_HOOKS[id]();
     const btn = e.currentTarget;
     btn.classList.remove('is-spinning');
     void btn.offsetWidth; // アニメーションを毎回やり直すための強制リフロー

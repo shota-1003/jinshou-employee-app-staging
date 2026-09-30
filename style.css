@@ -72,6 +72,12 @@ body {
   z-index: 10;
   border-bottom: 1px solid var(--border);
 }
+.app-header-refresh-btn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+}
 .app-header-logo {
   width: 30px; height: 30px; object-fit: contain;
   filter: drop-shadow(0 2px 8px oklch(0.6 0.18 264 / 0.5));
@@ -145,7 +151,6 @@ main {
 .login-wrap .card { text-align: left; }
 
 .greeting-block { margin-bottom: 20px; }
-.greeting-hi-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .home-refresh-btn {
   flex: none; display: inline-flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border-radius: 999px; border: 1px solid var(--border);
