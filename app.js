@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v233-staging';
-const BUILD_DEPLOYED_AT = '2026-09-30T22:43:37.214Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v234-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T00:17:34.865Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14420,9 +14420,10 @@ async function loadDailyReportLedger() {
   try {
     const { start, end } = computeDailyReportPeriodBounds(dailyReportPeriodYear, dailyReportPeriodMonth, dailyReportSummaryPeriodType);
     const rows = await rpc('get_my_daily_reports', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
-    if (!rows || rows.length === 0) { el.innerHTML = '<div class="empty-state">この期間の日報はありません</div>'; return; }
+    const confirmHtml = await renderDailyReportLedgerConfirmBlock(session, start, end);
+    if (!rows || rows.length === 0) { el.innerHTML = confirmHtml + '<div class="empty-state">この期間の日報はありません</div>'; return; }
     const sorted = rows.slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
-    el.innerHTML = `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
+    el.innerHTML = confirmHtml + `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
       <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>残業</th><th>備考</th></tr></thead>
       <tbody>${sorted.map((r) => {
     if (r.report_status === 'cancelled') {
@@ -14446,9 +14447,48 @@ async function loadDailyReportLedger() {
       </tr>`;
   }).join('')}</tbody>
     </table></div>`;
+    wireDailyReportLedgerConfirmButton(session, start, end);
   } catch (e) {
     el.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
+}
+
+// 出勤簿の「最終確認して提出」ブロック(2026-10-01追加、Shota指示)。確認済みならその日時を表示し、
+// 未確認ならボタンを出す。確認すると、この期間は本人による編集ができなくなる
+// (submit_daily_report側でサーバーが拒否する。ここでは案内だけで、強制自体はサーバー側の仕事)。
+async function renderDailyReportLedgerConfirmBlock(session, start, end) {
+  try {
+    const rows = await rpc('get_my_attendance_period_confirmation', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+    if (rows && rows.length > 0) {
+      const at = new Date(rows[0].confirmed_at).toLocaleString('ja-JP');
+      return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;background:var(--success-bg,#1d3a2a);">
+        <div style="font-weight:700;">✅ ${at} に最終確認・提出済みです</div>
+        <div class="hint" style="margin-top:4px;">この期間は編集できません。内容に誤りがあれば管理者へご連絡ください。</div>
+      </div>`;
+    }
+  } catch (e) { /* 未確認として扱う */ }
+  return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
+    <div class="hint" style="margin-bottom:8px;">内容を確認し、間違いが無ければ最終確認してください。確認すると、この期間はご自身では編集できなくなります。</div>
+    <button type="button" id="dr-ledger-confirm-btn">この期間を最終確認して提出する</button>
+    <div class="error" id="dr-ledger-confirm-error"></div>
+  </div>`;
+}
+
+function wireDailyReportLedgerConfirmButton(session, start, end) {
+  const btn = document.getElementById('dr-ledger-confirm-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    if (!confirm(`${start}〜${end}の日報内容で間違いありませんか？確認すると、この期間はご自身で編集できなくなります。`)) return;
+    btn.disabled = true;
+    try {
+      await rpc('confirm_my_attendance_period', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+      await loadDailyReportLedger();
+    } catch (e) {
+      btn.disabled = false;
+      const errEl = document.getElementById('dr-ledger-confirm-error');
+      if (errEl) errEl.textContent = e.message || '確認に失敗しました。';
+    }
+  });
 }
 
 function shiftDailyReportCalMonth(delta) {
