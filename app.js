@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v234-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T00:17:34.865Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v235-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T00:35:57.751Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9877,10 +9877,43 @@ async function openAttendanceDetail(groupId, groupLabel) {
   try {
     if (attendanceView === 'employee') {
       document.getElementById('ad-title').textContent = `${groupLabel}さんの現場別内訳(${ym.year}年${ym.month}月)`;
-      const rows = await rpc('admin_get_employee_attendance_by_site', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_employee_code: groupId });
-      listEl.innerHTML = rows.length === 0 ? '<div class="hint">データがありません。</div>' : rows.map((r) => `
+      const siteRows = await rpc('admin_get_employee_attendance_by_site', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_employee_code: groupId });
+      const siteHtml = siteRows.length === 0 ? '<div class="hint">データがありません。</div>' : siteRows.map((r) => `
         <div class="history-item"><div class="row1"><span>${r.site_name}</span><span>${r.total_headcount}人工</span></div></div>
       `).join('');
+      // 現場別の合計だけでなく、本人の出勤簿(日付ごとの実際の内容)と最終確認の状況も
+      // ここで開いて見られるようにする(2026-10-01追加、Shota指摘「開いて中身が見えないと
+      // 意味ないよ」)。確認状況は本人が確認する給与期間(26日〜25日)と揃える。
+      listEl.innerHTML = '<div class="hint">読み込み中(出勤簿)...</div>' + siteHtml;
+      try {
+        const { start, end } = computeDailyReportPeriodBounds(ym.year, ym.month, 'pay_period');
+        const [ledgerRows, confirmRows] = await Promise.all([
+          rpc('admin_get_employee_daily_report_ledger', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
+          rpc('admin_get_employee_period_confirmation', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
+        ]);
+        const confirmHtml = confirmRows && confirmRows.length > 0
+          ? `<div class="hint" style="color:var(--success,#2e7d4f);">✅ ${start}〜${end} を本人が${new Date(confirmRows[0].confirmed_at).toLocaleString('ja-JP')}に最終確認・提出済みです</div>`
+          : `<div class="hint">${start}〜${end} はまだ本人の最終確認がされていません</div>`;
+        const sorted = (ledgerRows || []).slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
+        const ledgerHtml = `<div class="form-title" style="margin-top:16px;">出勤簿(${start}〜${end})</div>${confirmHtml}` +
+          (sorted.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
+            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>状態</th></tr></thead>
+            <tbody>${sorted.map((r) => {
+              if (r.report_status === 'cancelled') return `<tr class="is-cancelled"><td>${r.report_date}</td><td colspan="3">取消済み</td><td></td></tr>`;
+              if (r.is_system_holiday) return `<tr class="is-holiday-auto"><td>${r.report_date}</td><td colspan="3">休日(システム自動登録)</td><td></td></tr>`;
+              return `<tr>
+                <td>${r.report_date}</td>
+                <td>${exdEsc((r.site_names || []).join('・'))}</td>
+                <td>${exdEsc((r.work_types || []).join('・'))}</td>
+                <td class="numeral">${Number(r.total_headcount).toFixed(1)}</td>
+                <td>${r.requires_attention ? '要確認' : exdEsc(r.report_status)}</td>
+              </tr>`;
+            }).join('')}</tbody>
+          </table></div>`);
+        listEl.innerHTML = ledgerHtml + '<div class="form-title" style="margin-top:16px;">現場別合計(' + ym.year + '年' + ym.month + '月)</div>' + siteHtml;
+      } catch (e) {
+        listEl.innerHTML = '<div class="hint">出勤簿の読み込みに失敗しました。</div>' + siteHtml;
+      }
     } else {
       document.getElementById('ad-title').textContent = `${groupLabel}の内訳(${ym.year}年${ym.month}月)`;
       if (attendanceView === 'site') {
