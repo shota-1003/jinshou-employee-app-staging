@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v236-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T00:45:40.744Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v237-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T01:09:06.374Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9943,10 +9943,32 @@ async function openAttendanceDetail(groupId, groupLabel) {
           const key = r.site_name || '(現場名なし)';
           bySite.set(key, (bySite.get(key) || 0) + (Number(r.headcount) || 0));
         });
-        const siteTotalsHtml = bySite.size === 0 ? '<div class="hint">データがありません。</div>' : Array.from(bySite.entries())
-          .sort((a, b) => b[1] - a[1])
-          .map(([name, total]) => `<div class="history-item"><div class="row1"><span>${exdEsc(name)}</span><span>${total.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</span></div></div>`).join('')
-          + `<div class="history-item"><div class="row1"><span><strong>合計</strong></span><span><strong>${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</strong></span></div></div>`;
+        const siteRows = Array.from(bySite.entries()).sort((a, b) => b[1] - a[1])
+          .map(([name, total]) => `<tr><td>${exdEsc(name)}</td><td>${total.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</td></tr>`).join('');
+        const siteTotalsHtml = `<table class="attendance-summary-table">${bySite.size === 0 ? '<tr><td colspan="2">データがありません</td></tr>' : siteRows}
+          <tr><td>合計</td><td>${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</td></tr></table>`;
+        // 「出張が何日・残業が何時間ってトータルの数字も現場集計みたいに出して」(2026-10-01 Shota指摘)。
+        // 1日に複数現場でも日数は重複カウントしないよう、日数系はreport_dateのSetで数える。
+        const uniqDates = (pred) => new Set(entries.filter(pred).map((r) => r.report_date)).size;
+        const sumHours = (field) => entries.reduce((s, r) => s + (Number(r[field]) || 0), 0);
+        const fmtH = (h) => (Math.round(h * 100) / 100).toString().replace(/\.?0+$/, '') || '0';
+        const teateTotals = [
+          ['出張', uniqDates((r) => r.is_business_trip), '日'],
+          ['残業', fmtH(sumHours('overtime_hours')), '時間'],
+          ['早出', fmtH(sumHours('early_start_hours')), '時間'],
+          ['通勤早出', fmtH(sumHours('early_commute_hours')), '時間'],
+          ['通勤残業', fmtH(sumHours('commute_overtime_hours')), '時間'],
+          ['100km超', uniqDates((r) => r.is_over_100km), '日'],
+          ['県外', uniqDates((r) => r.is_out_of_prefecture || r.prefecture), '日'],
+          ['夜勤', uniqDates((r) => r.is_night_shift), '日'],
+          ['リーダー', uniqDates((r) => r.is_leader), '日'],
+          ['欠勤', uniqDates((r) => r.is_absence), '日'],
+        ].filter(([, v]) => Number(v) > 0);
+        const tripAllowanceYen = entries.filter((r) => r.business_trip_allowance_eligible).reduce((s, r) => s + (Number(r.business_trip_allowance_amount) || 0), 0);
+        if (tripAllowanceYen > 0) teateTotals.push(['出張手当', tripAllowanceYen.toLocaleString(), '円']);
+        const teateTotalsHtml = `<table class="attendance-summary-table">${teateTotals.length === 0
+          ? '<tr><td colspan="2">対象の手当・勤怠はありません</td></tr>'
+          : teateTotals.map(([label, v, unit]) => `<tr><td>${label}</td><td>${v}${unit}</td></tr>`).join('')}</table>`;
         const ledgerHtml = `<div class="form-title" style="margin-top:16px;">出勤簿(${start}〜${end})</div>${confirmHtml}` +
           (days.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
             <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>勤怠・手当</th><th>備考</th><th>状態</th></tr></thead>
@@ -9955,14 +9977,17 @@ async function openAttendanceDetail(groupId, groupLabel) {
                 <td>${exdEsc(d.sites.join('・'))}</td>
                 <td>${exdEsc(d.workTypes.join('・'))}</td>
                 <td class="numeral">${d.headcount.toFixed(2).replace(/\.?0+$/, '') || '0'}</td>
-                <td>${exdEsc(d.teate.join('・'))}</td>
+                <td>${d.teate.map((t) => `<span class="ledger-tag">${exdEsc(t)}</span>`).join('') || ''}</td>
                 <td>${exdEsc(d.notes.join('・'))}</td>
                 <td>${d.status === 'needs_review' ? '要確認' : exdEsc(d.status)}</td>
               </tr>`).join('')}
               <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="3"></td></tr>
             </tbody>
           </table></div>`);
-        listEl.innerHTML = ledgerHtml + `<div class="form-title" style="margin-top:16px;">現場別合計(${start}〜${end})</div>` + siteTotalsHtml;
+        listEl.innerHTML = ledgerHtml + `<div class="attendance-summary-row">
+            <div class="attendance-summary-col"><div class="form-title">現場別合計(${start}〜${end})</div>${siteTotalsHtml}</div>
+            <div class="attendance-summary-col"><div class="form-title">勤怠・手当集計(${start}〜${end})</div>${teateTotalsHtml}</div>
+          </div>`;
       } catch (e) {
         listEl.innerHTML = '<div class="hint">出勤簿の読み込みに失敗しました。</div>';
       }
