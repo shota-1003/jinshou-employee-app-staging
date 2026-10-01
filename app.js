@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v235-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T00:35:57.751Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v236-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T00:45:40.744Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9876,43 +9876,95 @@ async function openAttendanceDetail(groupId, groupLabel) {
   const ym = currentAttendanceMonth();
   try {
     if (attendanceView === 'employee') {
-      document.getElementById('ad-title').textContent = `${groupLabel}さんの現場別内訳(${ym.year}年${ym.month}月)`;
-      const siteRows = await rpc('admin_get_employee_attendance_by_site', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_employee_code: groupId });
-      const siteHtml = siteRows.length === 0 ? '<div class="hint">データがありません。</div>' : siteRows.map((r) => `
-        <div class="history-item"><div class="row1"><span>${r.site_name}</span><span>${r.total_headcount}人工</span></div></div>
-      `).join('');
-      // 現場別の合計だけでなく、本人の出勤簿(日付ごとの実際の内容)と最終確認の状況も
+      document.getElementById('ad-title').textContent = `${groupLabel}さんの出勤簿`;
+      // 現場別合計だけでなく、本人の出勤簿(日付ごとの実際の内容)と最終確認の状況も
       // ここで開いて見られるようにする(2026-10-01追加、Shota指摘「開いて中身が見えないと
-      // 意味ないよ」)。確認状況は本人が確認する給与期間(26日〜25日)と揃える。
-      listEl.innerHTML = '<div class="hint">読み込み中(出勤簿)...</div>' + siteHtml;
+      // 意味ないよ」)。現場別合計は出面集計(カレンダー月)とは別の期間(給与期間、26日〜25日)
+      // で出すと数字が噛み合わず混乱するため、出勤簿と同じデータ(entryRows)から同じ期間で
+      // 計算する(「数字が出てない」「トータルの数字も出せ」2026-10-01 Shota指摘への対応)。
+      listEl.innerHTML = '<div class="hint">読み込み中(出勤簿)...</div>';
       try {
         const { start, end } = computeDailyReportPeriodBounds(ym.year, ym.month, 'pay_period');
-        const [ledgerRows, confirmRows] = await Promise.all([
-          rpc('admin_get_employee_daily_report_ledger', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
+        const [entryRows, confirmRows] = await Promise.all([
+          rpc('admin_get_employee_daily_report_entries', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
           rpc('admin_get_employee_period_confirmation', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
         ]);
         const confirmHtml = confirmRows && confirmRows.length > 0
           ? `<div class="hint" style="color:var(--success,#2e7d4f);">✅ ${start}〜${end} を本人が${new Date(confirmRows[0].confirmed_at).toLocaleString('ja-JP')}に最終確認・提出済みです</div>`
           : `<div class="hint">${start}〜${end} はまだ本人の最終確認がされていません</div>`;
-        const sorted = (ledgerRows || []).slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
+        // 本人の出勤簿(日付=1行)と同じ並び・粒度にする(2026-10-01 Shota指摘「なんで本人の方の
+        // 表示と同じにせんの」)。そのうえで手当関係(早出・残業・通勤早出・通勤残業・100km超・
+        // 運搬・現場作業・営業・県外・欠勤・出張・出張手当・リーダー・夜勤)を省略せず出す
+        // (同日指摘「手当関係全く入ってない、手抜きすんな」)。現場別合計・総合計も、出勤簿と
+        // 同じ期間・同じデータから計算する(「数字が出てない」「トータルも出せ」指摘への対応、
+        // 出面集計〔カレンダー月〕とは別期間の数字を並べて混乱させない)。
+        const teate = (r) => {
+          const list = [];
+          if (r.is_leader) list.push('リーダー');
+          if (r.is_night_shift) list.push('夜勤');
+          if (Number(r.early_start_hours) > 0) list.push(`早出${Number(r.early_start_hours)}h`);
+          if (Number(r.overtime_hours) > 0) list.push(`残業${Number(r.overtime_hours)}h`);
+          if (Number(r.early_commute_hours) > 0) list.push(`通勤早出${Number(r.early_commute_hours)}h`);
+          if (Number(r.commute_overtime_hours) > 0) list.push(`通勤残業${Number(r.commute_overtime_hours)}h`);
+          if (r.is_over_100km) list.push('100km超');
+          if (r.is_transport) list.push('運搬/交通');
+          if (r.is_field_duty) list.push('現場作業');
+          if (r.is_sales) list.push('営業');
+          if (r.is_out_of_prefecture || r.prefecture) list.push('県外' + (r.prefecture ? `(${r.prefecture})` : ''));
+          if (r.is_absence) list.push('欠勤');
+          if (r.is_business_trip) {
+            let t = '出張';
+            if (r.is_overnight) t += `(泊${r.overnight_nights || ''})`;
+            if (r.business_trip_allowance_eligible || Number(r.business_trip_allowance_amount) > 0) {
+              t += r.business_trip_allowance_eligible ? '・手当対象' : '・手当対象外';
+              if (Number(r.business_trip_allowance_amount) > 0) t += `(${Number(r.business_trip_allowance_amount).toLocaleString()}円)`;
+            }
+            list.push(t);
+          }
+          return list;
+        };
+        const entries = (entryRows || []).filter((r) => r.report_status !== 'cancelled');
+        // 日付ごとに1行へ集約(本人の出勤簿と同じ粒度)。同日に複数現場あれば「・」で連結する。
+        const byDate = new Map();
+        entries.forEach((r) => {
+          const g = byDate.get(r.report_date) || { report_date: r.report_date, sites: [], workTypes: [], headcount: 0, teate: [], notes: [], status: r.report_status };
+          g.sites.push(r.site_name || '');
+          g.workTypes.push(r.work_type || '');
+          g.headcount += Number(r.headcount) || 0;
+          g.teate.push(...teate(r));
+          if (r.notes) g.notes.push(r.notes);
+          if (r.report_status === 'needs_review' || r.report_status === 'rejected') g.status = r.report_status;
+          byDate.set(r.report_date, g);
+        });
+        const days = Array.from(byDate.values()).sort((a, b) => a.report_date.localeCompare(b.report_date));
+        const grandTotal = days.reduce((s, d) => s + d.headcount, 0);
+        const bySite = new Map();
+        entries.forEach((r) => {
+          const key = r.site_name || '(現場名なし)';
+          bySite.set(key, (bySite.get(key) || 0) + (Number(r.headcount) || 0));
+        });
+        const siteTotalsHtml = bySite.size === 0 ? '<div class="hint">データがありません。</div>' : Array.from(bySite.entries())
+          .sort((a, b) => b[1] - a[1])
+          .map(([name, total]) => `<div class="history-item"><div class="row1"><span>${exdEsc(name)}</span><span>${total.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</span></div></div>`).join('')
+          + `<div class="history-item"><div class="row1"><span><strong>合計</strong></span><span><strong>${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}人工</strong></span></div></div>`;
         const ledgerHtml = `<div class="form-title" style="margin-top:16px;">出勤簿(${start}〜${end})</div>${confirmHtml}` +
-          (sorted.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
-            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>状態</th></tr></thead>
-            <tbody>${sorted.map((r) => {
-              if (r.report_status === 'cancelled') return `<tr class="is-cancelled"><td>${r.report_date}</td><td colspan="3">取消済み</td><td></td></tr>`;
-              if (r.is_system_holiday) return `<tr class="is-holiday-auto"><td>${r.report_date}</td><td colspan="3">休日(システム自動登録)</td><td></td></tr>`;
-              return `<tr>
-                <td>${r.report_date}</td>
-                <td>${exdEsc((r.site_names || []).join('・'))}</td>
-                <td>${exdEsc((r.work_types || []).join('・'))}</td>
-                <td class="numeral">${Number(r.total_headcount).toFixed(1)}</td>
-                <td>${r.requires_attention ? '要確認' : exdEsc(r.report_status)}</td>
-              </tr>`;
-            }).join('')}</tbody>
+          (days.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
+            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>勤怠・手当</th><th>備考</th><th>状態</th></tr></thead>
+            <tbody>${days.map((d) => `<tr>
+                <td>${d.report_date}</td>
+                <td>${exdEsc(d.sites.join('・'))}</td>
+                <td>${exdEsc(d.workTypes.join('・'))}</td>
+                <td class="numeral">${d.headcount.toFixed(2).replace(/\.?0+$/, '') || '0'}</td>
+                <td>${exdEsc(d.teate.join('・'))}</td>
+                <td>${exdEsc(d.notes.join('・'))}</td>
+                <td>${d.status === 'needs_review' ? '要確認' : exdEsc(d.status)}</td>
+              </tr>`).join('')}
+              <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="3"></td></tr>
+            </tbody>
           </table></div>`);
-        listEl.innerHTML = ledgerHtml + '<div class="form-title" style="margin-top:16px;">現場別合計(' + ym.year + '年' + ym.month + '月)</div>' + siteHtml;
+        listEl.innerHTML = ledgerHtml + `<div class="form-title" style="margin-top:16px;">現場別合計(${start}〜${end})</div>` + siteTotalsHtml;
       } catch (e) {
-        listEl.innerHTML = '<div class="hint">出勤簿の読み込みに失敗しました。</div>' + siteHtml;
+        listEl.innerHTML = '<div class="hint">出勤簿の読み込みに失敗しました。</div>';
       }
     } else {
       document.getElementById('ad-title').textContent = `${groupLabel}の内訳(${ym.year}年${ym.month}月)`;
