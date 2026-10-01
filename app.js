@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v240-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T14:25:29.066Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v241-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T15:10:57.138Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9958,40 +9958,52 @@ async function openAttendanceDetail(groupId, groupLabel) {
         // (同日指摘「手当関係全く入ってない、手抜きすんな」)。現場別合計・総合計も、出勤簿と
         // 同じ期間・同じデータから計算する(「数字が出てない」「トータルも出せ」指摘への対応、
         // 出面集計〔カレンダー月〕とは別期間の数字を並べて混乱させない)。
-        const teate = (r) => {
-          const list = [];
-          if (r.is_leader) list.push('リーダー');
-          if (r.is_night_shift) list.push('夜勤');
-          if (Number(r.early_start_hours) > 0) list.push(`早出${Number(r.early_start_hours)}h`);
-          if (Number(r.overtime_hours) > 0) list.push(`残業${Number(r.overtime_hours)}h`);
-          if (Number(r.early_commute_hours) > 0) list.push(`通勤早出${Number(r.early_commute_hours)}h`);
-          if (Number(r.commute_overtime_hours) > 0) list.push(`通勤残業${Number(r.commute_overtime_hours)}h`);
-          if (r.is_over_100km) list.push('100km超');
-          if (r.is_transport) list.push('運搬/交通');
-          if (r.is_field_duty) list.push('現場作業');
-          if (r.is_sales) list.push('営業');
-          if (r.is_out_of_prefecture || r.prefecture) list.push('県外' + (r.prefecture ? `(${r.prefecture})` : ''));
-          if (r.is_absence) list.push('欠勤');
+        // 「出張の位置とかバラバラすぎて見にくい、出張・残業・通勤みたいに欄にして」
+        // (2026-10-02 Shota指摘): 1セルに「・」区切りでタグを並べると、項目ごとに出る位置が
+        // 日によってバラバラになり、どの日に何が抜けているか一目で分からなかった。
+        // 出張・残業・通勤・その他 を固定の列へ分け、同じ種類の情報は毎回同じ列に出るようにする。
+        const teateParts = (r) => {
+          const trip = [];
           if (r.is_business_trip) {
-            let t = '出張';
-            if (r.is_overnight) t += `(泊${r.overnight_nights || ''})`;
+            trip.push('出張' + (r.is_overnight ? `(泊${r.overnight_nights || ''})` : ''));
             if (r.business_trip_allowance_eligible || Number(r.business_trip_allowance_amount) > 0) {
-              t += r.business_trip_allowance_eligible ? '・手当対象' : '・手当対象外';
-              if (Number(r.business_trip_allowance_amount) > 0) t += `(${Number(r.business_trip_allowance_amount).toLocaleString()}円)`;
+              trip.push(r.business_trip_allowance_eligible ? '手当対象' : '手当対象外');
+              if (Number(r.business_trip_allowance_amount) > 0) trip.push(`${Number(r.business_trip_allowance_amount).toLocaleString()}円`);
             }
-            list.push(t);
           }
-          return list;
+          const overtime = [];
+          if (Number(r.early_start_hours) > 0) overtime.push(`早出${Number(r.early_start_hours)}h`);
+          if (Number(r.overtime_hours) > 0) overtime.push(`残業${Number(r.overtime_hours)}h`);
+          const commute = [];
+          if (Number(r.early_commute_hours) > 0) commute.push(`早出${Number(r.early_commute_hours)}h`);
+          if (Number(r.commute_overtime_hours) > 0) commute.push(`残業${Number(r.commute_overtime_hours)}h`);
+          if (r.is_over_100km) commute.push('100km超');
+          const other = [];
+          if (r.is_leader) other.push('リーダー');
+          if (r.is_night_shift) other.push('夜勤');
+          if (r.is_transport) other.push('運搬/交通');
+          if (r.is_field_duty) other.push('現場作業');
+          if (r.is_sales) other.push('営業');
+          if (r.is_out_of_prefecture || r.prefecture) other.push('県外' + (r.prefecture ? `(${r.prefecture})` : ''));
+          if (r.is_absence) other.push('欠勤');
+          return { trip, overtime, commute, other };
         };
         const entries = (entryRows || []).filter((r) => r.report_status !== 'cancelled');
         // 日付ごとに1行へ集約(本人の出勤簿と同じ粒度)。同日に複数現場あれば「・」で連結する。
         const byDate = new Map();
         entries.forEach((r) => {
-          const g = byDate.get(r.report_date) || { report_date: r.report_date, sites: [], workTypes: [], headcount: 0, teate: [], notes: [], status: r.report_status };
+          const g = byDate.get(r.report_date) || {
+            report_date: r.report_date, sites: [], workTypes: [], headcount: 0,
+            trip: [], overtime: [], commute: [], other: [], notes: [], status: r.report_status,
+          };
           g.sites.push(r.site_name || '');
           g.workTypes.push(r.work_type || '');
           g.headcount += Number(r.headcount) || 0;
-          g.teate.push(...teate(r));
+          const parts = teateParts(r);
+          g.trip.push(...parts.trip);
+          g.overtime.push(...parts.overtime);
+          g.commute.push(...parts.commute);
+          g.other.push(...parts.other);
           if (r.notes) g.notes.push(r.notes);
           if (r.report_status === 'needs_review' || r.report_status === 'rejected') g.status = r.report_status;
           byDate.set(r.report_date, g);
@@ -10029,19 +10041,23 @@ async function openAttendanceDetail(groupId, groupLabel) {
         const teateTotalsHtml = `<table class="attendance-summary-table">${teateTotals.length === 0
           ? '<tr><td colspan="2">対象の手当・勤怠はありません</td></tr>'
           : teateTotals.map(([label, v, unit]) => `<tr><td>${label}</td><td>${v}${unit}</td></tr>`).join('')}</table>`;
+        const tagCell = (arr) => arr.length === 0 ? '' : arr.map((t) => `<span class="ledger-tag">${exdEsc(t)}</span>`).join('');
         const ledgerHtml = `<div class="form-title" style="margin-top:16px;">出勤簿(${start}〜${end})</div>${confirmHtml}` +
           (days.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
-            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>勤怠・手当</th><th>備考</th><th>状態</th></tr></thead>
+            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>出張</th><th>残業</th><th>通勤</th><th>その他</th><th>備考</th><th>状態</th></tr></thead>
             <tbody>${days.map((d) => `<tr>
                 <td>${d.report_date}</td>
                 <td>${exdEsc(d.sites.join('・'))}</td>
                 <td>${exdEsc(d.workTypes.join('・'))}</td>
                 <td class="numeral">${d.headcount.toFixed(2).replace(/\.?0+$/, '') || '0'}</td>
-                <td>${d.teate.map((t) => `<span class="ledger-tag">${exdEsc(t)}</span>`).join('') || ''}</td>
+                <td>${tagCell(d.trip)}</td>
+                <td>${tagCell(d.overtime)}</td>
+                <td>${tagCell(d.commute)}</td>
+                <td>${tagCell(d.other)}</td>
                 <td>${exdEsc(d.notes.join('・'))}</td>
                 <td>${dailyReportStatusBadgeHtml({ report_status: d.status })}</td>
               </tr>`).join('')}
-              <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="3"></td></tr>
+              <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="6"></td></tr>
             </tbody>
           </table></div>`);
         listEl.innerHTML = ledgerHtml + `<div class="attendance-summary-row">
