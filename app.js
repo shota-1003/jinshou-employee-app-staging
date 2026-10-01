@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v238-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T04:08:11.674Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v239-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T13:41:13.989Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9482,10 +9482,21 @@ async function loadEmployeeSummary() {
 // ---------- 社員個人詳細(社員別集計のドリルダウン) ----------
 
 let emdContext = null; // { code, name, year, month } (支払登録画面から戻る際の再読み込み用)
+// 2026-10-01 Shota指示: 「社員別集計→現場別合計」は、今まで暦月(カレンダー月)固定で集計していた。
+// 給与スプレッドシート・社員本人の日報画面(dailyReportSummaryPeriodType)は給与期間(前月26日〜
+// 当月25日)で集計しているため、人工の数が画面によって食い違って見える原因の1つだった(2026-10-01
+// 調査結果)。請求・出来高確認にはカレンダー月が便利な場面もあるため、どちらかに決め打ちせず、
+// 社員本人画面と同じ切替をこの画面にも用意する。画面を開き直すたびに既定(カレンダー月)へ戻す
+// (前回タップした状態を次の社員にも引き継いで誤読させないため)。
+let emdAttendancePeriodType = 'calendar';
 
 async function openEmployeeMonthlyDetail(code, name, year, month) {
   const session = getSession();
   emdContext = { code, name, year, month };
+  emdAttendancePeriodType = 'calendar';
+  document.querySelectorAll('#emd-attendance-period-filter .filter-chip').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.period === emdAttendancePeriodType);
+  });
   showScreen('employee-monthly-detail');
   document.getElementById('emd-title').textContent = `${name}さん(${code}) ${year}年${month}月`;
   const yen = (n) => `${Number(n).toLocaleString('ja-JP')}円`;
@@ -9503,11 +9514,11 @@ async function openEmployeeMonthlyDetail(code, name, year, month) {
   const REQ_STATUS_BADGE = { rejected: '却下', cancelled: '取消' };
 
   try {
-    const [expenseRows, ledgerRows, siteRows, otherRows] = await Promise.all([
+    const [expenseRows, ledgerRows, otherRows] = await Promise.all([
       rpc('admin_get_employee_expense_detail', { p_admin_employee_code: session.employeeCode, p_year: year, p_month: month, p_target_employee_code: code }),
       rpc('admin_get_employee_leave_ledger', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code }),
-      rpc('admin_get_employee_attendance_by_site', { p_admin_employee_code: session.employeeCode, p_year: year, p_month: month, p_employee_code: code }),
       rpc('admin_search_requests', { p_admin_employee_code: session.employeeCode, p_employee_code: code, p_date_from: `${year}-${String(month).padStart(2, '0')}-01`, p_date_to: new Date(year, month, 0).toISOString().slice(0, 10) }),
+      loadEmdAttendanceBySite(),
     ]);
 
     const advance = expenseRows.filter((r) => r.expense_category === 'employee_advance');
@@ -9579,13 +9590,41 @@ async function openEmployeeMonthlyDetail(code, name, year, month) {
       <div class="row2">${r.summary || ''}</div></div>
     `).join('');
 
+  } catch (e) {
+    document.getElementById('emd-advance-list').innerHTML = `<div class="hint">読み込みに失敗しました: ${e.message}</div>`;
+  }
+}
+
+// 「現場別人工(この月)」部分だけを独立して読み込む(カレンダー月/給与期間の切替ボタンを
+// 押したときに、画面全体(経費・有給・その他申請)を再読み込みせずこの部分だけ更新するため)。
+// computeDailyReportPeriodBounds(社員本人の日報画面と共有、下記14000行台付近で定義)で
+// ラベルの実日付を出し、SQL側(admin_get_employee_attendance_by_site)の期間計算と
+// 食い違わないようにする。
+async function loadEmdAttendanceBySite() {
+  if (!emdContext) return;
+  const { code, year, month } = emdContext;
+  const session = getSession();
+  const labelEl = document.getElementById('emd-attendance-period-label');
+  const listEl = document.getElementById('emd-site-list');
+  if (labelEl) {
+    const { start, end } = computeDailyReportPeriodBounds(year, month, emdAttendancePeriodType);
+    labelEl.textContent = emdAttendancePeriodType === 'pay_period'
+      ? `給与期間: ${start} 〜 ${end}` : `カレンダー月: ${start} 〜 ${end}`;
+  }
+  if (listEl) listEl.innerHTML = '<div class="hint">読み込み中...</div>';
+  document.getElementById('emd-headcount').textContent = '-';
+  try {
+    const siteRows = await rpc('admin_get_employee_attendance_by_site', {
+      p_admin_employee_code: session.employeeCode, p_year: year, p_month: month, p_employee_code: code,
+      p_period_type: emdAttendancePeriodType,
+    });
     const headcountTotal = siteRows.reduce((s, r) => s + Number(r.total_headcount || 0), 0);
     document.getElementById('emd-headcount').textContent = `${headcountTotal}人工`;
-    document.getElementById('emd-site-list').innerHTML = siteRows.length === 0 ? '<div class="hint">この月の日報はありません。</div>' : siteRows.map((r) => `
+    if (listEl) listEl.innerHTML = siteRows.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : siteRows.map((r) => `
       <div class="history-item"><div class="row1"><span>${r.site_name}</span><span>${r.total_headcount}人工</span></div></div>
     `).join('');
   } catch (e) {
-    document.getElementById('emd-advance-list').innerHTML = `<div class="hint">読み込みに失敗しました: ${e.message}</div>`;
+    if (listEl) listEl.innerHTML = `<div class="hint">読み込みに失敗しました: ${e.message}</div>`;
   }
 }
 
@@ -18715,6 +18754,14 @@ function init() {
 
   document.querySelectorAll('.dr-summary-tab').forEach((btn) => {
     btn.addEventListener('click', () => { dailyReportSummaryPeriodType = btn.dataset.period; loadMyDailyReports(); });
+  });
+  document.querySelectorAll('#emd-attendance-period-filter .filter-chip').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#emd-attendance-period-filter .filter-chip').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      emdAttendancePeriodType = btn.dataset.period;
+      loadEmdAttendanceBySite();
+    });
   });
   document.querySelectorAll('.dr-view-tab').forEach((btn) => {
     btn.addEventListener('click', () => setDailyReportView(btn.dataset.view));

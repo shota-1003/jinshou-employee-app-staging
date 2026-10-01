@@ -3275,6 +3275,14 @@
     <div class="section-title">その他申請履歴(この月)</div>
     <div id="emd-other-list"></div>
     <div class="section-title">現場別人工(この月)</div>
+    <!-- 2026-10-01 Shota指示: カレンダー月(請求・出来高確認向け)/給与期間(26日〜25日、給与計算向け)の
+         切替。社員本人の日報画面(.dr-summary-tab)と同じ見た目・同じ考え方(既定はカレンダー月、
+         押すと範囲を明記したラベルに変わる)。 -->
+    <div class="filter-row" id="emd-attendance-period-filter">
+      <button type="button" class="filter-chip active" data-period="calendar">カレンダー月</button>
+      <button type="button" class="filter-chip" data-period="pay_period">給与期間(26日〜25日)</button>
+    </div>
+    <div class="hint" id="emd-attendance-period-label" style="margin:4px 0 8px;"></div>
     <div id="emd-site-list"></div>
   </section>
 
