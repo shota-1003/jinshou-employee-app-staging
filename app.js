@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v239-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T13:41:13.989Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v240-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T14:25:29.066Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8121,6 +8121,11 @@ async function togglePushNotifications(enable) {
 
 async function loadMyInfo() {
   const session = getSession();
+  // セッション未確立のまま呼ばれると session.employeeName の参照で
+  // "Cannot read properties of null" 例外になり画面が止まる(enterMenu()の既存ガードと同種、
+  // 2026-10-01 portal-qa-patrol#5256で検出。自動ログイン復帰が終わる前に「自分」をタップ
+  // できる間欠的な窓で発生)。
+  if (!session) { startLoginFlow(); return; }
   renderAvatar('myinfo-avatar', session.employeeName, null);
   document.getElementById('myinfo-name').textContent = session.employeeName;
   document.getElementById('myinfo-code').textContent = `社員番号: ${session.employeeCode}`;
@@ -9832,8 +9837,23 @@ async function loadAttendanceMatrix() {
       periodLabel = `${year}年`;
     }
     if (mySeq !== attendanceMatrixRequestSeq) return; // より新しいリクエストが既に発行されている
-    document.getElementById('am-hint').textContent = `${rows.length}件(${periodLabel})。${attendancePeriod === 'month' ? 'セルをタップするとその日の内訳、行をタップするとその期間の内訳を確認できます。' : '行をタップすると年間の内訳を確認できます。'}`;
+    const confirmHint = (attendancePeriod === 'month' && attendanceView === 'employee') ? '名前の横の✓は本人が最終確認済みです。' : '';
+    document.getElementById('am-hint').textContent = `${rows.length}件(${periodLabel})。${attendancePeriod === 'month' ? 'セルをタップするとその日の内訳、行をタップするとその期間の内訳を確認できます。' : '行をタップすると年間の内訳を確認できます。'}${confirmHint}`;
     if (rows.length === 0) { wrapEl.innerHTML = '<div class="hint">この期間の出面データはありません。</div>'; return; }
+
+    // 「名前の横に確定している人は分かるようにして」(2026-10-01 Shota指摘): 本人の最終確認
+    // (confirm_my_attendance_period)が済んでいるかを一覧できるようにする。本人の確認は
+    // 給与期間(26日〜25日)単位のため、カレンダー月表示でもその月と重なる給与期間で判定する。
+    let confirmedSet = new Set();
+    if (attendancePeriod === 'month' && attendanceView === 'employee') {
+      try {
+        const ym = currentAttendanceMonth();
+        const { start: pStart, end: pEnd } = computeDailyReportPeriodBounds(ym.year, ym.month, 'pay_period');
+        const confirmRows = await rpc('admin_list_period_confirmations_in_range', { p_admin_employee_code: session.employeeCode, p_period_start: pStart, p_period_end: pEnd });
+        confirmedSet = new Set((confirmRows || []).map((r) => r.employee_code));
+      } catch (e) { /* 確認状況が取れなくても出面集計自体は表示を続ける */ }
+      if (mySeq !== attendanceMatrixRequestSeq) return;
+    }
 
     let headers = '';
     for (let i = 1; i <= colCount; i++) headers += `<th>${colLabel(i)}</th>`;
@@ -9847,8 +9867,9 @@ async function loadAttendanceMatrix() {
           : '<td class="am-cell-empty">-</td>';
       }
       const total = attendancePeriod === 'month' ? r.month_total : r.year_total;
+      const confirmedBadge = confirmedSet.has(r.group_id) ? ' <span class="am-confirmed-badge" title="本人が最終確認済み">✓</span>' : '';
       return `<tr class="am-row-clickable" data-group-id="${r.group_id}" data-group-label="${r.group_label}">
-        <td>${r.group_label}</td>${cells}<td class="am-total-col">${total}</td>
+        <td>${r.group_label}${confirmedBadge}</td>${cells}<td class="am-total-col">${total}</td>
       </tr>`;
     }).join('');
     const colTotals = [];

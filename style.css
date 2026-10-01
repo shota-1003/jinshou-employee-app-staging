@@ -1319,10 +1319,15 @@ button.link {
 /* ===== 出面集計マトリクス(縦=社員/外注会社/現場、横=日、右端=月合計) ===== */
 .attendance-matrix-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-bg); }
 .attendance-matrix-table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }
-.attendance-matrix-table th, .attendance-matrix-table td { padding: 7px 9px; text-align: center; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); }
+.attendance-matrix-table th, .attendance-matrix-table td { padding: 7px 6px; text-align: center; border-bottom: 1px solid var(--border); border-right: 1px solid var(--border); }
 .attendance-matrix-table thead th { background: var(--card-bg-solid); color: var(--text-muted); font-weight: 700; position: sticky; top: 0; z-index: 1; }
+/* 2026-10-01 Shota指摘「スライドせずに31日まで見えるようにして」: DOUGLACE PRANATA
+   HUTAGALUNGのような長い外国人名がnowrapで1行表示されると、先頭の社員名列だけが
+   大きく幅を取ってしまい、31日分の列が画面に収まらず横スクロールが必須になっていた。
+   名前列だけ折り返しを許可して幅を固定し、残りの横幅を日ごとの列へ回す。 */
 .attendance-matrix-table th:first-child, .attendance-matrix-table td:first-child {
-  position: sticky; left: 0; z-index: 2; background: var(--card-bg-solid); text-align: left; font-weight: 700; min-width: 120px;
+  position: sticky; left: 0; z-index: 2; background: var(--card-bg-solid); text-align: left; font-weight: 700;
+  width: 92px; max-width: 92px; white-space: normal; word-break: break-word; line-height: 1.25;
 }
 .attendance-matrix-table thead th:first-child { z-index: 3; }
 .attendance-matrix-table td.am-cell-empty { color: var(--text-muted); opacity: .35; }
@@ -1346,10 +1351,17 @@ button.link {
 /* 2026-09-14 Shota指摘「まだ幅は余ってる」: サイズ違いの列統合で列数が減った分、
    表がコンテナの余白を持て余さないよう、列に余った幅を配分して広く使う。 */
 .attendance-matrix-table.wide-matrix { width: 100%; }
+/* 「名前の横に確定している人は分かるようにして」(2026-10-01): 名前列は幅が限られているため、
+   文字の「確定済」ではなく小さなチェック印バッジにして折り返しを増やさない。 */
+.am-confirmed-badge {
+  display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px;
+  border-radius: 50%; background: var(--success-bg, oklch(0.6 0.15 150 / 20%)); color: var(--success, #2e7d4f);
+  font-size: 10px; font-weight: 800; flex: none; vertical-align: middle; margin-left: 2px;
+}
 
 @media (min-width: 1280px) {
   .attendance-matrix-table { font-size: 13px; }
-  .attendance-matrix-table th, .attendance-matrix-table td { padding: 6px 7px; }
+  .attendance-matrix-table th, .attendance-matrix-table td { padding: 6px 5px; }
   #screen-attendance-matrix .attendance-matrix-wrap { max-height: 74vh; overflow-y: auto; }
 }
 .jd-print-signature { display: flex; gap: 16px; margin-top: 20px; }
