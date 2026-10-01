@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v237-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T01:09:06.374Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v238-staging';
+const BUILD_DEPLOYED_AT = '2026-10-01T04:08:11.674Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9979,7 +9979,7 @@ async function openAttendanceDetail(groupId, groupLabel) {
                 <td class="numeral">${d.headcount.toFixed(2).replace(/\.?0+$/, '') || '0'}</td>
                 <td>${d.teate.map((t) => `<span class="ledger-tag">${exdEsc(t)}</span>`).join('') || ''}</td>
                 <td>${exdEsc(d.notes.join('・'))}</td>
-                <td>${d.status === 'needs_review' ? '要確認' : exdEsc(d.status)}</td>
+                <td>${dailyReportStatusBadgeHtml({ report_status: d.status })}</td>
               </tr>`).join('')}
               <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="3"></td></tr>
             </tbody>
