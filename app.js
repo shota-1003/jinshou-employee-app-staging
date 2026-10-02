@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v247-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T15:13:02.923Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v248-staging';
+const BUILD_DEPLOYED_AT = '2026-10-02T16:31:01.473Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14005,16 +14005,33 @@ function addDailyReportEntry(prefill) {
   const newSiteWrap = clone.querySelector('.dr-new-site-wrap');
   const newSiteToggleBtn = clone.querySelector('.dr-new-site-toggle-btn');
   populateSiteSelect(siteSelect, '', true).then(() => {
-    if (prefill && prefill.site_id) siteSelect.value = String(prefill.site_id);
+    if (prefill && prefill.site_id) { siteSelect.value = String(prefill.site_id); applyTripAvailability(); }
   });
   siteSearch.addEventListener('input', () => populateSiteSelect(siteSelect, siteSearch.value.trim(), true));
   // 「同じ現場なのに出張チェックが抜ける」対策(2026-10-02 Shota指摘): 前日との連続性ではなく、
   // 現場そのものに対して「本人が直近その現場へ行った時、出張扱いだったか」を見て既定値にする
   // (日帰りの繰り返しにも、連続した出張にも両方対応する)。本人が既に手で触っていたら上書きしない。
   const isBusinessTripEl0 = clone.querySelector('.dr-is-business-trip');
+  // 出張チェックは県外の現場でだけ付けられる(2026-10-03 Shota指示)。県内の現場は出張にならないため
+  // チェックを外して選べなくする。新しい現場・未選択・判定が取れない時は従来どおり選べる状態にする。
+  const tripHintEl = clone.querySelector('.dr-trip-hint');
+  const applyTripAvailability = async () => {
+    const setHint = (text) => { tripHintEl.textContent = text; tripHintEl.style.display = text ? 'block' : 'none'; };
+    if (!siteSelect.value || siteSelect.value === '__new__') { isBusinessTripEl0.disabled = false; setHint(''); return null; }
+    try {
+      const session = getSession();
+      const rows = await rpc('get_site_trip_info', { p_employee_code: session.employeeCode, p_site_id: Number(siteSelect.value) });
+      const info = Array.isArray(rows) ? rows[0] : rows;
+      if (!info) { isBusinessTripEl0.disabled = false; setHint(''); return null; }
+      if (info.is_out_of_prefecture) { isBusinessTripEl0.disabled = false; setHint(`県外の現場${info.prefecture ? '(' + info.prefecture + ')' : ''}です。出張の場合はチェックしてください。`); return true; }
+      isBusinessTripEl0.checked = false; isBusinessTripEl0.disabled = true; setHint('県内の現場は出張になりません。');
+      return false;
+    } catch (e) { isBusinessTripEl0.disabled = false; setHint(''); return null; }
+  };
   siteSelect.addEventListener('change', async () => {
-    if (siteSelect.value === '__new__') { newSiteWrap.style.display = 'block'; return; }
-    if (isBusinessTripEl0.dataset.userSet === '1' || !siteSelect.value) return;
+    if (siteSelect.value === '__new__') { newSiteWrap.style.display = 'block'; applyTripAvailability(); return; }
+    const isOut = await applyTripAvailability();
+    if (isOut === false || isBusinessTripEl0.dataset.userSet === '1' || !siteSelect.value) return;
     try {
       const session = getSession();
       const def = await rpc('get_my_recent_business_trip_default', { p_employee_code: session.employeeCode, p_site_id: Number(siteSelect.value) });
