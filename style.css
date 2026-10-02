@@ -1347,6 +1347,9 @@ button.link {
 @media print {
   @page { size: A4 portrait; margin: 8mm; }
   body.printing-ab > *:not(#ab-print-root) { display: none !important; }
+  /* 画面用の「高さ100%」指定が残っていると、出勤簿が1ページ分で終わっても2ページ目の白紙が出る */
+  body.printing-ab { min-height: 0 !important; height: auto !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; }
+  html:has(body.printing-ab) { height: auto !important; min-height: 0 !important; overflow: visible !important; }
   body.printing-ab #ab-print-root { display: block !important; }
   body.printing-ab, body.printing-ab #ab-print-root { background: #fff !important; }
   body.printing-ab #ab-print-root, body.printing-ab #ab-print-root * { color: #000 !important; background: #fff !important; border-color: #888 !important; text-shadow: none !important; box-shadow: none !important; }
