@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v247-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T15:10:57.124Z';
+const BUILD_DEPLOYED_AT = '2026-10-02T15:13:02.923Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14788,8 +14788,8 @@ async function loadPeriodConfirmChangesAdmin() {
       const btn = card.querySelector('.pcc-book-btn');
       const box = card.querySelector('.pcc-book');
       btn.addEventListener('click', async () => {
-        if (box.dataset.loaded) { const open = box.style.display !== 'none'; box.style.display = open ? 'none' : 'block'; btn.textContent = open ? 'この人の出勤簿を見る' : '出勤簿を閉じる'; return; }
-        btn.disabled = true; box.style.display = 'block'; box.innerHTML = '<div class="hint">読み込み中...</div>';
+        if (box.dataset.loaded) { const open = box.style.display !== 'none'; box.style.display = open ? 'none' : 'block'; card.style.gridColumn = open ? '' : '1 / -1'; btn.textContent = open ? 'この人の出勤簿を見る' : '出勤簿を閉じる'; return; }
+        btn.disabled = true; box.style.display = 'block'; card.style.gridColumn = '1 / -1'; box.innerHTML = '<div class="hint">読み込み中...</div>';
         try {
           const book = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: r.employee_code, p_period_start: r.period_start, p_period_end: r.period_end });
           const endMonth = Number(String(r.period_end).slice(5, 7)); const endYear = Number(String(r.period_end).slice(0, 4));
