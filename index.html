@@ -716,6 +716,10 @@
         </div>
       </div>
 
+      <div id="daily-report-edit-reason-wrap" style="display:none;margin-top:4px;">
+        <label for="daily-report-edit-reason">修正理由<span class="required-mark">(この日はすでに確認・反映済みのため必須)</span></label>
+        <textarea id="daily-report-edit-reason" rows="2" placeholder="例: 現場を間違えていたため／時間を記入し間違えたため など"></textarea>
+      </div>
       <div class="error" id="daily-report-error"></div>
       <button id="daily-report-submit">日報を提出する</button>
       <button type="button" class="secondary" id="daily-report-save-draft">下書きとして保存する</button>
@@ -3554,6 +3558,22 @@
         <div class="field-group" id="employee-detail-basic-fields"></div>
       </div>
       <button type="button" class="secondary" id="employee-detail-edit-basic-btn">基本情報を編集する</button>
+      <div class="card" id="ed-payment-method-card" style="display:none; margin-top:10px;">
+        <div class="section-title" style="margin-top:0;">技能実習生: 給与の受け取り方法(月ごと)</div>
+        <div class="hint" style="margin-bottom:8px;">出面と一緒に本人から送られてくる「現金/振込」の希望を月ごとに記録します。</div>
+        <label for="ed-payment-method-month">対象月</label>
+        <input type="month" id="ed-payment-method-month">
+        <label for="ed-payment-method-select">受け取り方法</label>
+        <select id="ed-payment-method-select">
+          <option value="">未設定</option>
+          <option value="bank_transfer">振込</option>
+          <option value="cash">現金</option>
+        </select>
+        <label for="ed-payment-method-note">メモ(任意)</label>
+        <input type="text" id="ed-payment-method-note" placeholder="例: 今月だけ現金希望と連絡あり">
+        <div class="hint-inline" id="ed-payment-method-status"></div>
+        <button type="button" class="secondary" id="ed-payment-method-save-btn" style="margin-top:8px;">保存する</button>
+      </div>
     </div>
     <div class="tab-panel" id="employee-detail-panel-leave">
       <div class="stat-mini-row">

@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v242-staging';
-const BUILD_DEPLOYED_AT = '2026-10-01T15:19:18.481Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v243-staging';
+const BUILD_DEPLOYED_AT = '2026-10-02T05:12:36.474Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9096,7 +9096,49 @@ async function loadEmployeeDetailBasic() {
       fieldRow('日報: 運転手', p.is_driver ? '対象' : null) + fieldRow('日報: 残業入力', p.can_overtime ? '対象' : null) +
       fieldRow('日報: 現場入力', p.can_input_site_duty ? '対象' : null) + fieldRow('日報: 営業入力', p.can_input_sales ? '対象' : null) +
       fieldRow('日報: 運搬入力', p.can_input_transport ? '対象' : null) + fieldRow('日報: 資格取得登録', p.can_input_qualification ? '対象' : null);
+    await loadEmployeeDetailPaymentMethod();
   } catch (e) { /* 無視 */ }
+}
+
+// 技能実習生の給与受け取り方法(振込/現金、月ごと)。月によって希望が変わるため固定属性ではなく
+// 月次レコード(employee_payment_method_monthly)として持つ(2026-10-02、関口社長の要望)。
+// is_foreign_worker=trueの社員だけ欄を表示する(他社員には不要なUIを増やさない)。
+async function loadEmployeeDetailPaymentMethod() {
+  const session = getSession();
+  const code = currentEmployeeDetailCode;
+  const card = document.getElementById('ed-payment-method-card');
+  const monthEl = document.getElementById('ed-payment-method-month');
+  if (!monthEl.value) monthEl.value = todayJST().slice(0, 7);
+  try {
+    const rows = await rpc('admin_get_employee_payment_method', { p_admin_employee_code: session.employeeCode, p_employee_code: code, p_year_month: monthEl.value });
+    const r = rows && rows[0];
+    if (!r) { card.style.display = 'none'; return; }
+    card.style.display = '';
+    document.getElementById('ed-payment-method-select').value = r.payment_method || '';
+    document.getElementById('ed-payment-method-note').value = r.note || '';
+    document.getElementById('ed-payment-method-status').textContent = r.updated_at
+      ? `最終更新: ${new Date(r.updated_at).toLocaleString('ja-JP')}${r.recorded_by ? `(${r.recorded_by})` : ''}`
+      : 'この月はまだ記録がありません。';
+  } catch (e) { card.style.display = 'none'; }
+}
+
+async function doSaveEmployeePaymentMethod() {
+  const session = getSession();
+  const code = currentEmployeeDetailCode;
+  const ym = document.getElementById('ed-payment-method-month').value;
+  const method = document.getElementById('ed-payment-method-select').value;
+  if (!ym) { alert('対象月を選択してください。'); return; }
+  if (!method) { alert('受け取り方法を選択してください。'); return; }
+  const btn = document.getElementById('ed-payment-method-save-btn');
+  btn.disabled = true;
+  try {
+    await rpc('admin_set_employee_payment_method', {
+      p_admin_employee_code: session.employeeCode, p_employee_code: code, p_year_month: ym,
+      p_payment_method: method, p_note: document.getElementById('ed-payment-method-note').value.trim() || null,
+    });
+    await loadEmployeeDetailPaymentMethod();
+  } catch (e) { alert(e.message || '保存に失敗しました。'); }
+  btn.disabled = false;
 }
 
 const LEAVE_TX_LABEL = { initial_grant: '付与(初回)', accrual: '付与', usage: '使用', adjustment: '調整/取消', carryover_expiry: '失効' };
@@ -14312,6 +14354,10 @@ async function loadDailyReportForDate(dateStr) {
   hint.style.display = 'none';
   submitBtn.disabled = false;
   addBtn.disabled = false;
+  const editReasonWrap = document.getElementById('daily-report-edit-reason-wrap');
+  const editReasonEl = document.getElementById('daily-report-edit-reason');
+  if (editReasonWrap) editReasonWrap.style.display = 'none';
+  if (editReasonEl) editReasonEl.value = '';
   document.getElementById('daily-report-entry-list').innerHTML = '';
   dailyReportEntrySeq = 0;
   await refreshDailyReportTargetIsDriver();
@@ -14474,24 +14520,29 @@ async function doSubmitDailyReport(isDraft) {
       // 本人が自分の日報を編集する経路だけ、修正申請の仕組み(request_daily_report_edit)を通す。
       // 既に確認・反映済みの日を書き換えようとした場合だけ理由の入力を求め、承認待ちになる
       // (代理入力・外注入力は既存どおり管理者の直接権限としてsubmit_daily_reportを使う)。
-      let reason = null;
-      for (;;) {
-        try {
-          const editResult = await rpc('request_daily_report_edit', {
-            p_employee_code: session.employeeCode, p_report_date: dateStr, p_entries: entries, p_reason: reason,
-          });
-          const er = editResult && editResult[0];
-          editRequiresApproval = !!(er && er.requires_approval);
-          r = { is_special: false, total_headcount: entries.reduce((s, e) => s + (e.headcount != null ? Number(e.headcount) : (e.work_type === '終日' ? 1 : 0.5)), 0), entry_count: entries.length };
-          break;
-        } catch (editErr) {
-          if (!reason && /修正理由を入力してください/.test(editErr.message || '')) {
-            reason = window.prompt('この日はすでに確認・反映済みのため、修正には理由が必要です。修正理由を入力してください。');
-            if (!reason || !reason.trim()) { throw new Error('修正には理由の入力が必要です。'); }
-            continue;
-          }
-          throw editErr;
+      // 2026-10-02修正: 理由の入力をwindow.prompt()に依存していたため、ネイティブダイアログが
+      // 使えない/抑制される環境(PWAのスタンドアロン表示・一部の組込みブラウザ等)では理由を
+      // 入力する手段が無く、「理由の入力が必要です」というエラーだけが出て詰む不具合があった
+      // (2026-10-02 佐川さんのLINE報告)。フォーム内の実テキスト欄(daily-report-edit-reason)
+      // を使い、無ければ空のまま送り、サーバーが要求してきたら欄を表示して再送を促す。
+      const reasonEl = document.getElementById('daily-report-edit-reason');
+      const reasonWrap = document.getElementById('daily-report-edit-reason-wrap');
+      const reason = reasonEl ? reasonEl.value.trim() : '';
+      try {
+        const editResult = await rpc('request_daily_report_edit', {
+          p_employee_code: session.employeeCode, p_report_date: dateStr, p_entries: entries, p_reason: reason || null,
+        });
+        const er = editResult && editResult[0];
+        editRequiresApproval = !!(er && er.requires_approval);
+        r = { is_special: false, total_headcount: entries.reduce((s, e) => s + (e.headcount != null ? Number(e.headcount) : (e.work_type === '終日' ? 1 : 0.5)), 0), entry_count: entries.length };
+        if (reasonWrap) reasonWrap.style.display = 'none';
+        if (reasonEl) reasonEl.value = '';
+      } catch (editErr) {
+        if (!reason && /修正理由を入力してください/.test(editErr.message || '')) {
+          if (reasonWrap) reasonWrap.style.display = 'block';
+          throw new Error('この日はすでに確認・反映済みのため、修正には理由の入力が必要です。上に表示された「修正理由」欄に入力してから、もう一度「日報を提出する」を押してください。');
         }
+        throw editErr;
       }
     } else {
       const result = await rpc('submit_daily_report', {
@@ -14655,6 +14706,19 @@ async function loadDailyReportLedger() {
 // 出勤簿の「最終確認して提出」ブロック(2026-10-01追加、Shota指示)。確認済みならその日時を表示し、
 // 未確認ならボタンを出す。確認すると、この期間は本人による編集ができなくなる
 // (submit_daily_report側でサーバーが拒否する。ここでは案内だけで、強制自体はサーバー側の仕事)。
+//
+// 2026-10-02誤操作対応: 鈴木さんが「<」「>」ナビで次の給与期間(まだ終わっていない進行中の期間)へ
+// 移動した状態のまま誤って最終確認ボタンを押し、本来確定すべきでない期間を確定してしまった実例が
+// 発生した(他に3名も同様の誤操作を確認済み)。期間の終了日(25日)を過ぎていない場合は、ボタン自体を
+// 無効化し理由を明示する(押せてしまうこと自体が誤操作の入口だったため、警告だけでなく無効化する)。
+// サーバー側(confirm_my_attendance_period)にも同じ判定を追加済み(多重防御、クライアント側だけに
+// 依存しない)。
+function isAttendancePeriodOver(endDateStr) {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  const todayStr = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+  return todayStr > endDateStr;
+}
+
 async function renderDailyReportLedgerConfirmBlock(session, start, end) {
   try {
     const rows = await rpc('get_my_attendance_period_confirmation', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
@@ -14666,28 +14730,61 @@ async function renderDailyReportLedgerConfirmBlock(session, start, end) {
       </div>`;
     }
   } catch (e) { /* 未確認として扱う */ }
+
+  if (!isAttendancePeriodOver(end)) {
+    return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
+      <div class="hint" style="margin-bottom:8px;">この期間(${start}〜${end})はまだ終わっていません。最終確認は期間終了後(${end}の翌日以降)に行ってください。「&lt;」「&gt;」で期間を移動した場合、確定したい期間を表示していることを確認してください。</div>
+      <button type="button" id="dr-ledger-confirm-btn" disabled title="この期間はまだ終わっていないため、最終確認できません">この期間を最終確認して提出する</button>
+      <div class="error" id="dr-ledger-confirm-error"></div>
+    </div>`;
+  }
+
+  // 2026-10-02修正: window.confirm()依存をやめ、実DOMのボタンで確認を取る(ネイティブダイアログが
+  // 抑制・無反応な環境〔PWAスタンドアロン表示・一部の組込みブラウザ等〕では、window.confirm()が
+  // 常にfalseを返す/何も表示されないことがあり、ボタンを押しても無反応に見える不具合があった
+  // 〔佐川さんのLINE報告〕)。
   return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
     <div class="hint" style="margin-bottom:8px;">内容を確認し、間違いが無ければ最終確認してください。確認すると、この期間はご自身では編集できなくなります。</div>
     <button type="button" id="dr-ledger-confirm-btn">この期間を最終確認して提出する</button>
+    <div id="dr-ledger-confirm-inline" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--border,#555);border-radius:8px;">
+      <div style="margin-bottom:8px;">${start}〜${end}の日報内容で間違いありませんか？確認すると、この期間はご自身で編集できなくなります。</div>
+      <button type="button" id="dr-ledger-confirm-yes-btn">はい、最終確認する</button>
+      <button type="button" class="secondary" id="dr-ledger-confirm-no-btn" style="margin-top:6px;">やめる</button>
+    </div>
     <div class="error" id="dr-ledger-confirm-error"></div>
   </div>`;
 }
 
 function wireDailyReportLedgerConfirmButton(session, start, end) {
   const btn = document.getElementById('dr-ledger-confirm-btn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    if (!confirm(`${start}〜${end}の日報内容で間違いありませんか？確認すると、この期間はご自身で編集できなくなります。`)) return;
-    btn.disabled = true;
-    try {
-      await rpc('confirm_my_attendance_period', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
-      await loadDailyReportLedger();
-    } catch (e) {
-      btn.disabled = false;
-      const errEl = document.getElementById('dr-ledger-confirm-error');
-      if (errEl) errEl.textContent = e.message || '確認に失敗しました。';
-    }
+  if (!btn || btn.disabled) return;
+  const inline = document.getElementById('dr-ledger-confirm-inline');
+  const yesBtn = document.getElementById('dr-ledger-confirm-yes-btn');
+  const noBtn = document.getElementById('dr-ledger-confirm-no-btn');
+  const errEl = document.getElementById('dr-ledger-confirm-error');
+  btn.addEventListener('click', () => {
+    if (errEl) errEl.textContent = '';
+    if (inline) inline.style.display = 'block';
+    btn.style.display = 'none';
   });
+  if (noBtn) {
+    noBtn.addEventListener('click', () => {
+      if (inline) inline.style.display = 'none';
+      btn.style.display = '';
+    });
+  }
+  if (yesBtn) {
+    yesBtn.addEventListener('click', async () => {
+      yesBtn.disabled = true;
+      try {
+        await rpc('confirm_my_attendance_period', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+        await loadDailyReportLedger();
+      } catch (e) {
+        yesBtn.disabled = false;
+        if (errEl) errEl.textContent = e.message || '確認に失敗しました。';
+      }
+    });
+  }
 }
 
 function shiftDailyReportCalMonth(delta) {
@@ -15076,6 +15173,7 @@ async function loadMyDailyReportSummary() {
       <div class="summary-grid">
         <div><span class="summary-label">出勤日数</span><span class="summary-value">${fmtN(s.work_days)}日</span></div>
         <div><span class="summary-label">総人工</span><span class="summary-value">${fmtN(s.total_headcount)}人工</span></div>
+        <div><span class="summary-label">出張日数</span><span class="summary-value">${fmtN(s.business_trip_days)}日</span></div>
         <div><span class="summary-label">残業時間</span><span class="summary-value">${fmtN(s.overtime_hours)}h</span></div>
         <div><span class="summary-label">通勤早出</span><span class="summary-value">${s.early_commute_count}回 / ${fmtN(s.early_commute_hours)}h</span></div>
         <div><span class="summary-label">通勤残業</span><span class="summary-value">${s.commute_overtime_count}回 / ${fmtN(s.commute_overtime_hours)}h</span></div>
@@ -15118,7 +15216,10 @@ async function renderMyDailyReportDetailBody(dateStr) {
     if (!rows || rows.length === 0) { body.innerHTML = '<div class="empty-state">この日の日報は見つかりませんでした</div>'; return; }
     const isCancelled = rows.every((r) => r.report_status === 'cancelled');
     const cancelledMeta = rows.find((r) => r.cancelled_at) || {};
-    const anyReflected = rows.some((r) => r.reflected);
+    // 2026-10-02修正: 取消済みの行(重複等で既に無効化された側)まで含めて判定すると、
+    // 現在有効なエントリ自体は未反映にも関わらず「反映済みのため管理者へ依頼」という
+    // 矛盾した注意書きが出てしまっていた(佐川さんのLINE報告)。現在有効な行だけで判定する。
+    const anyReflected = rows.some((r) => r.report_status !== 'cancelled' && r.reflected);
     const cancelledBannerHtml = isCancelled ? `
       <div class="card" style="margin-bottom:10px;border:1px solid var(--muted);background:rgba(128,128,128,0.08);">
         <div style="font-weight:700;margin-bottom:4px;">この日報は取消済みです</div>
@@ -15127,10 +15228,20 @@ async function renderMyDailyReportDetailBody(dateStr) {
         ${cancelledMeta.cancelled_at ? `<div class="field-row"><span>取消日時</span><span>${new Date(cancelledMeta.cancelled_at).toLocaleString('ja-JP')}</span></div>` : ''}
         <div class="hint-inline" style="margin-top:6px;">日付を間違えた場合は、正しい日付で日報を登録し直してください。</div>
       </div>` : '';
+    // 2026-10-02修正: window.confirm()/window.prompt()依存をやめ、実DOMのフォームで理由を
+    // 受け取る(ネイティブダイアログが抑制・無反応な環境では、取消ボタンを押しても何も起きて
+    // いないように見えていた。佐川さんのLINE報告)。
     const cancelButtonHtml = !isCancelled ? `
       <div style="margin-top:6px;">
         <button type="button" class="btn-secondary" id="my-daily-report-cancel-btn" style="width:100%;color:var(--danger);border-color:var(--danger);">この日報を取り消す（誤登録として無効にする）</button>
         <div class="hint-inline" style="margin-top:4px;">取消すると出勤・給与等の集計対象から除外されます。取消しても履歴には「取消済み」として残ります。${anyReflected ? '（この日報は既に集計シートへ反映済みのため、取消は管理者に依頼が必要な場合があります）' : ''}</div>
+        <div id="my-daily-report-cancel-form" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--danger);border-radius:8px;">
+          <label for="my-daily-report-cancel-reason">取消理由<span class="required-mark">(必須)</span></label>
+          <textarea id="my-daily-report-cancel-reason" rows="2" placeholder="例: 日付を間違えて登録した／現場を間違えた など"></textarea>
+          <div class="error" id="my-daily-report-cancel-error"></div>
+          <button type="button" id="my-daily-report-cancel-confirm-btn" style="margin-top:6px;color:var(--danger);border-color:var(--danger);">取消を確定する</button>
+          <button type="button" class="secondary" id="my-daily-report-cancel-abort-btn" style="margin-top:6px;">やめる</button>
+        </div>
       </div>` : '';
     body.innerHTML = `<div class="form-title" style="font-size:15px;">${dateStr}</div>` + cancelledBannerHtml + rows.map((r) => `
       <div class="card" style="margin-bottom:10px;${isCancelled ? 'opacity:0.7;' : ''}">
@@ -15157,32 +15268,52 @@ async function renderMyDailyReportDetailBody(dateStr) {
       </div>
     `).join('') + cancelButtonHtml;
     const cancelBtn = document.getElementById('my-daily-report-cancel-btn');
-    if (cancelBtn) cancelBtn.addEventListener('click', () => cancelMyDailyReport(dateStr));
+    const cancelForm = document.getElementById('my-daily-report-cancel-form');
+    if (cancelBtn && cancelForm) {
+      cancelBtn.addEventListener('click', () => {
+        cancelForm.style.display = 'block';
+        cancelBtn.style.display = 'none';
+      });
+      const abortBtn = document.getElementById('my-daily-report-cancel-abort-btn');
+      if (abortBtn) {
+        abortBtn.addEventListener('click', () => {
+          cancelForm.style.display = 'none';
+          cancelBtn.style.display = '';
+        });
+      }
+      const confirmBtn = document.getElementById('my-daily-report-cancel-confirm-btn');
+      if (confirmBtn) {
+        confirmBtn.addEventListener('click', () => {
+          const reasonEl = document.getElementById('my-daily-report-cancel-reason');
+          cancelMyDailyReport(dateStr, reasonEl ? reasonEl.value : '');
+        });
+      }
+    }
   } catch (e) {
     body.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
 }
 
-// 日報の取消(soft delete / void)。確認ダイアログ→理由入力→cancel_daily_report RPC。
+// 日報の取消(soft delete / void)。理由はrenderMyDailyReportDetailBodyが描画した実フォーム
+// (my-daily-report-cancel-form)から渡される。
 // 「人工0」ではなく明確な取消として無効化する(2026-09-01、ユーザー指示)。
-async function cancelMyDailyReport(dateStr) {
+// 2026-10-02修正: window.confirm()/window.prompt()を廃止(理由は上記注記のとおり)。
+async function cancelMyDailyReport(dateStr, reason) {
   const session = getSession();
-  if (!window.confirm(`${dateStr} の日報を取り消しますか？\n\n取消すと、出勤・人工・残業・給与・旅費などの集計対象から除外されます。\n履歴には「取消済み」として残ります。\n\n（日付を間違えた場合は、取消したうえで正しい日付で登録し直してください）`)) {
+  const errEl = document.getElementById('my-daily-report-cancel-error');
+  if (errEl) errEl.textContent = '';
+  if (!reason || !reason.trim()) {
+    if (errEl) errEl.textContent = '取消理由を入力してください。';
     return;
   }
-  const reason = window.prompt('取消理由を入力してください（例: 日付を間違えて登録した / 現場を間違えた など）');
-  if (reason === null) return; // キャンセル
-  if (!reason.trim()) { alert('取消理由を入力してください。'); return; }
+  const confirmBtn = document.getElementById('my-daily-report-cancel-confirm-btn');
+  if (confirmBtn) confirmBtn.disabled = true;
   try {
-    const res = await rpc('cancel_daily_report', { p_employee_code: session.employeeCode, p_report_date: dateStr, p_reason: reason.trim() });
-    const row = Array.isArray(res) ? res[0] : res;
-    const hadReflected = row && (row.out_had_reflected === true || row.out_had_reflected === 'true');
-    let msg = 'この日報を取消しました。集計対象から除外されます。';
-    if (hadReflected) msg += '\n（集計シートへの反映解除は自動処理で行われます）';
-    alert(msg);
+    await rpc('cancel_daily_report', { p_employee_code: session.employeeCode, p_report_date: dateStr, p_reason: reason.trim() });
     await renderMyDailyReportDetailBody(dateStr); // 本文のみ再描画(取消済みバナー表示、showScreen再帰を避ける)
   } catch (e) {
-    alert(e.message || '取消に失敗しました。');
+    if (confirmBtn) confirmBtn.disabled = false;
+    if (errEl) errEl.textContent = e.message || '取消に失敗しました。';
   }
 }
 
@@ -18989,6 +19120,8 @@ function init() {
   document.getElementById('supply-master-submit').addEventListener('click', doSaveSupplyMasterItem);
   document.getElementById('employee-detail-edit-basic-btn').addEventListener('click', openEmployeeEditBasic);
   document.getElementById('employee-edit-submit').addEventListener('click', doSaveEmployeeBasic);
+  document.getElementById('ed-payment-method-month').addEventListener('change', loadEmployeeDetailPaymentMethod);
+  document.getElementById('ed-payment-method-save-btn').addEventListener('click', doSaveEmployeePaymentMethod);
   document.getElementById('employee-detail-revoke-all-devices-btn').addEventListener('click', async () => {
     if (!confirm(`${currentEmployeeDetailCode}のログイン中の全端末を無効化しますか?全ての端末で次回利用時に暗証番号の再入力が必要になります。`)) return;
     const session = getSession();
