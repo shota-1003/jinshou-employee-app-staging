@@ -1357,10 +1357,15 @@ button.link {
   body.printing-ab .attendance-book-table tr.ab-sat td { background: #deeaf6 !important; }
   body.printing-ab .attendance-book-table tr { page-break-inside: avoid; }
   body.printing-ab .ab-scroll { overflow: visible !important; border: 1px solid #888 !important; }
-  body.printing-ab .ab-title { font-size: 15px; }
-  body.printing-ab .ab-foot-cell { padding: 3px 4px; }
-  body.printing-ab .ab-foot-label { font-size: 8.5px; }
-  body.printing-ab .ab-foot-val { font-size: 12px; }
+  body.printing-ab .attendance-book-table td.ab-site, body.printing-ab .attendance-book-table td.ab-note { min-width: 0; font-size: 9px; }
+  body.printing-ab .attendance-book-table th, body.printing-ab .attendance-book-table td { line-height: 1.15; }
+  body.printing-ab .ab-head { padding: 0 0 4px; }
+  body.printing-ab .ab-title { font-size: 14px; }
+  body.printing-ab .ab-foot { margin-top: 5px; gap: 3px; }
+  body.printing-ab .ab-foot-row { grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  body.printing-ab .ab-foot-cell { padding: 2px 3px; }
+  body.printing-ab .ab-foot-label { font-size: 8px; line-height: 1.15; }
+  body.printing-ab .ab-foot-val { font-size: 11px; }
 }
 
 /* 2026-10-02 Shota指示「絞り込みは縦をやめて横に3列」。PC利用が前提の集計画面のため3列を基本とし、
