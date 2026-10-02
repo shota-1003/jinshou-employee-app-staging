@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v248-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T16:31:01.473Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v249-staging';
+const BUILD_DEPLOYED_AT = '2026-10-02T17:21:53.324Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9100,11 +9100,14 @@ async function loadEmployeeDetailBasic() {
     const rows = await rpc('admin_get_employee_profile', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
     const p = rows && rows[0];
     if (!p) return;
+    let dependents = null;
+    try { dependents = await rpc('admin_get_employee_dependents', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code }); } catch (e) { /* 扶養人数だけ読めなくても基本情報は表示する */ }
     renderAvatar('employee-detail-avatar', p.employee_name, p.profile_photo_url);
     document.getElementById('employee-detail-name').textContent = p.employee_name;
     document.getElementById('employee-detail-code').textContent = `社員番号: ${p.employee_code}・${p.status === 'active' ? '在籍中' : (p.status === 'retired' ? '退職' : '在籍外')}`;
     document.getElementById('employee-detail-basic-fields').innerHTML =
       fieldRow('フリガナ', p.furigana) + fieldRow('生年月日', p.birth_date ? new Date(p.birth_date).toLocaleDateString('ja-JP') : null) +
+      fieldRow('扶養人数', dependents != null ? `${dependents}人` : null) +
       fieldRow('入社日', p.hire_date ? new Date(p.hire_date).toLocaleDateString('ja-JP') : null) + fieldRow('所属/役割', p.department) +
       fieldRow('権限', p.request_role === 'executive' ? '管理者' : '一般社員') +
       fieldRow('メールアドレス', p.email) + fieldRow('電話番号', p.phone) + fieldRow('郵便番号', p.postal_code) + fieldRow('住所', p.address) +
@@ -10281,6 +10284,7 @@ async function loadEmployeeDetailRequests() {
 async function openEmployeeEditBasic() {
   document.getElementById('employee-edit-furigana').value = '';
   document.getElementById('employee-edit-birth').value = '';
+  document.getElementById('employee-edit-dependents').value = '';
   document.getElementById('employee-edit-department').value = '';
   document.getElementById('employee-edit-headcount-category').value = '';
   hideError('employee-edit-error');
@@ -10301,6 +10305,10 @@ async function openEmployeeEditBasic() {
     if (p) {
       document.getElementById('employee-edit-furigana').value = p.furigana || '';
       document.getElementById('employee-edit-birth').value = p.birth_date ? p.birth_date.slice(0, 10) : '';
+      try {
+        const dep = await rpc('admin_get_employee_dependents', { p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode });
+        document.getElementById('employee-edit-dependents').value = dep != null ? String(dep) : '';
+      } catch (e) { /* 読めなければ空欄のまま(空欄は変更なし) */ }
       document.getElementById('employee-edit-show-birthday').checked = p.show_birthday_on_calendar !== false;
       document.getElementById('employee-edit-department').value = p.department || '';
       document.getElementById('employee-edit-headcount-category').value = p.headcount_category || '';
@@ -10326,6 +10334,8 @@ async function doSaveEmployeeBasic() {
   const furigana = document.getElementById('employee-edit-furigana').value.trim();
   const birth = document.getElementById('employee-edit-birth').value;
   const department = document.getElementById('employee-edit-department').value.trim();
+  const dependentsRaw = document.getElementById('employee-edit-dependents').value.trim();
+  if (dependentsRaw !== '' && (!/^\d+$/.test(dependentsRaw) || Number(dependentsRaw) > 20)) { showError('employee-edit-error', '扶養人数は0〜20の整数で入力してください。'); return; }
   hideError('employee-edit-error');
   const btn = document.getElementById('employee-edit-submit');
   btn.disabled = true;
@@ -10333,6 +10343,8 @@ async function doSaveEmployeeBasic() {
     await rpc('admin_update_employee_basic', {
       p_admin_employee_code: session.employeeCode, p_target_employee_code: currentEmployeeDetailCode,
       p_furigana: furigana || null, p_birth_date: birth || null, p_department: department || null,
+      // 空欄は「変更しない」(NULL)。0は「扶養なし」として登録する。
+      p_dependents_count: dependentsRaw === '' ? null : Number(dependentsRaw),
       p_is_driver: document.getElementById('employee-edit-is-driver').checked,
       p_can_overtime: document.getElementById('employee-edit-can-overtime').checked,
       p_can_input_site_duty: document.getElementById('employee-edit-can-site-duty').checked,

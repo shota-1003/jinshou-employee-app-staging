@@ -3782,6 +3782,8 @@
       <input type="text" id="employee-edit-furigana">
       <label for="employee-edit-birth">生年月日</label>
       <input type="date" id="employee-edit-birth">
+      <label for="employee-edit-dependents">扶養人数(子供1人につき扶養手当3,000円。未入力のままだと手当は付きません)</label>
+      <input type="number" id="employee-edit-dependents" min="0" max="20" step="1" inputmode="numeric" placeholder="例: 2(いない場合は0)">
       <div class="checkbox-row">
         <input type="checkbox" id="employee-edit-show-birthday">
         <label>誕生日を社内カレンダーに表示する(生年・年齢は表示されません)</label>
