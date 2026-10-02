@@ -1316,6 +1316,12 @@ button.link {
 .jd-print-workers-table th { background: #f0f0f0; }
 .jd-print-total-row td { background: #f7f7f7; }
 
+/* 2026-10-02 Shota指示「絞り込みは縦をやめて横に3列」。PC利用が前提の集計画面のため3列を基本とし、
+   幅が狭い画面(スマホ)だけ縦に戻して選択欄が潰れないようにする。 */
+.am-filter-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.am-filter-col { min-width: 0; }
+@media (max-width: 640px) { .am-filter-grid { grid-template-columns: 1fr; } }
+
 /* ===== 出面集計マトリクス(縦=社員/外注会社/現場、横=日、右端=月合計) ===== */
 .attendance-matrix-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--card-bg); }
 .attendance-matrix-table { border-collapse: collapse; font-size: 12.5px; white-space: nowrap; }

@@ -3449,15 +3449,23 @@
       <button type="button" class="filter-chip" data-view="subcontractor_company">外注会社別</button>
       <button type="button" class="filter-chip" data-view="site">現場別</button>
     </div>
-    <label for="am-employee-filter">社員で絞り込み</label>
-    <div class="hint-inline">任意</div>
-    <select id="am-employee-filter"><option value="">すべての社員</option></select>
-    <label for="am-company-filter">外注会社で絞り込み</label>
-    <div class="hint-inline">任意</div>
-    <select id="am-company-filter"><option value="">すべての外注会社</option></select>
-    <label for="am-site-filter">現場で絞り込み</label>
-    <div class="hint-inline">任意</div>
-    <select id="am-site-filter"><option value="">すべての現場</option></select>
+    <div class="am-filter-grid">
+      <div class="am-filter-col">
+        <label for="am-employee-filter">社員で絞り込み</label>
+        <div class="hint-inline">任意</div>
+        <select id="am-employee-filter"><option value="">すべての社員</option></select>
+      </div>
+      <div class="am-filter-col">
+        <label for="am-company-filter">外注会社で絞り込み</label>
+        <div class="hint-inline">任意</div>
+        <select id="am-company-filter"><option value="">すべての外注会社</option></select>
+      </div>
+      <div class="am-filter-col">
+        <label for="am-site-filter">現場で絞り込み</label>
+        <div class="hint-inline">任意</div>
+        <select id="am-site-filter"><option value="">すべての現場</option></select>
+      </div>
+    </div>
     <div class="hint" id="am-hint" style="margin:10px 0;"></div>
     <div class="attendance-matrix-wrap" id="am-matrix-wrap"></div>
   </section>
