@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v246-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T11:22:25.615Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v247-staging';
+const BUILD_DEPLOYED_AT = '2026-10-02T15:01:45.741Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14715,28 +14715,31 @@ function attendanceBookHtml(rows, summary, opts) {
     [['実労働日数', fullDays + paidDays + halfDays * 0.5], ['基本給日数', fullDays + halfDays * 0.5], ['所定労働日残業時間', overtime - sundayOvertime], ['所定休日残業時間', sundayOvertime], ['当日欠勤', s ? Number(s.absence_days || 0) : dash], ['有給日数', paidDays]],
     [['通勤早出', sum('early_commute_hours')], ['通勤100㎞越え', rows.filter((r) => r.is_over_100km).length], ['資格日数', s ? Number(s.qualification_count || 0) : dash], ['通勤残業', sum('commute_overtime_hours')], ['現場', s ? Number(s.field_duty_count || 0) : dash], ['営業', s ? Number(s.sales_count || 0) : dash], ['運搬', s ? Number(s.transport_count || 0) : dash]],
   ];
+  // 備考には「数値の列に出ない注意」だけを出す(残業・通勤早出・通勤残業・100㎞・出張は専用の列がある)。
+  // 確認待ち・食い違いの日報は、スプレッドシートにも入らないため人工・残業等には数えず、現場名を薄く別に出す。
   const noteParts = (r) => {
     const p = [];
-    if (r.is_trip_by_site) p.push('出張');
-    if (r.is_business_trip && !r.is_trip_by_site) p.push('出張チェックあり(現場の設定とは一致していません)');
-    if (!r.is_business_trip && r.is_trip_by_site && isWorked(r)) p.push('出張チェックなし(現場の設定ではシート上は出張になります)');
+    if (r.is_business_trip && !r.is_trip_by_site) p.push('出張チェックあり(この現場は出張扱いではありません)');
+    if (!r.is_business_trip && r.is_trip_by_site && isWorked(r)) p.push('出張チェックなし(この現場は出張扱いです)');
     if (Number(r.headcount) === 0.5) p.push('半日');
-    if (Number(r.overtime_hours) > 0) p.push(`残業${attendanceBookNum(r.overtime_hours)}h`);
-    if (Number(r.early_commute_hours) > 0) p.push(`通勤早出${attendanceBookNum(r.early_commute_hours)}h`);
-    if (Number(r.commute_overtime_hours) > 0) p.push(`通勤残業${attendanceBookNum(r.commute_overtime_hours)}h`);
-    if (r.is_over_100km) p.push('通勤100㎞越え');
-    if (r.has_pending) p.push('管理者確認待ち');
+    if (r.has_conflict) p.push('人工と勤務区分が食い違っています(管理者の確認が必要・集計に未算入)');
+    if (r.has_pending) p.push('管理者の確認待ち(確定するまで集計に未算入)');
     if (isWorked(r) && r.is_unreflected) p.push('シート未反映');
     return p;
   };
+  const pendingLabel = (r) => (r.has_conflict && r.has_pending ? '確認待ち・食い違い' : (r.has_conflict ? '人工と区分が食い違い' : '確認待ち'));
+  const hoursCell = (v) => (Number(v) > 0 ? attendanceBookNum(v) : '');
   const bodyRows = rows.map((r, i) => {
     const cls = [r.weekday_jp === '日' ? 'ab-sun' : (r.weekday_jp === '土' ? 'ab-sat' : ''), isWorked(r) || r.is_paid_leave ? '' : 'ab-off'].filter(Boolean).join(' ');
     const worked1 = isWorked(r);
     return `<tr class="${cls}">
       <td class="ab-date">${dateLabel(r.work_date, i)}</td>
       <td class="ab-wd">${esc(r.weekday_jp)}</td>
-      <td class="ab-site">${esc(r.site_names || '')}</td>
+      <td class="ab-site">${esc(r.site_names || '')}${r.pending_sites ? `<span class="ab-pending">${esc(r.pending_sites)}(${esc(pendingLabel(r))})</span>` : ''}</td>
       <td class="ab-num">${Number(r.overtime_hours) > 0 ? attendanceBookNum(r.overtime_hours) : (worked1 ? '0' : '')}</td>
+      <td class="ab-num">${hoursCell(r.early_commute_hours)}</td>
+      <td class="ab-num">${hoursCell(r.commute_overtime_hours)}</td>
+      <td class="ab-mark">${r.is_over_100km ? '〇' : ''}</td>
       <td>${esc(r.is_trip_by_site ? (r.trip_prefectures || '') : '')}</td>
       <td class="ab-mark">${r.is_trip_by_site ? '〇' : ''}</td>
       <td class="ab-mark">${r.is_night ? '〇' : ''}</td>
@@ -14749,10 +14752,10 @@ function attendanceBookHtml(rows, summary, opts) {
   return `<div class="attendance-book">
     <div class="ab-head">
       <div class="ab-title">${esc(o.title || '出勤簿')}</div>
-      <div class="ab-meta">${o.name ? `氏名 <strong>${esc(o.name)}</strong>` : ''}${o.periodLabel ? `<span>${esc(o.periodLabel)}</span>` : ''}</div>
+      <div class="ab-meta">${o.name ? `氏名 <strong>${esc(o.name)}</strong>` : ''}${o.periodLabel ? `<span>${esc(o.periodLabel)}</span>` : ''}<button type="button" class="secondary ab-print-btn">印刷</button></div>
     </div>
     <div class="ab-scroll"><table class="attendance-book-table">
-      <thead><tr><th>日付</th><th>曜日</th><th>現場</th><th>残業</th><th>出張</th><th>出張日数</th><th>深夜</th><th>日曜</th><th>有給</th><th>備考</th></tr></thead>
+      <thead><tr><th>日付</th><th>曜日</th><th>現場</th><th>残業</th><th>通勤早出</th><th>通勤残業</th><th>100㎞</th><th>出張</th><th>出張日数</th><th>深夜</th><th>日曜</th><th>有給</th><th>備考</th></tr></thead>
       <tbody>${bodyRows}</tbody>
     </table></div>
     <div class="ab-foot">${footHtml}</div>
@@ -14800,6 +14803,26 @@ async function loadPeriodConfirmChangesAdmin() {
     list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
 }
+
+// 出勤簿の印刷(2026-10-02 Shota指示「あと印刷できるように」)。出勤簿だけを白地・黒文字・A4で印刷する
+// (画面の他の部分は印刷用CSSで隠す。印刷後に一時要素を片付ける)。
+function printAttendanceBook(btn) {
+  const book = btn.closest('.attendance-book');
+  if (!book) return;
+  const root = document.createElement('div');
+  root.id = 'ab-print-root';
+  root.innerHTML = book.outerHTML;
+  root.querySelectorAll('.ab-print-btn').forEach((b) => b.remove());
+  document.body.appendChild(root);
+  document.body.classList.add('printing-ab');
+  const done = () => { document.body.classList.remove('printing-ab'); root.remove(); window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('.ab-print-btn') : null;
+  if (b) printAttendanceBook(b);
+});
 
 // 出勤簿(2026-09-29 Shota指示「スプレッドシートの出勤簿のように反映させたい」→ 2026-10-02に
 // スプレッドシートと同じ見た目のプレビューへ作り直し)。
