@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v245-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T11:00:30.571Z';
+const BUILD_DEPLOYED_AT = '2026-10-02T11:01:52.568Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -15261,7 +15261,7 @@ async function renderMyDailyReportDetailBody(dateStr) {
           <label for="my-daily-report-cancel-reason">取消理由<span class="required-mark">(必須)</span></label>
           <textarea id="my-daily-report-cancel-reason" rows="2" placeholder="例: 日付を間違えて登録した／現場を間違えた など"></textarea>
           <div class="error" id="my-daily-report-cancel-error"></div>
-          <button type="button" id="my-daily-report-cancel-confirm-btn" style="margin-top:6px;color:var(--danger);border-color:var(--danger);">取消を確定する</button>
+          <button type="button" class="secondary" id="my-daily-report-cancel-confirm-btn" style="margin-top:6px;color:var(--danger);border-color:var(--danger);font-weight:700;">取消を確定する</button>
           <button type="button" class="secondary" id="my-daily-report-cancel-abort-btn" style="margin-top:6px;">やめる</button>
         </div>
       </div>` : '';
