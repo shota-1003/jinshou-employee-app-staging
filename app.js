@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v245-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T11:01:52.568Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v246-staging';
+const BUILD_DEPLOYED_AT = '2026-10-02T11:22:25.615Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10118,7 +10118,13 @@ async function openAttendanceDetail(groupId, groupLabel) {
               <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="6"></td></tr>
             </tbody>
           </table></div>`);
-        listEl.innerHTML = ledgerHtml + `<div class="attendance-summary-row">
+        // スプレッドシートと同じ形式の出勤簿プレビュー(2026-10-02 Shota指示)。失敗しても下の詳細は出す。
+        let bookHtml = '';
+        try {
+          const bookRows = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end });
+          bookHtml = `<div style="margin-bottom:16px;"><div class="form-title" style="font-size:15px;">出勤簿プレビュー(スプレッドシートと同じ形式)</div>${attendanceBookHtml(bookRows, null, { title: `${ym.year}年${ym.month}月度`, name: groupLabel, periodLabel: `${start}〜${end}` })}</div>`;
+        } catch (e) { bookHtml = ''; }
+        listEl.innerHTML = bookHtml + ledgerHtml + `<div class="attendance-summary-row">
             <div class="attendance-summary-col"><div class="form-title">現場別合計(${start}〜${end})</div>${siteTotalsHtml}</div>
             <div class="attendance-summary-col"><div class="form-title">勤怠・手当集計(${start}〜${end})</div>${teateTotalsHtml}</div>
           </div>`;
@@ -14674,10 +14680,129 @@ function setDailyReportView(mode) {
   }
 }
 
-// 出勤簿(2026-09-29 Shota指示「スプレッドシートの出勤簿のように反映させたい」)。
-// 新しいRPCは作らず、リスト表示と同じget_my_daily_reportsを1日1行の表として並べる
-// (現場・区分・人工・残業・備考はスプレッドシートの出勤簿タブに書かれている内容と同じ)。
-// 月末合計は既存の給与期間集計(#my-daily-report-summary、全タブ共通で上に出ている)をそのまま使う。
+// 出勤簿プレビュー(2026-10-02 Shota指示「出勤簿のプレビュー作って。スプレッドシートと同じ奴」)。
+// スプレッドシートの出勤簿00XXタブと同じ列(日付・曜日・現場・残業・出張・出張日数・深夜・日曜・有給・備考)と
+// 同じ3段の合計欄で、日付ごとに1行に並べる。数え方もシートと同じ(データはget_my_attendance_book /
+// admin_get_employee_attendance_book。実物のシートと日ごとに突き合わせて確認済み)。
+// 労働時間(開始・終了・休憩)の列はシート上でも使われていない空欄なので省いている。
+function attendanceBookNum(n) {
+  const x = Number(n || 0);
+  return Number.isInteger(x) ? String(x) : String(Math.round(x * 100) / 100);
+}
+
+function attendanceBookHtml(rows, summary, opts) {
+  const o = opts || {};
+  const esc = (v) => exdEsc(String(v == null ? '' : v));
+  const dateLabel = (d, i) => {
+    const m = Number(d.slice(5, 7)); const day = Number(d.slice(8, 10));
+    return (i === 0 || day === 1) ? `${m}月${day}日` : `${day}日`;
+  };
+  const isWorked = (r) => Number(r.headcount) > 0 && !!r.site_names;
+  const worked = rows.filter(isWorked);
+  const halfDays = worked.filter((r) => Number(r.headcount) === 0.5).length;
+  const fullDays = worked.length - halfDays;
+  const sum = (key, list) => (list || rows).reduce((a, r) => a + Number(r[key] || 0), 0);
+  const overtime = sum('overtime_hours');
+  const sundayWork = rows.filter((r) => r.is_sunday_work);
+  const sundayOvertime = sum('overtime_hours', sundayWork);
+  const tripDays = rows.filter((r) => r.is_trip_by_site).length;
+  const nightDays = rows.filter((r) => r.is_night).length;
+  const paidDays = rows.filter((r) => r.is_paid_leave).length;
+  const s = summary || null;
+  const dash = '-';
+  const blocks = [
+    [['出勤日数・1日', fullDays], ['出勤日数・半日', halfDays], ['残業時間', overtime], ['所定休日出勤日数', sundayWork.length], ['出張日数', tripDays], ['夜勤日数', nightDays]],
+    [['実労働日数', fullDays + paidDays + halfDays * 0.5], ['基本給日数', fullDays + halfDays * 0.5], ['所定労働日残業時間', overtime - sundayOvertime], ['所定休日残業時間', sundayOvertime], ['当日欠勤', s ? Number(s.absence_days || 0) : dash], ['有給日数', paidDays]],
+    [['通勤早出', sum('early_commute_hours')], ['通勤100㎞越え', rows.filter((r) => r.is_over_100km).length], ['資格日数', s ? Number(s.qualification_count || 0) : dash], ['通勤残業', sum('commute_overtime_hours')], ['現場', s ? Number(s.field_duty_count || 0) : dash], ['営業', s ? Number(s.sales_count || 0) : dash], ['運搬', s ? Number(s.transport_count || 0) : dash]],
+  ];
+  const noteParts = (r) => {
+    const p = [];
+    if (r.is_trip_by_site) p.push('出張');
+    if (r.is_business_trip && !r.is_trip_by_site) p.push('出張チェックあり(現場の設定とは一致していません)');
+    if (!r.is_business_trip && r.is_trip_by_site && isWorked(r)) p.push('出張チェックなし(現場の設定ではシート上は出張になります)');
+    if (Number(r.headcount) === 0.5) p.push('半日');
+    if (Number(r.overtime_hours) > 0) p.push(`残業${attendanceBookNum(r.overtime_hours)}h`);
+    if (Number(r.early_commute_hours) > 0) p.push(`通勤早出${attendanceBookNum(r.early_commute_hours)}h`);
+    if (Number(r.commute_overtime_hours) > 0) p.push(`通勤残業${attendanceBookNum(r.commute_overtime_hours)}h`);
+    if (r.is_over_100km) p.push('通勤100㎞越え');
+    if (r.has_pending) p.push('管理者確認待ち');
+    if (isWorked(r) && r.is_unreflected) p.push('シート未反映');
+    return p;
+  };
+  const bodyRows = rows.map((r, i) => {
+    const cls = [r.weekday_jp === '日' ? 'ab-sun' : (r.weekday_jp === '土' ? 'ab-sat' : ''), isWorked(r) || r.is_paid_leave ? '' : 'ab-off'].filter(Boolean).join(' ');
+    const worked1 = isWorked(r);
+    return `<tr class="${cls}">
+      <td class="ab-date">${dateLabel(r.work_date, i)}</td>
+      <td class="ab-wd">${esc(r.weekday_jp)}</td>
+      <td class="ab-site">${esc(r.site_names || '')}</td>
+      <td class="ab-num">${Number(r.overtime_hours) > 0 ? attendanceBookNum(r.overtime_hours) : (worked1 ? '0' : '')}</td>
+      <td>${esc(r.is_trip_by_site ? (r.trip_prefectures || '') : '')}</td>
+      <td class="ab-mark">${r.is_trip_by_site ? '〇' : ''}</td>
+      <td class="ab-mark">${r.is_night ? '〇' : ''}</td>
+      <td class="ab-mark">${r.is_sunday_work ? '〇' : ''}</td>
+      <td class="ab-mark">${r.is_paid_leave ? '〇' : ''}</td>
+      <td class="ab-note">${esc(noteParts(r).join(' / '))}</td>
+    </tr>`;
+  }).join('');
+  const footHtml = blocks.map((blk) => `<div class="ab-foot-row">${blk.map(([label, v]) => `<div class="ab-foot-cell"><div class="ab-foot-label">${esc(label)}</div><div class="ab-foot-val">${typeof v === 'number' ? attendanceBookNum(v) : esc(v)}</div></div>`).join('')}</div>`).join('');
+  return `<div class="attendance-book">
+    <div class="ab-head">
+      <div class="ab-title">${esc(o.title || '出勤簿')}</div>
+      <div class="ab-meta">${o.name ? `氏名 <strong>${esc(o.name)}</strong>` : ''}${o.periodLabel ? `<span>${esc(o.periodLabel)}</span>` : ''}</div>
+    </div>
+    <div class="ab-scroll"><table class="attendance-book-table">
+      <thead><tr><th>日付</th><th>曜日</th><th>現場</th><th>残業</th><th>出張</th><th>出張日数</th><th>深夜</th><th>日曜</th><th>有給</th><th>備考</th></tr></thead>
+      <tbody>${bodyRows}</tbody>
+    </table></div>
+    <div class="ab-foot">${footHtml}</div>
+  </div>`;
+}
+
+// 管理者ダッシュボードの「本人の最終確認後に変更された日報」カードの遷移先(2026-10-02 Shota指摘
+// 「押してもこのページ〔日報管理のトップ〕に行くだけ」)。件数だけで中身を見る画面が無かった。
+async function loadPeriodConfirmChangesAdmin() {
+  const session = getSession();
+  const list = document.getElementById('period-confirm-changes-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_changes_after_period_confirm', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="empty-state">変更された日報はありません</div>'; return; }
+    const fmtDT = (v) => new Date(v).toLocaleString('ja-JP');
+    list.innerHTML = rows.map((r, i) => `
+      <div class="card" style="margin-bottom:10px;" data-idx="${i}">
+        <div class="row1" style="display:flex;justify-content:space-between;gap:8px;">
+          <strong>${exdEsc(r.employee_name)}(${exdEsc(r.employee_code)})</strong><span>${exdEsc(r.report_date)}</span>
+        </div>
+        <div class="hint-inline">現在の内容: ${exdEsc(r.site_names || '-')} / ${attendanceBookNum(r.headcount)}人工${Number(r.overtime_hours) > 0 ? ` / 残業${attendanceBookNum(r.overtime_hours)}h` : ''}</div>
+        <div class="hint-inline">変更: ${exdEsc(r.actor_name || '-')} が ${fmtDT(r.changed_at)}</div>
+        <div class="hint-inline">本人の最終確認: ${fmtDT(r.employee_confirmed_at)}(対象期間 ${exdEsc(r.period_start)}〜${exdEsc(r.period_end)}、表示は給料日 ${exdEsc(r.payday)} まで)</div>
+        <button type="button" class="secondary pcc-book-btn" style="margin-top:6px;">この人の出勤簿を見る</button>
+        <div class="pcc-book" style="display:none;margin-top:8px;"></div>
+      </div>`).join('');
+    list.querySelectorAll('.card').forEach((card) => {
+      const r = rows[Number(card.dataset.idx)];
+      const btn = card.querySelector('.pcc-book-btn');
+      const box = card.querySelector('.pcc-book');
+      btn.addEventListener('click', async () => {
+        if (box.dataset.loaded) { const open = box.style.display !== 'none'; box.style.display = open ? 'none' : 'block'; btn.textContent = open ? 'この人の出勤簿を見る' : '出勤簿を閉じる'; return; }
+        btn.disabled = true; box.style.display = 'block'; box.innerHTML = '<div class="hint">読み込み中...</div>';
+        try {
+          const book = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: r.employee_code, p_period_start: r.period_start, p_period_end: r.period_end });
+          const endMonth = Number(String(r.period_end).slice(5, 7)); const endYear = Number(String(r.period_end).slice(0, 4));
+          box.innerHTML = attendanceBookHtml(book, null, { title: `${endYear}年${endMonth}月度`, name: r.employee_name, periodLabel: `${r.period_start}〜${r.period_end}` });
+          box.dataset.loaded = '1'; btn.textContent = '出勤簿を閉じる';
+        } catch (e) { box.innerHTML = '<div class="error show">出勤簿を読み込めませんでした。</div>'; }
+        btn.disabled = false;
+      });
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
+  }
+}
+
+// 出勤簿(2026-09-29 Shota指示「スプレッドシートの出勤簿のように反映させたい」→ 2026-10-02に
+// スプレッドシートと同じ見た目のプレビューへ作り直し)。
 async function loadDailyReportLedger() {
   const session = getSession();
   initDailyReportPeriodIfNeeded();
@@ -14685,34 +14810,17 @@ async function loadDailyReportLedger() {
   el.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     const { start, end } = computeDailyReportPeriodBounds(dailyReportPeriodYear, dailyReportPeriodMonth, dailyReportSummaryPeriodType);
-    const rows = await rpc('get_my_daily_reports', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+    const [rows, sumRows] = await Promise.all([
+      rpc('get_my_attendance_book', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end }),
+      rpc('get_my_daily_report_month_summary', { p_employee_code: session.employeeCode, p_year: dailyReportPeriodYear, p_month: dailyReportPeriodMonth, p_period_type: dailyReportSummaryPeriodType }).catch(() => null),
+    ]);
     const confirmHtml = await renderDailyReportLedgerConfirmBlock(session, start, end);
     if (!rows || rows.length === 0) { el.innerHTML = confirmHtml + '<div class="empty-state">この期間の日報はありません</div>'; return; }
-    const sorted = rows.slice().sort((a, b) => a.report_date.localeCompare(b.report_date));
-    el.innerHTML = confirmHtml + `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
-      <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>残業</th><th>備考</th></tr></thead>
-      <tbody>${sorted.map((r) => {
-    if (r.report_status === 'cancelled') {
-      return `<tr class="is-cancelled"><td>${r.report_date}</td><td colspan="4">取消済み</td><td></td></tr>`;
-    }
-    if (r.is_system_holiday) {
-      return `<tr class="is-holiday-auto"><td>${r.report_date}</td><td colspan="4">休日（システム自動登録）</td><td></td></tr>`;
-    }
-    const remarks = [];
-    if (r.is_early_commute) remarks.push(`通勤早出${Number(r.early_commute_hours)}h`);
-    if (r.is_commute_overtime) remarks.push(`通勤残業${Number(r.commute_overtime_hours)}h`);
-    if (r.is_over_100km) remarks.push('通勤100km超');
-    if (r.is_special) remarks.push('管理者確認中');
-    return `<tr>
-        <td>${r.report_date}</td>
-        <td>${exdEsc(r.site_names.join('・'))}</td>
-        <td>${exdEsc(r.work_types.join('・'))}</td>
-        <td class="numeral">${Number(r.total_headcount).toFixed(1)}</td>
-        <td class="numeral">${Number(r.overtime_hours) > 0 ? Number(r.overtime_hours) : ''}</td>
-        <td>${exdEsc(remarks.join('・'))}</td>
-      </tr>`;
-  }).join('')}</tbody>
-    </table></div>`;
+    el.innerHTML = confirmHtml + attendanceBookHtml(rows, sumRows && sumRows[0], {
+      title: `${dailyReportPeriodYear}年${dailyReportPeriodMonth}月度`,
+      name: session.employeeName || '',
+      periodLabel: `${start}〜${end}`,
+    });
     wireDailyReportLedgerConfirmButton(session, start, end);
   } catch (e) {
     el.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
@@ -19864,6 +19972,7 @@ function init() {
   SCREEN_ENTER_HOOKS['first-login-codes-admin'] = loadFirstLoginCodesAdmin;
   SCREEN_ENTER_HOOKS['daily-report-needs-review-admin'] = loadDailyReportNeedsReviewAdmin;
   SCREEN_ENTER_HOOKS['daily-report-edit-requests-admin'] = loadDailyReportEditRequestsAdmin;
+  SCREEN_ENTER_HOOKS['period-confirm-changes-admin'] = loadPeriodConfirmChangesAdmin;
   SCREEN_ENTER_HOOKS['daily-report-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportAdminList();
