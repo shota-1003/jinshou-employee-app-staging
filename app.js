@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v255-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T01:07:40.389Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v256-staging';
+const BUILD_DEPLOYED_AT = '2026-10-03T01:32:17.679Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14861,7 +14861,7 @@ async function loadAttendanceFixNeededAdmin(opts) {
       const lines = items.map((r) => '<div class="hint-inline afn-line"><strong>' + exdEsc(md(r.work_date)) + '</strong> ' + exdEsc(r.reason_text) + (r.detail ? '(' + exdEsc(r.detail) + ')' : '')
         + ' <button type="button" class="secondary afn-open" style="margin-left:6px;padding:2px 10px;" data-emp="' + exdEsc(r.employee_code) + '" data-date="' + exdEsc(String(r.work_date).slice(0, 10)) + '" data-reason="' + exdEsc(r.reason) + '">' + (r.reason === 'submitted' ? '中身を確認して承認' : '中身を確認する') + '</button>'
         + '<div class="afn-panel" style="display:none;margin-top:6px;"></div></div>').join('');
-      const periodHead = h.period_start !== lastPeriod ? '<div style="font-weight:800;margin:14px 0 6px;">給与期間 ' + exdEsc(h.period_start) + '〜' + exdEsc(h.period_end) + '</div>' : '';
+      const periodHead = h.period_start !== lastPeriod ? '<div class="afn-period" style="font-weight:800;margin:14px 0 6px;">給与期間 ' + exdEsc(h.period_start) + '〜' + exdEsc(h.period_end) + '</div>' : '';
       lastPeriod = h.period_start;
       return periodHead + '<div class="card" style="margin-bottom:10px;' + (h.already_confirmed ? 'border:2px solid var(--danger);' : '') + '">'
         + '<div class="row1" style="display:flex;justify-content:space-between;gap:8px;"><strong>' + exdEsc(h.employee_name) + '(' + exdEsc(h.employee_code) + ')</strong>' + confirmedTag + '</div>'
@@ -14871,7 +14871,8 @@ async function loadAttendanceFixNeededAdmin(opts) {
     }).join('');
     list.onclick = (ev) => {
       const b = ev.target && ev.target.closest ? ev.target.closest('.afn-open') : null;
-      if (b) openAttendanceFixApprovePanel(b, session, () => loadAttendanceFixNeededAdmin({ silent: true }));
+      // 承認・修正のあとは一覧を読み直さず、処理した行だけをその場で消す(読み直しは数秒かかり、画面も動いてしまうため)。
+      if (b) openAttendanceFixApprovePanel(b, session, (panel) => afnRemoveLine(panel));
     };
     restoreScroll();
   } catch (e) {
@@ -14881,6 +14882,26 @@ async function loadAttendanceFixNeededAdmin(opts) {
 
 // 一覧の各行から、その日の日報の中身を表示し、種類に応じて承認・差し戻し・修正をする
 // (承認はadmin_confirm_daily_reports、人工と勤務区分の修正はadmin_fix_daily_report_work_typeを使う)。
+// 処理した行だけを一覧から消す。行が無くなった人のカード・日報が無くなった給与期間の見出しも片付ける。
+function afnRemoveLine(panel) {
+  const line = panel.closest('.afn-line');
+  const card = line && line.closest('.card');
+  if (!line || !card) return;
+  line.remove();
+  const left = card.querySelectorAll('.afn-line').length;
+  if (left > 0) {
+    card.querySelectorAll('.hint-inline').forEach((el) => { if (/^\d+日$/.test(el.textContent.trim())) el.textContent = left + '日'; });
+    return;
+  }
+  const list = card.parentElement;
+  card.remove();
+  list.querySelectorAll('.afn-period').forEach((hd) => {
+    const next = hd.nextElementSibling;
+    if (!next || next.classList.contains('afn-period')) hd.remove();
+  });
+  if (!list.querySelector('.card')) list.innerHTML = '<div class="empty-state">管理者の承認待ち・差戻しなど、給与に反映されない日報はありません</div>';
+}
+
 async function openAttendanceFixApprovePanel(btn, session, reload) {
   const panel = btn.parentElement.querySelector('.afn-panel');
   const reason = btn.dataset.reason;
@@ -14907,7 +14928,9 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><span class="hint-inline">直す:</span>'
           + [['終日', 1], ['午前', 0.5], ['午後', 0.5]].map(([w, h]) => '<button type="button" class="secondary afn-fix" style="padding:2px 10px;" data-id="' + r.id + '" data-wt="' + w + '" data-hc="' + h + '">' + w + '・' + h + '人工にする</button>').join('') + '</div>' : '';
       const tripBtn = (reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
-        ? '<div style="margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張チェックを外す(県内の現場のため出張にしない)</button></div>' : '';
+        ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張から外す(県内の現場のため出張にしない)</button>'
+          + '<button type="button" class="secondary afn-trip-count" data-id="' + r.id + '">出張扱いにする(県外の現場へ直す)</button></div>'
+          + '<div class="afn-site-pick" data-id="' + r.id + '" style="display:none;margin-top:6px;"></div>' : '';
       return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>' + tripBtn
         + (r.rejected_reason ? '<div class="hint-inline">差戻し理由: ' + exdEsc(r.rejected_reason) + '</div>' : '')
         + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + fixBtns + '</div>';
@@ -14921,15 +14944,16 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       actions = '<div class="hint-inline">本人の再提出を待たずに、この内容のまま管理者が確定することもできます。</div><div><button type="button" class="afn-approve">この内容のまま確定する</button></div>';
     } else if (reason === 'trip_site') {
       actions = '<div class="hint-inline">県内の現場なので出張には数えません(給与は変わりません)。選べるのは次のどちらかです。</div>'
-        + '<div class="hint-inline">① 出張ではなかった → 上の「出張チェックを外す」を押す。</div>'
-        + '<div class="hint-inline">② 現場の入力が間違っている(本当は県外の現場だった) → 理由を書いて差し戻し、本人に現場を直してもらう。</div>'
+        + '<div class="hint-inline">① 出張ではなかった → 「出張から外す」を押す。</div>'
+        + '<div class="hint-inline">② 本当に出張だった(行った先は県外の現場) → 「出張扱いにする」で、行った県外の現場を選んで直す。</div>'
+        + '<div class="hint-inline">③ 分からない → 理由を書いて差し戻し、本人に現場を直してもらう。</div>'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;"><input type="text" class="afn-reason" placeholder="差し戻す理由(例: 現場を確認して出し直してください)" style="flex:1;min-width:160px;"><button type="button" class="secondary afn-reject-all">現場の間違いなので差し戻す</button></div>';
     }
     panel.innerHTML = items + '<div class="afn-msg error" style="display:none;"></div>' + actions;
     const msg = panel.querySelector('.afn-msg');
     const showMsg = (t) => { msg.textContent = t; msg.style.display = t ? 'block' : 'none'; msg.classList.toggle('show', !!t); };
     const lock = (v) => panel.querySelectorAll('button').forEach((x) => { x.disabled = v; });
-    const run = async (fn) => { lock(true); showMsg(''); try { await fn(); await reload(); } catch (e) { showMsg(e.message || '処理に失敗しました。'); lock(false); } };
+    const run = async (fn) => { lock(true); showMsg(''); try { await fn(); await reload(panel); } catch (e) { showMsg(e.message || '処理に失敗しました。'); lock(false); } };
     const ids = targets.map((r) => Number(r.id));
     const ap = panel.querySelector('.afn-approve');
     if (ap) ap.addEventListener('click', () => {
@@ -14949,6 +14973,26 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
     panel.querySelectorAll('.afn-trip-clear').forEach((tb) => tb.addEventListener('click', () => {
       if (!window.confirm('この日の出張チェックを外します(県内の現場のため出張に数えません)。よろしいですか?')) return;
       run(() => rpc('admin_clear_daily_report_trip_flag', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(tb.dataset.id), p_reason: '県内の現場のため出張チェックを外した(承認待ち一覧から)' }));
+    }));
+    panel.querySelectorAll('.afn-trip-count').forEach((cb) => cb.addEventListener('click', async () => {
+      const box = panel.querySelector('.afn-site-pick[data-id="' + cb.dataset.id + '"]');
+      if (box.dataset.open === '1') { box.style.display = 'none'; box.dataset.open = ''; return; }
+      box.style.display = 'block'; box.dataset.open = '1'; box.innerHTML = '<div class="hint">県外の現場を読み込み中...</div>';
+      try {
+        const sites = await rpc('admin_list_out_of_prefecture_sites', { p_admin_employee_code: session.employeeCode });
+        if (!sites || sites.length === 0) { box.innerHTML = '<div class="hint">選べる県外の現場がありません。</div>'; return; }
+        box.innerHTML = '<div class="hint-inline">行った県外の現場を選んでください(日報の現場がこの現場に直り、出張に数えます)</div>'
+          + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><select class="afn-site-select" style="flex:1;min-width:180px;"><option value="">選んでください</option>'
+          + sites.map((x) => '<option value="' + x.id + '">' + exdEsc(x.site_name) + (x.prefecture ? '(' + exdEsc(x.prefecture) + ')' : '') + '</option>').join('')
+          + '</select><button type="button" class="afn-site-go">この現場に直して出張扱いにする</button></div>';
+        box.querySelector('.afn-site-go').addEventListener('click', () => {
+          const sel = box.querySelector('.afn-site-select');
+          if (!sel.value) { showMsg('県外の現場を選んでください。'); return; }
+          const nm = sel.options[sel.selectedIndex].text;
+          if (!window.confirm('この日の現場を「' + nm + '」に直して、出張に数えます。よろしいですか?')) return;
+          run(() => rpc('admin_change_daily_report_site', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(cb.dataset.id), p_site_id: Number(sel.value), p_reason: '出張扱いにするため県外の現場へ直した(承認待ち一覧から)' }));
+        });
+      } catch (e) { box.innerHTML = '<div class="error show">読み込めませんでした。</div>'; }
     }));
     const rjAll = panel.querySelector('.afn-reject-all');
     if (rjAll) rjAll.addEventListener('click', () => {
