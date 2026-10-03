@@ -719,18 +719,22 @@
             try {
                 const dayData = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
                 let issues = null; let conf = null;
+                let extraFailed = false;
                 if (state.canEdit) {
-                    [issues, conf] = await Promise.all([
-                        readRpc('assignment_validate_day', { p_employee_code: me, p_date: date }),
-                        readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: date }),
-                    ]);
+                    // 警告・確認状況の取得に失敗しても、日別の配置そのものは表示する(従来の動き)。
+                    try {
+                        [issues, conf] = await Promise.all([
+                            readRpc('assignment_validate_day', { p_employee_code: me, p_date: date }),
+                            readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: date }),
+                        ]);
+                    } catch (e) { extraFailed = true; fail(e); }
                 }
                 // 連続タイムラインは日付ごとのキャッシュから描くので、取得した日付の枠へ入れる。
-                state.days.set(date, { day: dayData, issues, confirmation: conf, full: true });
+                state.days.set(date, { day: dayData, issues, confirmation: conf, full: !extraFailed });
                 // 画面の「いまの日」の状態は、まだその日を選んでいるときだけ更新する。
                 if (state.selected === date) {
                     state.day_data = dayData;
-                    if (state.canEdit) { state.issues = issues; state.confirmation = conf; }
+                    if (state.canEdit && !extraFailed) { state.issues = issues; state.confirmation = conf; }
                 }
             } catch (e) { fail(e); }
         }
