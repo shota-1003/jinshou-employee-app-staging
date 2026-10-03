@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v251-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T00:05:21.078Z';
+const BUILD_DEPLOYED_AT = '2026-10-03T00:10:08.136Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14851,7 +14851,10 @@ async function loadAttendanceFixNeededAdmin() {
     list.innerHTML = groups.map((items) => {
       const h = items[0];
       const confirmedTag = h.already_confirmed ? '<span style="color:var(--danger);font-weight:800;">本人確認済み(給与に影響する恐れ)</span>' : '<span class="hint-inline">本人未確認</span>';
-      const lines = items.map((r) => '<div class="hint-inline"><strong>' + exdEsc(md(r.work_date)) + '</strong> ' + exdEsc(r.reason_text) + (r.detail ? '(' + exdEsc(r.detail) + ')' : '') + '</div>').join('');
+      // 「管理者の確認待ち」の日は、その場で中身を確認して承認・差し戻しできる(2026-10-03 Shota指摘「これ承認できんやん」)。
+      const lines = items.map((r) => '<div class="hint-inline afn-line"><strong>' + exdEsc(md(r.work_date)) + '</strong> ' + exdEsc(r.reason_text) + (r.detail ? '(' + exdEsc(r.detail) + ')' : '')
+        + (r.reason === 'submitted' ? ' <button type="button" class="secondary afn-open" style="margin-left:6px;padding:2px 10px;" data-emp="' + exdEsc(r.employee_code) + '" data-date="' + exdEsc(String(r.work_date).slice(0, 10)) + '">中身を確認して承認</button>' : '')
+        + '<div class="afn-panel" style="display:none;margin-top:6px;"></div></div>').join('');
       const periodHead = h.period_start !== lastPeriod ? '<div style="font-weight:800;margin:14px 0 6px;">給与期間 ' + exdEsc(h.period_start) + '〜' + exdEsc(h.period_end) + '</div>' : '';
       lastPeriod = h.period_start;
       return periodHead + '<div class="card" style="margin-bottom:10px;' + (h.already_confirmed ? 'border:2px solid var(--danger);' : '') + '">'
@@ -14860,9 +14863,60 @@ async function loadAttendanceFixNeededAdmin() {
         + lines
         + '</div>';
     }).join('');
+    list.onclick = (ev) => {
+      const b = ev.target && ev.target.closest ? ev.target.closest('.afn-open') : null;
+      if (b) openAttendanceFixApprovePanel(b, session, loadAttendanceFixNeededAdmin);
+    };
   } catch (e) {
     list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
+}
+
+// 承認待ちの日報の中身を表示し、承認・差し戻しする(承認処理そのものは既存のadmin_confirm_daily_reportsを使う)。
+async function openAttendanceFixApprovePanel(btn, session, reload) {
+  const panel = btn.parentElement.querySelector('.afn-panel');
+  if (panel.dataset.open === '1') { panel.style.display = 'none'; panel.dataset.open = ''; btn.textContent = '中身を確認して承認'; return; }
+  panel.style.display = 'block'; panel.dataset.open = '1'; btn.textContent = '閉じる';
+  panel.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_submitted_reports_for_day', { p_admin_employee_code: session.employeeCode, p_employee_code: btn.dataset.emp, p_work_date: btn.dataset.date });
+    if (!rows || rows.length === 0) { panel.innerHTML = '<div class="hint">この日の承認待ちの日報はもうありません(画面を更新してください)。</div>'; return; }
+    const n = attendanceBookNum;
+    const items = rows.map((r) => {
+      const bits = [r.work_type, n(r.headcount) + '人工'];
+      if (Number(r.overtime_hours) > 0) bits.push('残業' + n(r.overtime_hours) + 'h');
+      if (Number(r.early_commute_hours) > 0) bits.push('通勤早出' + n(r.early_commute_hours) + 'h');
+      if (Number(r.commute_overtime_hours) > 0) bits.push('通勤残業' + n(r.commute_overtime_hours) + 'h');
+      if (r.is_over_100km) bits.push('100km超');
+      if (r.is_leader) bits.push('リーダー');
+      if (r.is_night_shift) bits.push('夜勤');
+      bits.push('出張' + (r.is_business_trip ? 'あり' : 'なし') + '(' + (r.is_out_of_prefecture ? '県外の現場' : '県内の現場') + ')');
+      return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>'
+        + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + '</div>';
+    }).join('');
+    panel.innerHTML = items
+      + '<div class="afn-msg error" style="display:none;"></div>'
+      + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'
+      + '<button type="button" class="afn-approve">この内容で承認する</button>'
+      + '<input type="text" class="afn-reason" placeholder="差し戻す場合は理由を入力" style="flex:1;min-width:160px;">'
+      + '<button type="button" class="secondary afn-reject">差し戻す</button></div>';
+    const ids = rows.map((r) => Number(r.id));
+    const msg = panel.querySelector('.afn-msg');
+    const showMsg = (t) => { msg.textContent = t; msg.style.display = t ? 'block' : 'none'; msg.classList.toggle('show', !!t); };
+    const act = async (action, reason) => {
+      panel.querySelectorAll('button').forEach((x) => { x.disabled = true; }); showMsg('');
+      try {
+        await rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: ids, p_action: action, p_reason: reason || null });
+        await reload();
+      } catch (e) { showMsg(e.message || '処理に失敗しました。'); panel.querySelectorAll('button').forEach((x) => { x.disabled = false; }); }
+    };
+    panel.querySelector('.afn-approve').addEventListener('click', () => act('confirmed'));
+    panel.querySelector('.afn-reject').addEventListener('click', () => {
+      const reason = panel.querySelector('.afn-reason').value.trim();
+      if (!reason) { showMsg('差し戻す理由を入力してください。'); return; }
+      act('rejected', reason);
+    });
+  } catch (e) { panel.innerHTML = '<div class="error show">読み込めませんでした。</div>'; }
 }
 
 // 出勤簿の印刷(2026-10-02 Shota指示「あと印刷できるように」)。出勤簿だけを白地・黒文字・A4で印刷する
