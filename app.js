@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v256-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T01:38:59.944Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v257-staging';
+const BUILD_DEPLOYED_AT = '2026-10-03T01:53:00.437Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11947,7 +11947,7 @@ async function doDecideSite(itemEl, action) {
     }
     await rpc('admin_decide_pending_site', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_action: action });
     await loadSiteAdminList();
-  } catch (e) { /* 失敗時は一覧が更新されないだけ */ }
+  } catch (e) { window.alert(e.message || '処理に失敗しました。'); }
 }
 
 const JAPAN_PREFECTURES = [
@@ -16469,7 +16469,9 @@ function renderRequestDetailActions(sourceType, r) {
     const decide = async (action, reason) => {
       const session = getSession();
       try {
-        if (sourceType === 'site_proposal') await rpc(rejectRpc, { p_admin_employee_code: session.employeeCode, p_site_id: currentRequestDetail.sourceId, p_action: action });
+        // 現場の承認処理は 'active'(承認) / 'inactive'(却下) だけを受け付ける。ここの 'approved'/'rejected' をそのまま渡すと
+        // 「不正な操作です」で必ずエラーになっていた(2026-10-03 Shota指摘「新規現場申請 坂本が承認してもエラー」)。
+        if (sourceType === 'site_proposal') await rpc(rejectRpc, { p_admin_employee_code: session.employeeCode, p_site_id: currentRequestDetail.sourceId, p_action: action === 'approved' ? 'active' : 'inactive' });
         else await rpc(rejectRpc, { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_note: reason || null });
         navReturn('admin-all-requests');
       } catch (e) { showError('rdetail-error', e.message || '処理に失敗しました。'); }
