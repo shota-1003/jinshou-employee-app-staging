@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v254-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T00:51:43.271Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v255-staging';
+const BUILD_DEPLOYED_AT = '2026-10-03T01:07:40.389Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14906,7 +14906,9 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       const fixBtns = (reason === 'conflict' && isConflict(r) && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><span class="hint-inline">直す:</span>'
           + [['終日', 1], ['午前', 0.5], ['午後', 0.5]].map(([w, h]) => '<button type="button" class="secondary afn-fix" style="padding:2px 10px;" data-id="' + r.id + '" data-wt="' + w + '" data-hc="' + h + '">' + w + '・' + h + '人工にする</button>').join('') + '</div>' : '';
-      return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>'
+      const tripBtn = (reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
+        ? '<div style="margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張チェックを外す(県内の現場のため出張にしない)</button></div>' : '';
+      return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>' + tripBtn
         + (r.rejected_reason ? '<div class="hint-inline">差戻し理由: ' + exdEsc(r.rejected_reason) + '</div>' : '')
         + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + fixBtns + '</div>';
     }).join('');
@@ -14918,7 +14920,10 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
     } else if (reason === 'rejected' && targets.length) {
       actions = '<div class="hint-inline">本人の再提出を待たずに、この内容のまま管理者が確定することもできます。</div><div><button type="button" class="afn-approve">この内容のまま確定する</button></div>';
     } else if (reason === 'trip_site') {
-      actions = '<div class="hint-inline">県内の現場なので出張には数えません(給与は変わりません)。現場が県外なら、現場マスタの県外の設定を直してください。</div>';
+      actions = '<div class="hint-inline">県内の現場なので出張には数えません(給与は変わりません)。選べるのは次のどちらかです。</div>'
+        + '<div class="hint-inline">① 出張ではなかった → 上の「出張チェックを外す」を押す。</div>'
+        + '<div class="hint-inline">② 現場の入力が間違っている(本当は県外の現場だった) → 理由を書いて差し戻し、本人に現場を直してもらう。</div>'
+        + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;"><input type="text" class="afn-reason" placeholder="差し戻す理由(例: 現場を確認して出し直してください)" style="flex:1;min-width:160px;"><button type="button" class="secondary afn-reject-all">現場の間違いなので差し戻す</button></div>';
     }
     panel.innerHTML = items + '<div class="afn-msg error" style="display:none;"></div>' + actions;
     const msg = panel.querySelector('.afn-msg');
@@ -14927,12 +14932,30 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
     const run = async (fn) => { lock(true); showMsg(''); try { await fn(); await reload(); } catch (e) { showMsg(e.message || '処理に失敗しました。'); lock(false); } };
     const ids = targets.map((r) => Number(r.id));
     const ap = panel.querySelector('.afn-approve');
-    if (ap) ap.addEventListener('click', () => run(() => rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: ids, p_action: 'confirmed', p_reason: null })));
+    if (ap) ap.addEventListener('click', () => {
+      // 差戻し中の日報を本人の再提出なしで確定すると、差戻しの理由が消える。誤って押さないよう確認を挟む(2026-10-03 誤承認の再発防止)。
+      if (reason === 'rejected') {
+        const whys = targets.map((r) => r.rejected_reason).filter(Boolean).join(' / ');
+        if (!window.confirm('差戻しの理由(' + whys + ')が直っていないまま、管理者がこの内容で確定します。理由は消えます。本当に確定しますか?')) return;
+      }
+      run(() => rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: ids, p_action: 'confirmed', p_reason: null }));
+    });
     const rj = panel.querySelector('.afn-reject');
     if (rj) rj.addEventListener('click', () => {
       const why = panel.querySelector('.afn-reason').value.trim();
       if (!why) { showMsg('差し戻す理由を入力してください。'); return; }
       run(() => rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: ids, p_action: 'rejected', p_reason: why }));
+    });
+    panel.querySelectorAll('.afn-trip-clear').forEach((tb) => tb.addEventListener('click', () => {
+      if (!window.confirm('この日の出張チェックを外します(県内の現場のため出張に数えません)。よろしいですか?')) return;
+      run(() => rpc('admin_clear_daily_report_trip_flag', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(tb.dataset.id), p_reason: '県内の現場のため出張チェックを外した(承認待ち一覧から)' }));
+    }));
+    const rjAll = panel.querySelector('.afn-reject-all');
+    if (rjAll) rjAll.addEventListener('click', () => {
+      const why = panel.querySelector('.afn-reason').value.trim();
+      if (!why) { showMsg('差し戻す理由を入力してください。'); return; }
+      const allIds = rows.filter((r) => r.report_status !== 'rejected').map((r) => Number(r.id));
+      run(() => rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: allIds, p_action: 'rejected', p_reason: why }));
     });
     panel.querySelectorAll('.afn-fix').forEach((fb) => fb.addEventListener('click', () => run(() => rpc('admin_fix_daily_report_work_type', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(fb.dataset.id), p_work_type: fb.dataset.wt, p_headcount: Number(fb.dataset.hc), p_reason: '管理者が承認待ち一覧から修正' }))));
   } catch (e) { panel.innerHTML = '<div class="error show">読み込めませんでした。</div>'; }
