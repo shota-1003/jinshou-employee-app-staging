@@ -711,19 +711,27 @@
             } catch (e) { state.offline = true; fail(e); }
         }
         async function loadDay() {
+            // 取得を始めた時点の日付を覚えておく。応答を待つあいだに利用者が別の日を選ぶと、
+            // 応答時点の state.selected は別の日になっている。その値で保存すると、
+            // 前に選んでいた日のデータが「いま選んだ日」の枠へ入り、日付の見出しは9/5なのに
+            // 中身は9/1、という表示になる(2026-10-03 Shota指摘「携帯とパソコンで配置が違う」の原因)。
+            const date = state.selected;
             try {
-                state.day_data = await readRpc('assignment_get_day', { p_employee_code: me, p_date: state.selected });
+                const dayData = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
+                let issues = null; let conf = null;
                 if (state.canEdit) {
-                    const [issues, conf] = await Promise.all([
-                        readRpc('assignment_validate_day', { p_employee_code: me, p_date: state.selected }),
-                        readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: state.selected }),
+                    [issues, conf] = await Promise.all([
+                        readRpc('assignment_validate_day', { p_employee_code: me, p_date: date }),
+                        readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: date }),
                     ]);
-                    state.issues = issues; state.confirmation = conf;
                 }
-                // 連続タイムラインは日付ごとのキャッシュから描くので、ここも更新する。
-                state.days.set(state.selected, {
-                    day: state.day_data, issues: state.issues, confirmation: state.confirmation, full: true,
-                });
+                // 連続タイムラインは日付ごとのキャッシュから描くので、取得した日付の枠へ入れる。
+                state.days.set(date, { day: dayData, issues, confirmation: conf, full: true });
+                // 画面の「いまの日」の状態は、まだその日を選んでいるときだけ更新する。
+                if (state.selected === date) {
+                    state.day_data = dayData;
+                    if (state.canEdit) { state.issues = issues; state.confirmation = conf; }
+                }
             } catch (e) { fail(e); }
         }
         async function loadMine() {
@@ -5245,11 +5253,13 @@
             await loadMonth();
             if (!state.canEdit && !ctx.defaultView) state.view = 'me';
             if (state.view === 'me') { await loadMine(); render(); return; }
+            const initDate = state.selected;
             await loadDay();
-            // 日別表示へ入ったときにすぐ出せるよう、選択日ぶんは手元に置いておく。
-            state.days.set(state.selected, {
-                day: state.day_data, issues: state.issues, confirmation: state.confirmation, full: true,
-            });
+            // 日別表示へ入ったときにすぐ出せるよう、選択日ぶんは手元に置いておく
+            // (loadDayが取得した日付の枠へ入れている。取得に失敗したときだけ空の枠を用意する)。
+            if (!state.days.has(initDate)) {
+                state.days.set(initDate, { day: null, issues: null, confirmation: null, full: true });
+            }
             state.tl.from = state.selected;
             state.tl.to = state.selected;
             focusDate(state.selected);
