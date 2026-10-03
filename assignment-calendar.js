@@ -5251,6 +5251,14 @@
         (async function init() {
             syncLayoutMode();
             await loadMonth();
+            // 月の読み込みが一時的に失敗(データベースが混んでいて時間切れ等)したとき、すぐ「自分の予定」だけの
+            // 表示へ落とすと、全員の配置が消えたように見える(2026-10-03 Shota指摘「配置カレンダーが自分の配置しか
+            // 見れない」)。canEdit は月データを取得できたときだけ true になるので、失敗している間は間をあけて
+            // 数回取り直し、それでもだめなときだけ従来どおり自分の予定へ切り替える。
+            for (let attempt = 1; attempt <= 3 && !state.canEdit && state.offline; attempt += 1) {
+                await new Promise((r) => { setTimeout(r, 2000 * attempt); });
+                await loadMonth();
+            }
             if (!state.canEdit && !ctx.defaultView) state.view = 'me';
             if (state.view === 'me') { await loadMine(); render(); return; }
             const initDate = state.selected;
