@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v257-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T01:53:00.437Z';
+const BUILD_DEPLOYED_AT = '2026-10-03T01:54:35.578Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14036,6 +14036,8 @@ function addDailyReportEntry(prefill) {
       const info = Array.isArray(rows) ? rows[0] : rows;
       if (!info) { isBusinessTripEl0.disabled = false; setHint(''); return null; }
       if (info.is_out_of_prefecture) { isBusinessTripEl0.disabled = false; setHint(`県外の現場${info.prefecture ? '(' + info.prefecture + ')' : ''}です。出張の場合はチェックしてください。`); return true; }
+      // 「現場外」は県内か県外か分からない(県外へ行った日もある)ため、出張チェックは選べるままにする(2026-10-03 Shota指摘)。
+      if (info.is_unknown_location) { isBusinessTripEl0.disabled = false; setHint('現場外です。県外へ出張した場合は出張にチェックしてください(行き先は管理者が確認します)。'); return null; }
       isBusinessTripEl0.checked = false; isBusinessTripEl0.disabled = true; setHint('県内の現場は出張になりません。');
       return false;
     } catch (e) { isBusinessTripEl0.disabled = false; setHint(''); return null; }
@@ -14923,12 +14925,13 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       if (r.is_over_100km) bits.push('100km超');
       if (r.is_leader) bits.push('リーダー');
       if (r.is_night_shift) bits.push('夜勤');
-      bits.push('出張' + (r.is_business_trip ? 'あり' : 'なし') + '(' + (r.is_out_of_prefecture ? '県外の現場' : '県内の現場') + ')');
+      const isOutsideSite = r.site_name === '現場外';
+      bits.push('出張' + (r.is_business_trip ? 'あり' : 'なし') + '(' + (isOutsideSite ? '現場外: 県内か県外か不明' : (r.is_out_of_prefecture ? '県外の現場' : '県内の現場')) + ')');
       const fixBtns = (reason === 'conflict' && isConflict(r) && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><span class="hint-inline">直す:</span>'
           + [['終日', 1], ['午前', 0.5], ['午後', 0.5]].map(([w, h]) => '<button type="button" class="secondary afn-fix" style="padding:2px 10px;" data-id="' + r.id + '" data-wt="' + w + '" data-hc="' + h + '">' + w + '・' + h + '人工にする</button>').join('') + '</div>' : '';
       const tripBtn = (reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
-        ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張から外す(県内の現場のため出張にしない)</button>'
+        ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張から外す(' + (isOutsideSite ? '県外ではなかった・出張にしない' : '県内の現場のため出張にしない') + ')</button>'
           + '<button type="button" class="secondary afn-trip-count" data-id="' + r.id + '">出張扱いにする(県外の現場へ直す)</button></div>'
           + '<div class="afn-site-pick" data-id="' + r.id + '" style="display:none;margin-top:6px;"></div>' : '';
       return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>' + tripBtn
@@ -14943,9 +14946,10 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
     } else if (reason === 'rejected' && targets.length) {
       actions = '<div class="hint-inline">本人の再提出を待たずに、この内容のまま管理者が確定することもできます。</div><div><button type="button" class="afn-approve">この内容のまま確定する</button></div>';
     } else if (reason === 'trip_site') {
-      actions = '<div class="hint-inline">県内の現場なので出張には数えません(給与は変わりません)。選べるのは次のどちらかです。</div>'
+      const hasOutside = rows.some((r) => r.site_name === '現場外');
+      actions = '<div class="hint-inline">' + (hasOutside ? '「現場外」は県内か県外か分かりません。県外へ行っていたなら出張にできます。' : '県内の現場なので出張には数えません(給与は変わりません)。') + '選べるのは次のどれかです。</div>'
         + '<div class="hint-inline">① 出張ではなかった → 「出張から外す」を押す。</div>'
-        + '<div class="hint-inline">② 本当に出張だった(行った先は県外の現場) → 「出張扱いにする」で、行った県外の現場を選んで直す。</div>'
+        + '<div class="hint-inline">② 本当に出張だった(行った先は県外) → 「出張扱いにする」で、行った県外の現場を選んで直す(行き先が分からない・現場にない場合は「現場外(県外)」を選ぶ)。</div>'
         + '<div class="hint-inline">③ 分からない → 理由を書いて差し戻し、本人に現場を直してもらう。</div>'
         + '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:6px;"><input type="text" class="afn-reason" placeholder="差し戻す理由(例: 現場を確認して出し直してください)" style="flex:1;min-width:160px;"><button type="button" class="secondary afn-reject-all">現場の間違いなので差し戻す</button></div>';
     }
