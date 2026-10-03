@@ -955,6 +955,14 @@
     <div id="period-confirm-changes-list"></div>
   </section>
 
+  <!-- 本人確認の前に直す必要がある日報(管理ホームのカードの遷移先) -->
+  <section id="screen-attendance-fix-needed-admin" class="screen">
+    <button type="button" class="back-link back-to-origin" data-nav="admin-dashboard">ダッシュボードに戻る</button>
+    <div class="form-title">管理者の承認待ちの日報(給与に反映されません)</div>
+    <div class="hint" style="margin-bottom:10px;">直近の給与期間(2026-08-26〜)から、提出済みで管理者がまだ確定していない日・差戻し・人工と勤務区分の食い違いの日を、給与期間ごとに出します(閲覧のみ。本人確認の有無に関係なく表示)。これが残ったままだと、出勤簿の月合計に数えられず、給与に入りません。あわせて、出張にチェックがあるのに現場が県外の現場ではない日(出張手当が付かない)も出ます。この場合は日報管理で、その日報の現場を実際の県外の現場へ直してください(出張の数え方自体は変わりません)。本人確認を止める仕組みは2026-09-26開始の給与期間からです。管理者は日報管理で確認・確定し、差戻し・食い違いは本人が日報を直します。本人確認済みなのに残っている人は赤枠で先頭に出ます。</div>
+    <div id="attendance-fix-needed-list"></div>
+  </section>
+
   <!-- 日報 特殊ケース確認(管理者) -->
   <section id="screen-daily-report-admin" class="screen">
     <button type="button" class="back-link" data-nav="daily-report-management">日報管理に戻る</button>

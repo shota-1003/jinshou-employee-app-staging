@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v249-staging';
-const BUILD_DEPLOYED_AT = '2026-10-02T17:21:53.324Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v251-staging';
+const BUILD_DEPLOYED_AT = '2026-10-03T00:05:21.078Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -548,7 +548,7 @@ const ADMIN_SCREENS = new Set([
   'expense-payment-pending', 'fulfillment-pending',
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
-  'daily-report-needs-review-admin', 'daily-report-edit-requests-admin',
+  'daily-report-needs-review-admin', 'daily-report-edit-requests-admin', 'attendance-fix-needed-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
@@ -581,7 +581,7 @@ const PARENT_ROUTE = Object.freeze({
   'entertainment-monthly-report': 'admin-dashboard',
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
-  'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard',
+  'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard', 'attendance-fix-needed-admin': 'admin-dashboard',
   // 注: ADMIN_SCREENS にある 'master-management-hub' は index.html に画面が無い(死んだ定義)ため、ここには載せない。
   // 匿名相談
   'anon-admin-thread': 'anon-admin',
@@ -14833,6 +14833,38 @@ async function loadPeriodConfirmChangesAdmin() {
   }
 }
 
+// 管理ホーム「本人確認の前に直す必要がある日報(提出済み・差戻し・食い違い)」の遷移先(2026-10-03、Shota指摘)。
+// 本人確認済みなのにまだ残っている人を先頭に出す(給与から黙って落ちないように)。
+async function loadAttendanceFixNeededAdmin() {
+  const session = getSession();
+  const list = document.getElementById('attendance-fix-needed-list');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  try {
+    const rows = await rpc('admin_list_attendance_fix_needed', { p_admin_employee_code: session.employeeCode });
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="empty-state">管理者の承認待ち・差戻しなど、給与に反映されない日報はありません</div>'; return; }
+    const md = (d) => { const p = String(d).split('-'); return Number(p[1]) + '/' + Number(p[2]); };
+    // 給与期間ごとにまとめ(新しい期間が上)、期間の中では「本人確認済み」の人を先頭にする。
+    const byEmp = new Map();
+    rows.forEach((r) => { const k = r.period_start + '|' + r.employee_code; if (!byEmp.has(k)) byEmp.set(k, []); byEmp.get(k).push(r); });
+    const groups = Array.from(byEmp.values()).sort((a, b) => (a[0].period_start < b[0].period_start ? 1 : a[0].period_start > b[0].period_start ? -1 : (b[0].already_confirmed ? 1 : 0) - (a[0].already_confirmed ? 1 : 0) || (a[0].employee_code < b[0].employee_code ? -1 : 1)));
+    let lastPeriod = null;
+    list.innerHTML = groups.map((items) => {
+      const h = items[0];
+      const confirmedTag = h.already_confirmed ? '<span style="color:var(--danger);font-weight:800;">本人確認済み(給与に影響する恐れ)</span>' : '<span class="hint-inline">本人未確認</span>';
+      const lines = items.map((r) => '<div class="hint-inline"><strong>' + exdEsc(md(r.work_date)) + '</strong> ' + exdEsc(r.reason_text) + (r.detail ? '(' + exdEsc(r.detail) + ')' : '') + '</div>').join('');
+      const periodHead = h.period_start !== lastPeriod ? '<div style="font-weight:800;margin:14px 0 6px;">給与期間 ' + exdEsc(h.period_start) + '〜' + exdEsc(h.period_end) + '</div>' : '';
+      lastPeriod = h.period_start;
+      return periodHead + '<div class="card" style="margin-bottom:10px;' + (h.already_confirmed ? 'border:2px solid var(--danger);' : '') + '">'
+        + '<div class="row1" style="display:flex;justify-content:space-between;gap:8px;"><strong>' + exdEsc(h.employee_name) + '(' + exdEsc(h.employee_code) + ')</strong>' + confirmedTag + '</div>'
+        + '<div class="hint-inline">' + items.length + '日</div>'
+        + lines
+        + '</div>';
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
+  }
+}
+
 // 出勤簿の印刷(2026-10-02 Shota指示「あと印刷できるように」)。出勤簿だけを白地・黒文字・A4で印刷する
 // (画面の他の部分は印刷用CSSで隠す。印刷後に一時要素を片付ける)。
 function printAttendanceBook(btn) {
@@ -14895,12 +14927,44 @@ function isAttendancePeriodOver(endDateStr) {
   return todayStr > endDateStr;
 }
 
+// 2026-10-03追加(Shota指摘): 期間内に「提出済み(管理者未確定)・差戻し・食い違い」の日が残っていると、
+// 出勤簿の月合計に数えられないまま本人確認できてしまい、給与から黙って落ちていた。2026-09-26開始の期間以降は
+// サーバー(confirm_my_attendance_period)が確定を拒否する。ここはその日付と「やること」を先に見せる(バナー)。
+function attendanceFixBannerHtml(allItems) {
+  if (!allItems || allItems.length === 0) return '';
+  const md = (d) => { const p = String(d).split('-'); return Number(p[1]) + '/' + Number(p[2]); };
+  // blocks_confirm=false は「お知らせ」(出張の現場違い)。確定は止めず、別枠で見せる。
+  const notices = allItems.filter((x) => x.blocks_confirm === false);
+  const items = allItems.filter((x) => x.blocks_confirm !== false);
+  let noticeHtml = '';
+  if (notices.length > 0) {
+    const nlines = notices.map((x) => '<li><strong>' + exdEsc(md(x.work_date)) + '</strong> ' + exdEsc(x.reason_text) + (x.detail ? '<span class="hint-inline">(現場: ' + exdEsc(x.detail) + ')</span>' : '') + '</li>').join('');
+    noticeHtml = '<div class="card" id="dr-ledger-trip-notice" style="margin-bottom:10px;border:2px solid var(--gold,#c9a227);">'
+      + '<div style="font-weight:800;">ℹ 確認してください(' + new Set(notices.map((x) => x.work_date)).size + '日)</div>'
+      + '<ul style="margin:6px 0 6px 18px;padding:0;">' + nlines + '</ul>'
+      + '<div class="hint">この日は出張手当に数えられません。現場が正しければそのままで構いません(確認は止まりません)。</div>'
+      + '</div>';
+  }
+  if (items.length === 0) return noticeHtml;
+  const days = new Set(items.map((x) => x.work_date)).size;
+  const lines = items.map((x) => '<li><strong>' + exdEsc(md(x.work_date)) + '</strong> ' + exdEsc(x.reason_text) + (x.detail ? '<span class="hint-inline">(' + exdEsc(x.detail) + ')</span>' : '') + '</li>').join('');
+  return '<div class="card" id="dr-ledger-fix-banner" style="margin-bottom:10px;border:2px solid var(--danger,#d33);">'
+    + '<div style="font-weight:800;color:var(--danger,#d33);">⚠ 確定前に直す日報があります(' + days + '日)</div>'
+    + '<ul style="margin:6px 0 6px 18px;padding:0;">' + lines + '</ul>'
+    + '<div class="hint">差戻し・食い違いは、日報を直して出し直してください。管理者の確認待ちは、管理者が確認するまで確定できません(管理者に連絡してください)。すべて片付くまで、この期間は最終確認できません。</div>'
+    + '</div>' + noticeHtml;
+}
+
 async function renderDailyReportLedgerConfirmBlock(session, start, end) {
+  let fixItems = [];
+  try { fixItems = (await rpc('get_my_attendance_period_fix_items', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end })) || []; } catch (e) { fixItems = []; }
+  const banner = attendanceFixBannerHtml(fixItems);
+  const hasFix = fixItems.some((x) => x.blocks_confirm !== false);
   try {
     const rows = await rpc('get_my_attendance_period_confirmation', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
     if (rows && rows.length > 0) {
       const at = new Date(rows[0].confirmed_at).toLocaleString('ja-JP');
-      return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;background:var(--success-bg,#1d3a2a);">
+      return banner + `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;background:var(--success-bg,#1d3a2a);">
         <div style="font-weight:700;">✅ ${at} に最終確認・提出済みです</div>
         <div class="hint" style="margin-top:4px;">この期間は編集できません。内容に誤りがあれば管理者へご連絡ください。</div>
       </div>`;
@@ -14908,7 +14972,7 @@ async function renderDailyReportLedgerConfirmBlock(session, start, end) {
   } catch (e) { /* 未確認として扱う */ }
 
   if (!isAttendancePeriodOver(end)) {
-    return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
+    return banner + `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
       <div class="hint" style="margin-bottom:8px;">この期間(${start}〜${end})はまだ終わっていません。最終確認は期間終了後(${end}の翌日以降)に行ってください。「&lt;」「&gt;」で期間を移動した場合、確定したい期間を表示していることを確認してください。</div>
       <button type="button" id="dr-ledger-confirm-btn" disabled title="この期間はまだ終わっていないため、最終確認できません">この期間を最終確認して提出する</button>
       <div class="error" id="dr-ledger-confirm-error"></div>
@@ -14919,15 +14983,15 @@ async function renderDailyReportLedgerConfirmBlock(session, start, end) {
   // 抑制・無反応な環境〔PWAスタンドアロン表示・一部の組込みブラウザ等〕では、window.confirm()が
   // 常にfalseを返す/何も表示されないことがあり、ボタンを押しても無反応に見える不具合があった
   // 〔佐川さんのLINE報告〕)。
-  return `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
+  return banner + `<div class="card" id="dr-ledger-confirm-block" style="margin-bottom:10px;">
     <div class="hint" style="margin-bottom:8px;">内容を確認し、間違いが無ければ最終確認してください。確認すると、この期間はご自身では編集できなくなります。</div>
-    <button type="button" id="dr-ledger-confirm-btn">この期間を最終確認して提出する</button>
+    <button type="button" id="dr-ledger-confirm-btn"${hasFix ? ' disabled title="確定前に直す日報があるため、最終確認できません"' : ''}>この期間を最終確認して提出する</button>
     <div id="dr-ledger-confirm-inline" style="display:none;margin-top:8px;padding:10px;border:1px solid var(--border,#555);border-radius:8px;">
       <div style="margin-bottom:8px;">${start}〜${end}の日報内容で間違いありませんか？確認すると、この期間はご自身で編集できなくなります。</div>
       <button type="button" id="dr-ledger-confirm-yes-btn">はい、最終確認する</button>
       <button type="button" class="secondary" id="dr-ledger-confirm-no-btn" style="margin-top:6px;">やめる</button>
     </div>
-    <div class="error" id="dr-ledger-confirm-error"></div>
+    <div class="error" id="dr-ledger-confirm-error" style="white-space:pre-line;"></div>
   </div>`;
 }
 
@@ -14957,7 +15021,10 @@ function wireDailyReportLedgerConfirmButton(session, start, end) {
         await loadDailyReportLedger();
       } catch (e) {
         yesBtn.disabled = false;
-        if (errEl) errEl.textContent = e.message || '確認に失敗しました。';
+        // サーバーが「まだ確定できません。次の日報を先に直してください…」と日付付きで返す(改行入り)。
+        if (inline) inline.style.display = 'none';
+        btn.style.display = '';
+        if (errEl) { errEl.classList.add('show'); errEl.textContent = e.message || '確認に失敗しました。'; }
       }
     });
   }
@@ -20025,6 +20092,7 @@ function init() {
   SCREEN_ENTER_HOOKS['daily-report-needs-review-admin'] = loadDailyReportNeedsReviewAdmin;
   SCREEN_ENTER_HOOKS['daily-report-edit-requests-admin'] = loadDailyReportEditRequestsAdmin;
   SCREEN_ENTER_HOOKS['period-confirm-changes-admin'] = loadPeriodConfirmChangesAdmin;
+  SCREEN_ENTER_HOOKS['attendance-fix-needed-admin'] = loadAttendanceFixNeededAdmin;
   SCREEN_ENTER_HOOKS['daily-report-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportAdminList();
