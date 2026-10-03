@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v257-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T01:59:23.811Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v258-staging';
+const BUILD_DEPLOYED_AT = '2026-10-03T02:48:51.193Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14915,6 +14915,9 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
     const rows = await rpc('admin_list_reports_for_day', { p_admin_employee_code: session.employeeCode, p_employee_code: btn.dataset.emp, p_work_date: btn.dataset.date });
     if (!rows || rows.length === 0) { panel.innerHTML = '<div class="hint">この日の日報はもうありません(画面を更新してください)。</div>'; return; }
     const n = attendanceBookNum;
+    // 自分が出した日報は、自分では承認・修正できない(自己承認の防止)。操作ボタンを出さず、自分の日報の画面で直す案内にする
+    // (2026-10-03 Shota「できない」: ボタンを押すと「自分自身が提出した日報は自分で直せません」と出るだけだった)。
+    const isOwn = btn.dataset.emp === session.employeeCode;
     const statusLabel = { submitted: '提出済み(承認待ち)', confirmed: '確定済み', rejected: '差戻し中' };
     const isConflict = (r) => (Number(r.headcount) === 0.5 && r.work_type === '終日') || (Number(r.headcount) >= 1 && (r.work_type === '午前' || r.work_type === '午後'));
     const items = rows.map((r, i) => {
@@ -14927,10 +14930,10 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       if (r.is_night_shift) bits.push('夜勤');
       const isOutsideSite = r.site_name === '現場外';
       bits.push('出張' + (r.is_business_trip ? 'あり' : 'なし') + '(' + (isOutsideSite ? '現場外: 県内か県外か不明' : (r.is_out_of_prefecture ? '県外の現場' : '県内の現場')) + ')');
-      const fixBtns = (reason === 'conflict' && isConflict(r) && r.report_status !== 'rejected')
+      const fixBtns = (!isOwn && reason === 'conflict' && isConflict(r) && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><span class="hint-inline">直す:</span>'
           + [['終日', 1], ['午前', 0.5], ['午後', 0.5]].map(([w, h]) => '<button type="button" class="secondary afn-fix" style="padding:2px 10px;" data-id="' + r.id + '" data-wt="' + w + '" data-hc="' + h + '">' + w + '・' + h + '人工にする</button>').join('') + '</div>' : '';
-      const tripBtn = (reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
+      const tripBtn = (!isOwn && reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張から外す(' + (isOutsideSite ? '県外ではなかった・出張にしない' : '県内の現場のため出張にしない') + ')</button>'
           + '<button type="button" class="secondary afn-trip-count" data-id="' + r.id + '">出張扱いにする(県外の現場へ直す)</button></div>'
           + '<div class="afn-site-pick" data-id="' + r.id + '" style="display:none;margin-top:6px;"></div>' : '';
@@ -14938,9 +14941,14 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
         + (r.rejected_reason ? '<div class="hint-inline">差戻し理由: ' + exdEsc(r.rejected_reason) + '</div>' : '')
         + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + fixBtns + '</div>';
     }).join('');
-    const targets = rows.filter((r) => (reason === 'submitted' ? r.report_status === 'submitted' : reason === 'rejected' ? r.report_status === 'rejected' : false));
+    const targets = isOwn ? [] : rows.filter((r) => (reason === 'submitted' ? r.report_status === 'submitted' : reason === 'rejected' ? r.report_status === 'rejected' : false));
     let actions = '';
-    if (reason === 'submitted' && targets.length) {
+    if (isOwn) {
+      actions = '<div class="hint-inline">これはあなた自身の日報です。自分の日報は自分では承認・修正できないため、次のどちらかにしてください。</div>'
+        + '<div class="hint-inline">① 内容が間違っている → 「自分の日報を開いて直す」で、自分の日報を直して出し直す。</div>'
+        + '<div class="hint-inline">② 管理者の承認が必要 → 別の管理者に依頼する。</div>'
+        + '<div style="margin-top:6px;"><button type="button" class="afn-open-own" data-date="' + exdEsc(btn.dataset.date) + '">自分の日報を開いて直す</button></div>';
+    } else if (reason === 'submitted' && targets.length) {
       actions = '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;"><button type="button" class="afn-approve">この内容で承認する</button>'
         + '<input type="text" class="afn-reason" placeholder="差し戻す場合は理由を入力" style="flex:1;min-width:160px;"><button type="button" class="secondary afn-reject">差し戻す</button></div>';
     } else if (reason === 'rejected' && targets.length) {
@@ -14973,6 +14981,12 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       const why = panel.querySelector('.afn-reason').value.trim();
       if (!why) { showMsg('差し戻す理由を入力してください。'); return; }
       run(() => rpc('admin_confirm_daily_reports', { p_admin_employee_code: session.employeeCode, p_daily_report_ids: ids, p_action: 'rejected', p_reason: why }));
+    });
+    const ownBtn = panel.querySelector('.afn-open-own');
+    if (ownBtn) ownBtn.addEventListener('click', () => {
+      dailyReportTarget = { type: 'self', employeeCode: null, employeeName: null, subcontractorWorkerId: null, workerName: null };
+      dailyReportPrefillDate = ownBtn.dataset.date;
+      showScreen('daily-report');
     });
     panel.querySelectorAll('.afn-trip-clear').forEach((tb) => tb.addEventListener('click', () => {
       if (!window.confirm('この日の出張チェックを外します(県内の現場のため出張に数えません)。よろしいですか?')) return;
