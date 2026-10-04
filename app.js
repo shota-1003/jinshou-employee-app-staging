@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v258-staging';
-const BUILD_DEPLOYED_AT = '2026-10-03T02:48:51.193Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v259-staging';
+const BUILD_DEPLOYED_AT = '2026-10-04T13:34:43.054Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -9804,7 +9804,7 @@ async function doSubmitExpensePayment() {
 // ---------- 出面集計(管理者、社員別/外注会社別/現場別マトリクス、月次/年間) ----------
 
 let attendanceView = 'employee';
-let attendancePeriod = 'month'; // 'month' | 'year'
+let attendancePeriod = 'pay'; // 'month'(カレンダー月) | 'pay'(給与期間 26日〜25日。既定: 給与と数字を合わせる 2026-10-04 Shota) | 'year'
 let attendanceSiteFilter = '';
 let attendanceEmployeeFilter = '';
 let attendanceCompanyFilter = '';
@@ -9854,6 +9854,7 @@ function attendanceViewLabel() {
 // 上書きしてしまう競合が起きうる(実機テストで再現した)。呼び出しごとに世代番号を
 // 発行し、応答が返ってきた時点で最新の呼び出しでなければ描画しない。
 let attendanceMatrixRequestSeq = 0;
+let attendanceColDates = []; // 給与期間表示の列→日付(年・月・日)
 
 // 「対象月」を< 2026年8月 >のようなナビゲーション表示にする(集計ロジック自体は
 // 変更せず、既存の#am-month(type=month)の値をそのまま使う。見た目だけの変更)。
@@ -9883,7 +9884,38 @@ async function loadAttendanceMatrix() {
   wrapEl.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
     let rows; let colCount; let colLabel; let periodLabel;
-    if (attendancePeriod === 'month') {
+    if (attendancePeriod === 'pay') {
+      // 給与期間(前月26日〜当月25日): 前月と当月の月次表を取って日付順に並べ直す(DBは変えない)。選んだ月=期間の終わりの月。
+      const ym = currentAttendanceMonth();
+      if (!ym) return;
+      const prev = ym.month === 1 ? { year: ym.year - 1, month: 12 } : { year: ym.year, month: ym.month - 1 };
+      const [prevRows, curRows] = await Promise.all([
+        rpc('admin_get_attendance_matrix', { p_admin_employee_code: session.employeeCode, p_year: prev.year, p_month: prev.month, p_view: attendanceView, ...filterParams }),
+        rpc('admin_get_attendance_matrix', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_view: attendanceView, ...filterParams }),
+      ]);
+      const prevDays = daysInMonth(prev.year, prev.month);
+      attendanceColDates = [];
+      for (let d = 26; d <= prevDays; d++) attendanceColDates.push({ year: prev.year, month: prev.month, day: d });
+      for (let d = 1; d <= 25; d++) attendanceColDates.push({ year: ym.year, month: ym.month, day: d });
+      const byId = new Map();
+      for (const r of (curRows || [])) byId.set(String(r.group_id), { label: r.group_label, id: r.group_id, cur: r.daily || {}, prev: {} });
+      for (const r of (prevRows || [])) {
+        const k = String(r.group_id);
+        if (byId.has(k)) byId.get(k).prev = r.daily || {}; else byId.set(k, { label: r.group_label, id: r.group_id, cur: {}, prev: r.daily || {} });
+      }
+      rows = [...byId.values()].map((m) => {
+        const daily = {}; let total = 0;
+        attendanceColDates.forEach((c, idx) => {
+          const v = (c.month === ym.month && c.year === ym.year ? m.cur : m.prev)[String(c.day)];
+          if (v) { daily[String(idx + 1)] = v; total += Number(v) || 0; }
+        });
+        return { group_id: m.id, group_label: m.label, daily, month_total: Math.round(total * 100) / 100 };
+      }).filter((r) => Object.keys(r.daily).length > 0);
+      colCount = attendanceColDates.length;
+      colLabel = (i) => { const c = attendanceColDates[i - 1]; return (i === 1 || c.day === 1) ? `${c.month}/${c.day}` : `${c.day}`; };
+      const bnd = computeDailyReportPeriodBounds(ym.year, ym.month, 'pay_period');
+      periodLabel = `給与期間 ${bnd.start}〜${bnd.end}`;
+    } else if (attendancePeriod === 'month') {
       const ym = currentAttendanceMonth();
       if (!ym) return;
       rows = await rpc('admin_get_attendance_matrix', { p_admin_employee_code: session.employeeCode, p_year: ym.year, p_month: ym.month, p_view: attendanceView, ...filterParams });
@@ -9898,15 +9930,15 @@ async function loadAttendanceMatrix() {
       periodLabel = `${year}年`;
     }
     if (mySeq !== attendanceMatrixRequestSeq) return; // より新しいリクエストが既に発行されている
-    const confirmHint = (attendancePeriod === 'month' && attendanceView === 'employee') ? '名前の横の✓は本人が最終確認済みです。' : '';
-    document.getElementById('am-hint').textContent = `${rows.length}件(${periodLabel})。${attendancePeriod === 'month' ? 'セルをタップするとその日の内訳、行をタップするとその期間の内訳を確認できます。' : '行をタップすると年間の内訳を確認できます。'}${confirmHint}`;
+    const confirmHint = (attendancePeriod !== 'year' && attendanceView === 'employee') ? '名前の横の✓は本人が最終確認済みです。' : '';
+    document.getElementById('am-hint').textContent = `${rows.length}件(${periodLabel})。${attendancePeriod !== 'year' ? 'セルをタップするとその日の内訳、行をタップするとその期間の内訳を確認できます。' : '行をタップすると年間の内訳を確認できます。'}${confirmHint}`;
     if (rows.length === 0) { wrapEl.innerHTML = '<div class="hint">この期間の出面データはありません。</div>'; return; }
 
     // 「名前の横に確定している人は分かるようにして」(2026-10-01 Shota指摘): 本人の最終確認
     // (confirm_my_attendance_period)が済んでいるかを一覧できるようにする。本人の確認は
     // 給与期間(26日〜25日)単位のため、カレンダー月表示でもその月と重なる給与期間で判定する。
     let confirmedSet = new Set();
-    if (attendancePeriod === 'month' && attendanceView === 'employee') {
+    if (attendancePeriod !== 'year' && attendanceView === 'employee') {
       try {
         const ym = currentAttendanceMonth();
         const { start: pStart, end: pEnd } = computeDailyReportPeriodBounds(ym.year, ym.month, 'pay_period');
@@ -9921,13 +9953,13 @@ async function loadAttendanceMatrix() {
     const bodyRows = rows.map((r) => {
       let cells = '';
       for (let i = 1; i <= colCount; i++) {
-        const key = attendancePeriod === 'month' ? String(i) : String(i);
-        const v = (attendancePeriod === 'month' ? r.daily : r.monthly)[key];
+        const key = String(i);
+        const v = (attendancePeriod !== 'year' ? r.daily : r.monthly)[key];
         cells += v
-          ? `<td class="am-cell-value" data-col="${i}" data-group-id="${r.group_id}" data-group-label="${r.group_label}">${v}</td>`
+          ? `<td class="am-cell-value" data-col="${i}" data-date="${attendancePeriod === 'pay' && attendanceColDates[i - 1] ? attendanceColDates[i - 1].year + '-' + attendanceColDates[i - 1].month + '-' + attendanceColDates[i - 1].day : ''}" data-group-id="${r.group_id}" data-group-label="${r.group_label}">${v}</td>`
           : '<td class="am-cell-empty">-</td>';
       }
-      const total = attendancePeriod === 'month' ? r.month_total : r.year_total;
+      const total = attendancePeriod !== 'year' ? r.month_total : r.year_total;
       const confirmedBadge = confirmedSet.has(r.group_id) ? ' <span class="am-confirmed-badge" title="本人が最終確認済み">✓</span>' : '';
       return `<tr class="am-row-clickable" data-group-id="${r.group_id}" data-group-label="${r.group_label}">
         <td>${r.group_label}${confirmedBadge}</td>${cells}<td class="am-total-col">${total}</td>
@@ -9936,22 +9968,24 @@ async function loadAttendanceMatrix() {
     const colTotals = [];
     for (let i = 1; i <= colCount; i++) {
       const key = String(i);
-      colTotals.push(rows.reduce((sum, r) => sum + (Number((attendancePeriod === 'month' ? r.daily : r.monthly)[key]) || 0), 0));
+      colTotals.push(rows.reduce((sum, r) => sum + (Number((attendancePeriod !== 'year' ? r.daily : r.monthly)[key]) || 0), 0));
     }
-    const grandTotal = rows.reduce((sum, r) => sum + Number((attendancePeriod === 'month' ? r.month_total : r.year_total) || 0), 0);
+    const grandTotal = rows.reduce((sum, r) => sum + Number((attendancePeriod !== 'year' ? r.month_total : r.year_total) || 0), 0);
     const totalRow = `<tr><td>合計</td>${colTotals.map((t) => `<td class="am-total-col">${t ? t : '-'}</td>`).join('')}<td class="am-total-col">${grandTotal}</td></tr>`;
 
     wrapEl.innerHTML = `
       <table class="attendance-matrix-table">
-        <thead><tr><th>${attendanceViewLabel()}</th>${headers}<th>${attendancePeriod === 'month' ? '月合計' : '年合計'}</th></tr></thead>
+        <thead><tr><th>${attendanceViewLabel()}</th>${headers}<th>${attendancePeriod === 'pay' ? '期間合計' : attendancePeriod === 'month' ? '月合計' : '年合計'}</th></tr></thead>
         <tbody>${bodyRows}${totalRow}</tbody>
       </table>
     `;
-    if (attendancePeriod === 'month') {
+    if (attendancePeriod !== 'year') {
       wrapEl.querySelectorAll('.am-cell-value').forEach((el) => {
         el.addEventListener('click', (e) => {
           e.stopPropagation();
-          openAttendanceCellDetail(Number(el.dataset.col), el.dataset.groupId, el.dataset.groupLabel);
+          let day = Number(el.dataset.col); let ymOver = null;
+          if (el.dataset.date) { const parts = el.dataset.date.split('-').map(Number); ymOver = { year: parts[0], month: parts[1] }; day = parts[2]; }
+          openAttendanceCellDetail(day, el.dataset.groupId, el.dataset.groupLabel, ymOver);
         });
       });
     }
@@ -9963,9 +9997,9 @@ async function loadAttendanceMatrix() {
   }
 }
 
-async function openAttendanceCellDetail(day, groupId, groupLabel) {
+async function openAttendanceCellDetail(day, groupId, groupLabel, ymOverride) {
   const session = getSession();
-  const ym = currentAttendanceMonth();
+  const ym = ymOverride || currentAttendanceMonth();
   showScreen('attendance-cell-detail');
   const dateLabel = `${ym.year}年${ym.month}月${day}日`;
   document.getElementById('acd-title').textContent = `${dateLabel} ${groupLabel}`;
@@ -9985,7 +10019,7 @@ async function openAttendanceCellDetail(day, groupId, groupLabel) {
 
 async function openAttendanceDetail(groupId, groupLabel) {
   const session = getSession();
-  const periodLabel = attendancePeriod === 'month' ? (() => { const ym = currentAttendanceMonth(); return `${ym.year}年${ym.month}月`; })() : `${document.getElementById('am-year').value}年`;
+  const periodLabel = attendancePeriod !== 'year' ? (() => { const ym = currentAttendanceMonth(); return `${ym.year}年${ym.month}月`; })() : `${document.getElementById('am-year').value}年`;
   showScreen('attendance-detail');
   const listEl = document.getElementById('ad-list');
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
@@ -20059,7 +20093,7 @@ function init() {
     btn.addEventListener('click', () => {
       attendancePeriod = btn.dataset.period;
       document.querySelectorAll('#am-period-filter .filter-chip').forEach((c) => c.classList.toggle('active', c === btn));
-      document.getElementById('am-month-group').style.display = attendancePeriod === 'month' ? 'block' : 'none';
+      document.getElementById('am-month-group').style.display = attendancePeriod !== 'year' ? 'block' : 'none';
       document.getElementById('am-year').style.display = attendancePeriod === 'year' ? 'block' : 'none';
       document.querySelector('label[for="am-year"]').style.display = attendancePeriod === 'year' ? 'block' : 'none';
       if (attendancePeriod === 'year' && !document.getElementById('am-year').value) {
