@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v259-staging';
-const BUILD_DEPLOYED_AT = '2026-10-04T13:34:43.054Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v260-staging';
+const BUILD_DEPLOYED_AT = '2026-10-05T02:54:38.008Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14967,13 +14967,16 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       const fixBtns = (!isOwn && reason === 'conflict' && isConflict(r) && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><span class="hint-inline">直す:</span>'
           + [['終日', 1], ['午前', 0.5], ['午後', 0.5]].map(([w, h]) => '<button type="button" class="secondary afn-fix" style="padding:2px 10px;" data-id="' + r.id + '" data-wt="' + w + '" data-hc="' + h + '">' + w + '・' + h + '人工にする</button>').join('') + '</div>' : '';
+      const correctBtn = (!isOwn && r.report_status === 'rejected')
+        ? '<div style="margin-top:6px;"><button type="button" class="secondary afn-correct" data-id="' + r.id + '" data-site="' + exdEsc(r.site_name || '') + '">現場・人工を直して確定する</button></div>'
+          + '<div class="afn-correct-box" data-id="' + r.id + '" style="display:none;margin-top:6px;"></div>' : '';
       const tripBtn = (!isOwn && reason === 'trip_site' && r.is_business_trip && !r.is_out_of_prefecture && r.report_status !== 'rejected')
         ? '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="afn-trip-clear" data-id="' + r.id + '">出張から外す(' + (isOutsideSite ? '県外ではなかった・出張にしない' : '県内の現場のため出張にしない') + ')</button>'
           + '<button type="button" class="secondary afn-trip-count" data-id="' + r.id + '">出張扱いにする(県外の現場へ直す)</button></div>'
           + '<div class="afn-site-pick" data-id="' + r.id + '" style="display:none;margin-top:6px;"></div>' : '';
       return '<div style="padding:6px 8px;border:1px solid var(--border,#555);border-radius:8px;margin-bottom:6px;"><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span><div class="hint-inline">' + exdEsc(bits.join(' / ')) + '</div>' + tripBtn
         + (r.rejected_reason ? '<div class="hint-inline">差戻し理由: ' + exdEsc(r.rejected_reason) + '</div>' : '')
-        + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + fixBtns + '</div>';
+        + (r.notes ? '<div class="hint-inline">備考: ' + exdEsc(r.notes) + '</div>' : '') + fixBtns + correctBtn + '</div>';
     }).join('');
     const targets = isOwn ? [] : rows.filter((r) => (reason === 'submitted' ? r.report_status === 'submitted' : reason === 'rejected' ? r.report_status === 'rejected' : false));
     let actions = '';
@@ -15022,6 +15025,38 @@ async function openAttendanceFixApprovePanel(btn, session, reload) {
       dailyReportPrefillDate = ownBtn.dataset.date;
       showScreen('daily-report');
     });
+    // 差戻し中の日報を、管理者が現場・人工を直してそのまま確定する(本人が編集できないとき。2026-10-05 Shota)
+    panel.querySelectorAll('.afn-correct').forEach((cb) => cb.addEventListener('click', () => {
+      const box = panel.querySelector('.afn-correct-box[data-id="' + cb.dataset.id + '"]');
+      if (box.dataset.open === '1') { box.style.display = 'none'; box.dataset.open = ''; return; }
+      box.style.display = 'block'; box.dataset.open = '1';
+      box.innerHTML = '<div class="hint-inline">いまの現場: ' + exdEsc(cb.dataset.site) + '。変えるときは、現場名を入れて探して選んでください(変えないなら空のまま)。</div>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;"><input type="text" class="afn-site-q" placeholder="現場名(例: ファスプレ)" style="flex:1;min-width:150px;"><button type="button" class="secondary afn-site-find">探す</button></div>'
+        + '<select class="afn-site-pick-sel" style="display:none;margin-top:4px;width:100%;"></select>'
+        + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px;"><span class="hint-inline">人工:</span><select class="afn-wt"><option value="">変えない</option><option value="終日|1">終日・1人工</option><option value="午前|0.5">午前・0.5人工</option><option value="午後|0.5">午後・0.5人工</option></select></div>'
+        + '<div style="margin-top:6px;"><button type="button" class="afn-correct-go">この内容に直して確定する</button></div>';
+      const sel = box.querySelector('.afn-site-pick-sel');
+      box.querySelector('.afn-site-find').addEventListener('click', async () => {
+        const q = box.querySelector('.afn-site-q').value.trim();
+        if (!q) { showMsg('現場名を入れてください。'); return; }
+        try {
+          const found = await rpc('admin_search_sites_simple', { p_admin_employee_code: session.employeeCode, p_query: q });
+          if (!found || found.length === 0) { showMsg('その名前の現場がありません。'); return; }
+          showMsg('');
+          sel.style.display = 'block';
+          sel.innerHTML = '<option value="">選んでください</option>' + found.map((x) => '<option value="' + x.id + '">' + exdEsc(x.site_name) + '</option>').join('');
+        } catch (e) { showMsg(e.message || '探せませんでした。'); }
+      });
+      box.querySelector('.afn-correct-go').addEventListener('click', () => {
+        const siteId = sel.value ? Number(sel.value) : null;
+        const wt = box.querySelector('.afn-wt').value;
+        const [wtName, hc] = wt ? wt.split('|') : [null, null];
+        if (!siteId && !wtName) { showMsg('直す内容(現場か人工)を選んでください。内容が正しいなら「この内容のまま確定」を使ってください。'); return; }
+        const desc = (siteId ? '現場を「' + sel.options[sel.selectedIndex].text + '」' : '') + (siteId && wtName ? '、' : '') + (wtName ? '人工を「' + wtName + '・' + hc + '人工」' : '');
+        if (!window.confirm('この日報の' + desc + 'に直して、管理者が確定します。差戻しの理由は消えます。よろしいですか?')) return;
+        run(() => rpc('admin_correct_daily_report', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(cb.dataset.id), p_site_id: siteId, p_work_type: wtName, p_headcount: hc ? Number(hc) : null, p_reason: '本人が編集できないため、管理者が直して確定した(承認待ち一覧から)' }));
+      });
+    }));
     panel.querySelectorAll('.afn-trip-clear').forEach((tb) => tb.addEventListener('click', () => {
       if (!window.confirm('この日の出張チェックを外します(県内の現場のため出張に数えません)。よろしいですか?')) return;
       run(() => rpc('admin_clear_daily_report_trip_flag', { p_admin_employee_code: session.employeeCode, p_daily_report_id: Number(tb.dataset.id), p_reason: '県内の現場のため出張チェックを外した(承認待ち一覧から)' }));
