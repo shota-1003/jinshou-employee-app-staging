@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v260-staging';
-const BUILD_DEPLOYED_AT = '2026-10-05T02:54:38.008Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v261-staging';
+const BUILD_DEPLOYED_AT = '2026-10-05T04:54:52.267Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -16902,12 +16902,38 @@ async function renderDrmDaySummary() {
       </div>`;
   } catch (e) { el.innerHTML = ''; }
   renderDrmSubcontractorMissing();
+  renderDrmUnplanned();
 }
 
 // 外注「会社単位」の出勤報告 照合(仕様6/7/8)。配置カレンダーの会社別予定人数と、その日に届いた
 // 出勤報告人数(本人報告＋管理者の外注応援代理入力を二重計上しない照合値)を比較し、
 // 「○○会社 予定N人 報告M人 未報告K人」を一覧化する。未報告がある会社はタップで管理者が
 // 会社単位の外注応援代理入力へ直行できる(本人入力できない作業員の補完)。
+// 配置にないのに日報が出ている社員・外注(配置の入れ忘れ)。直近7日を日ごとに出す。ダッシュボードのカード(daily_report_unplanned)と同じ範囲。2026-10-05 Shota指示
+async function renderDrmUnplanned() {
+  const el = document.getElementById('drm-unplanned');
+  if (!el) return;
+  const session = getSession();
+  try {
+    const end = drmSelectedDate && drmSelectedDate > todayJST() ? todayJST() : (drmSelectedDate || todayJST());
+    const endD = new Date(end + 'T00:00:00'); const startD = new Date(endD); startD.setDate(startD.getDate() - 6);
+    const fmt = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    const rows = await rpc('admin_list_unplanned_reports', { p_admin_employee_code: session.employeeCode, p_from: fmt(startD), p_to: fmt(endD) });
+    if (!rows || !rows.length) { el.innerHTML = ''; return; }
+    const wd = ['日', '月', '火', '水', '木', '金', '土'];
+    const byDate = new Map();
+    rows.forEach((r) => { const k = String(r.report_date).slice(0, 10); if (!byDate.has(k)) byDate.set(k, []); byDate.get(k).push(r); });
+    const stJp = { submitted: '提出済み・未確定', confirmed: '確定' };
+    const lines = Array.from(byDate.entries()).map(([d, list]) => {
+      const dd = new Date(d + 'T00:00:00');
+      const items = list.map((r) => '<div class="hint-inline">' + (r.kind === 'employee' ? '社員' : '外注') + ' <b>' + exdEsc(r.person) + '</b>(' + exdEsc(r.site_name || '-') + '・' + exdEsc(r.work_type || '') + '・' + (stJp[r.report_status] || exdEsc(r.report_status)) + ')</div>').join('');
+      return '<div style="margin-top:6px;"><div><b>' + (dd.getMonth() + 1) + '/' + dd.getDate() + '(' + wd[dd.getDay()] + ')</b> ' + list.length + '件</div>' + items + '</div>';
+    }).join('');
+    el.innerHTML = '<div class="today-item attention" style="cursor:default;display:block;"><div class="today-item-label">配置にないのに日報が出ている ' + rows.length + '件(直近7日)</div>'
+      + '<div class="hint-inline">その日どの配置にも入っていないのに、働いた日報があります。配置の入れ忘れの可能性があります(配置カレンダーで確認してください)。</div>' + lines + '</div>';
+  } catch (e) { el.innerHTML = ''; }
+}
+
 async function renderDrmSubcontractorMissing() {
   const el = document.getElementById('drm-sc-missing');
   if (!el) return;
