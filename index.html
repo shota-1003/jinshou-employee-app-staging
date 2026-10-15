@@ -635,6 +635,13 @@
     <label for="propose-site-prefecture">都道府県</label>
     <select id="propose-site-prefecture"><option value="">選択してください</option></select>
     <div class="checkbox-row"><input type="checkbox" id="propose-site-out-of-prefecture"><label for="propose-site-out-of-prefecture">県外の現場</label></div>
+    <label for="propose-site-address">住所</label>
+    <input type="text" id="propose-site-address" placeholder="例: 徳島市南昭和町1-23" maxlength="500">
+    <label for="propose-site-prime-contractor">元請け<span class="required-mark">(必須)</span></label>
+    <input type="text" id="propose-site-prime-contractor" placeholder="例: ○○建設株式会社" maxlength="200">
+    <div class="checkbox-row"><input type="checkbox" id="propose-site-internal"><label for="propose-site-internal">元請けなし（社内業務として申請）</label></div>
+    <label for="propose-site-internal-reason">社内業務で元請けがない理由</label>
+    <input type="text" id="propose-site-internal-reason" maxlength="500" placeholder="例: 自社の資材置場">
     <label for="propose-site-notes">備考(任意)</label>
     <textarea id="propose-site-notes" rows="2"></textarea>
     <div id="propose-site-candidates" style="display:none;margin-top:12px;">
@@ -2905,8 +2912,11 @@
       </select>
       <label>住所</label>
       <input type="text" id="site-create-address" placeholder="例: 徳島市南昭和町1-23">
-      <label>元請</label>
-      <input type="text" id="site-create-prime-contractor" placeholder="例: 〇〇建設株式会社">
+      <label>元請<span class="required-mark">(必須)</span></label>
+      <input type="text" id="site-create-prime-contractor" placeholder="例: 〇〇建設株式会社" maxlength="200">
+      <div class="checkbox-row"><input type="checkbox" id="site-create-internal"><label for="site-create-internal">元請けなし（社内業務）</label></div>
+      <label for="site-create-internal-reason">社内業務で元請けがない理由</label>
+      <input type="text" id="site-create-internal-reason" maxlength="500" placeholder="例: 自社の資材置場">
       <label>開始予定日</label>
       <input type="date" id="site-create-start-date">
       <label>終了予定日</label>

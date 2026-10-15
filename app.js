@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v265-staging';
-const BUILD_DEPLOYED_AT = '2026-10-15T07:25:36.225Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v266-staging';
+const BUILD_DEPLOYED_AT = '2026-10-15T08:53:46.388Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11925,8 +11925,12 @@ async function loadSiteAdminList() {
     // その場で選べるようにする(表記揺れによる現場の重複作成を防ぐ、ユーザー指示)。
     const candidateLists = await Promise.all(rows.map((s) =>
       rpc('admin_get_site_merge_candidates', { p_admin_employee_code: session.employeeCode, p_site_id: s.id }).catch(() => [])));
+    const details = await rpc('admin_list_sites', {
+      p_admin_employee_code: session.employeeCode, p_include_inactive: true, p_query: null,
+    }).catch(() => null);
     listEl.innerHTML = rows.map((s, i) => {
       const candidates = candidateLists[i] || [];
+      const detail = Array.isArray(details) ? details.find((row) => Number(row.id) === Number(s.id)) : null;
       const candidatesHtml = candidates.length > 0 ? `
         <div class="hint-inline" style="margin-top:6px;">似ている既存の現場:</div>
         ${candidates.map((c) => `
@@ -11940,6 +11944,11 @@ async function loadSiteAdminList() {
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"></div>
         <div class="row2">申請者: ${siteProposerText(s)}</div>
         <div class="row2">申請日時: ${new Date(s.created_at).toLocaleString('ja-JP')}</div>
+        <label>元請け会社（承認前に確認）</label>
+        <input type="text" class="site-pending-prime" maxlength="200" value="${exdEsc(detail?.prime_contractor || '')}" placeholder="例: 〇〇建設株式会社">
+        <label><input type="checkbox" class="site-pending-internal">元請けなし（社内業務）</label>
+        <input type="text" class="site-pending-internal-reason" maxlength="500" placeholder="社内業務で元請けがない理由">
+        <div class="error site-pending-prime-error">${details === null ? '元請けの登録済み情報を取得できませんでした。承認前に確認してください。' : ''}</div>
         ${candidatesHtml}
         <div class="qual-verify-btns">
           <button type="button" class="approve-btn">新規現場として承認する</button>
@@ -11975,9 +11984,24 @@ async function doDecideSite(itemEl, action) {
   const session = getSession();
   const id = itemEl.dataset.id;
   const renamedTo = itemEl.querySelector('.site-rename-input').value.trim();
+  const prime = itemEl.querySelector('.site-pending-prime').value.trim();
+  const internal = itemEl.querySelector('.site-pending-internal').checked;
+  const reason = itemEl.querySelector('.site-pending-internal-reason').value.trim();
+  const errorEl = itemEl.querySelector('.site-pending-prime-error');
+  if (errorEl) errorEl.textContent = '';
+  if (action === 'active' && (internal ? !!prime || !reason : !prime)) {
+    if (errorEl) errorEl.textContent = internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '承認前に元請け会社を入力してください。';
+    return;
+  }
   try {
     if (action === 'active' && renamedTo) {
       await rpc('admin_update_site_name', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_site_name: renamedTo });
+    }
+    if (action === 'active') {
+      await rpc('site_prime_exception_set', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_reason: internal ? reason : null });
+      if (!internal) await rpc('admin_update_site_details', {
+        p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_prime_contractor: prime,
+      });
     }
     await rpc('admin_decide_pending_site', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_action: action });
     await loadSiteAdminList();
@@ -12005,6 +12029,10 @@ function populateSitePrefectureSelect(selectId) {
 
 function resetProposeSiteForm() {
   document.getElementById('propose-site-name').value = '';
+  document.getElementById('propose-site-address').value = '';
+  document.getElementById('propose-site-prime-contractor').value = '';
+  document.getElementById('propose-site-internal').checked = false;
+  document.getElementById('propose-site-internal-reason').value = '';
   document.getElementById('propose-site-notes').value = '';
   document.getElementById('propose-site-out-of-prefecture').checked = false;
   document.getElementById('propose-site-prefecture').value = '';
@@ -13501,17 +13529,26 @@ async function doProposeSite(forceCreate) {
   const prefecture = document.getElementById('propose-site-prefecture').value || null;
   const isOutOfPrefecture = document.getElementById('propose-site-out-of-prefecture').checked;
   const notes = document.getElementById('propose-site-notes').value.trim() || null;
+  const address = document.getElementById('propose-site-address').value.trim() || null;
+  const primeContractor = document.getElementById('propose-site-prime-contractor').value.trim();
+  const internal = document.getElementById('propose-site-internal').checked;
+  const internalReason = document.getElementById('propose-site-internal-reason').value.trim();
   const candidatesEl = document.getElementById('propose-site-candidates');
   hideError('propose-site-error');
   candidatesEl.style.display = 'none';
   if (!name) { showError('propose-site-error', '現場名を入力してください。'); return; }
+  if (internal ? !!primeContractor || !internalReason : !primeContractor) {
+    showError('propose-site-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '元請け会社を入力してください。'); return;
+  }
 
   const btn = document.getElementById('propose-site-submit');
   btn.disabled = true;
   try {
-    const result = await rpc('propose_new_site', {
+    const result = await rpc('propose_new_site_details', {
       p_employee_code: session.employeeCode, p_site_name: name, p_prefecture: prefecture,
-      p_is_out_of_prefecture: isOutOfPrefecture, p_notes: notes, p_force_create: !!forceCreate,
+      p_is_out_of_prefecture: isOutOfPrefecture,
+      p_notes: internal ? ['元請けなし（社内業務）申請理由: ' + internalReason, notes].filter(Boolean).join('\n') : notes,
+      p_force_create: !!forceCreate, p_address: address, p_prime_contractor: primeContractor || null,
     });
     const r = result[0];
     if (r.created) {
@@ -13542,16 +13579,22 @@ async function doCreateSite(forceCreate) {
   const session = getSession();
   const nameInput = document.getElementById('site-create-name');
   const name = nameInput.value.trim();
+  const primeContractor = document.getElementById('site-create-prime-contractor').value.trim();
+  const internal = document.getElementById('site-create-internal').checked;
+  const internalReason = document.getElementById('site-create-internal-reason').value.trim();
   const candidatesEl = document.getElementById('site-create-candidates');
   hideError('site-create-error');
   candidatesEl.style.display = 'none';
   if (!name) { showError('site-create-error', '現場名を入力してください。'); return; }
+  if (internal ? !!primeContractor || !internalReason : !primeContractor) {
+    showError('site-create-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '元請け会社を入力してください。'); return;
+  }
   try {
-    const result = await rpc('admin_register_site', {
+    const result = await rpc(internal ? 'admin_register_internal_site' : 'admin_register_site', {
       p_admin_employee_code: session.employeeCode, p_site_name: name,
       p_prefecture: document.getElementById('site-create-prefecture').value || null,
       p_address: document.getElementById('site-create-address').value.trim() || null,
-      p_prime_contractor: document.getElementById('site-create-prime-contractor').value.trim() || null,
+      ...(internal ? { p_reason: internalReason } : { p_prime_contractor: primeContractor }),
       p_planned_start_date: document.getElementById('site-create-start-date').value || null,
       p_planned_end_date: document.getElementById('site-create-end-date').value || null,
       p_force_create: !!forceCreate,
@@ -13571,6 +13614,8 @@ async function doCreateSite(forceCreate) {
     document.getElementById('site-create-prefecture').value = '';
     document.getElementById('site-create-address').value = '';
     document.getElementById('site-create-prime-contractor').value = '';
+    document.getElementById('site-create-internal').checked = false;
+    document.getElementById('site-create-internal-reason').value = '';
     document.getElementById('site-create-start-date').value = '';
     document.getElementById('site-create-end-date').value = '';
     await loadSiteAdminList();
