@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v261-staging';
-const BUILD_DEPLOYED_AT = '2026-10-05T04:54:52.267Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v265-staging';
+const BUILD_DEPLOYED_AT = '2026-10-15T07:25:36.225Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -14038,7 +14038,7 @@ async function refreshDailyReportTargetIsDriver() {
   }
 }
 
-function addDailyReportEntry(prefill) {
+function addDailyReportEntry(prefill, canAppend, siteQuery) {
   const template = document.getElementById('daily-report-entry-template');
   const clone = template.content.cloneNode(true);
   hydrateIcons(clone);
@@ -14050,8 +14050,10 @@ function addDailyReportEntry(prefill) {
   const siteSearch = clone.querySelector('.dr-site-search');
   const newSiteWrap = clone.querySelector('.dr-new-site-wrap');
   const newSiteToggleBtn = clone.querySelector('.dr-new-site-toggle-btn');
-  populateSiteSelect(siteSelect, '', true).then(() => {
+  const siteReady = populateSiteSelect(siteSelect, siteQuery || '', true).then(() => {
+    if (canAppend && !canAppend()) return false;
     if (prefill && prefill.site_id) { siteSelect.value = String(prefill.site_id); applyTripAvailability(); }
+    return !prefill?.site_id || siteSelect.value === String(prefill.site_id);
   });
   siteSearch.addEventListener('input', () => populateSiteSelect(siteSelect, siteSearch.value.trim(), true));
   // 「同じ現場なのに出張チェックが抜ける」対策(2026-10-02 Shota指摘): 前日との連続性ではなく、
@@ -14148,8 +14150,10 @@ function addDailyReportEntry(prefill) {
     updateDailyReportTotal();
   });
 
+  if (canAppend && !canAppend()) return Promise.resolve(false);
   document.getElementById('daily-report-entry-list').appendChild(clone);
   updateDailyReportTotal();
+  return siteReady;
 }
 
 // ================= 外注（応援）人数の登録(P0-3) =================
@@ -14434,7 +14438,14 @@ async function fetchDailyReportForTarget(dateStr) {
   }));
 }
 
+let dailyReportLoadTicket = 0;
 async function loadDailyReportForDate(dateStr) {
+  const loadTicket = ++dailyReportLoadTicket;
+  const authToken = currentDeviceToken;
+  const requestEmployee = getSession()?.employeeCode;
+  const currentLoad = () => loadTicket === dailyReportLoadTicket &&
+    authToken === currentDeviceToken && getSession()?.employeeCode === requestEmployee &&
+    document.getElementById('daily-report-date').value === dateStr;
   const hint = document.getElementById('daily-report-existing-hint');
   const submitBtn = document.getElementById('daily-report-submit');
   const addBtn = document.getElementById('daily-report-add-entry');
@@ -14461,11 +14472,18 @@ async function loadDailyReportForDate(dateStr) {
   loadDrScSection(dateStr);
 
   let existing = [];
+  let existingLoaded = false;
   try {
     existing = await fetchDailyReportForTarget(dateStr);
-  } catch (e) { /* 取得できなくても新規入力は続けられる */ }
+    existingLoaded = true;
+  } catch (e) { /* 既存の取得失敗時はKY候補を入れない */ }
+  if (!currentLoad()) return;
 
   if (existing.length > 0) {
+    const sessionForKy = getSession();
+    const pendingKy = dailyReportTarget.type === 'self' && sessionForKy &&
+      window.KyDailyReportHandoff.peek('employee', sessionForKy.employeeCode);
+    if (pendingKy && pendingKy.date === dateStr) window.KyDailyReportHandoff.consume('employee', sessionForKy.employeeCode, dateStr);
     const reflected = existing[0].reflected;
     hint.style.display = 'block';
     if (reflected) {
@@ -14473,6 +14491,7 @@ async function loadDailyReportForDate(dateStr) {
     } else {
       hint.textContent = 'この日は入力済みです。内容を修正して「日報を提出する」を押すと上書きされます。';
     }
+    if (pendingKy && pendingKy.date === dateStr) hint.textContent += ' KYからの候補は既存の日報へ上書きしません。';
     // 以前は残業/通勤早出/通勤残業/通勤100km超/現場作業/営業/運搬を再表示用に渡し忘れており、
     // DBには正しく保存されているのに再読み込みすると入力欄が空に見える不具合があった
     // (保存自体は既存のまま無事故だった)。existingの全項目をそのままprefillへ渡す。
@@ -14484,7 +14503,32 @@ async function loadDailyReportForDate(dateStr) {
       is_business_trip: e.is_business_trip, is_overnight: e.is_overnight, overnight_nights: e.overnight_nights,
     }));
   } else {
-    addDailyReportEntry();
+    const session = getSession();
+    const pending = dailyReportTarget.type === 'self' && session &&
+      window.KyDailyReportHandoff.peek('employee', session.employeeCode);
+    if (!pending || pending.date !== dateStr) { addDailyReportEntry(); return; }
+    if (!existingLoaded) {
+      window.KyDailyReportHandoff.clear();
+      hint.style.display = 'block';
+      hint.textContent = '既存の日報を確認できないため、KYからの入力を止めました。再読み込みして確認してください。';
+      addDailyReportEntry(); return;
+    }
+    const result = await window.KyDailyReportAdapters.suggestion({
+      actorKind: 'employee', actorCode: session.employeeCode, date: dateStr,
+      existing, rpc,
+    });
+    if (!currentLoad()) return;
+    if (result.kind === 'prefill') {
+      const selected = await addDailyReportEntry({ site_id: result.siteId, notes: result.notes }, currentLoad, result.siteName);
+      if (!currentLoad()) return;
+      if (selected) { hint.style.display = 'block'; hint.textContent = result.message; return; }
+      document.getElementById('daily-report-entry-list').innerHTML = '';
+      addDailyReportEntry();
+      hint.style.display = 'block'; hint.textContent = '現場候補を読み込めなかったため、KYからの入力を止めました。';
+    } else {
+      addDailyReportEntry();
+      if (result.kind === 'notice') { hint.style.display = 'block'; hint.textContent = result.message; }
+    }
   }
 }
 
@@ -15590,6 +15634,19 @@ async function loadMyDailyReports() {
           <div class="hint-inline">勤務予定がないため、システムが休日として記録しました</div>
         `;
         list.appendChild(hdiv);
+        return;
+      }
+      // 取り消されたシステム自動休日は現場名が無い(NULL)。「null(休日)」と出ないよう説明の文言にする。
+      if (isCancelled && r.site_names.every((n) => n == null || n === '')) {
+        const cdiv = document.createElement('div');
+        cdiv.className = 'history-item is-holiday-auto is-cancelled';
+        cdiv.style.opacity = '0.6';
+        cdiv.innerHTML = `
+          <div class="row1"><span>${r.report_date}</span><span class="mini-tag muted">取消済み</span></div>
+          <div class="row2">休日（システム自動登録）</div>
+          <div class="hint-inline">自動で入った休日は取り消されました。日報を入力できます</div>
+        `;
+        list.appendChild(cdiv);
         return;
       }
       const div = document.createElement('div');
