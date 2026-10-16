@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v266-staging';
-const BUILD_DEPLOYED_AT = '2026-10-15T08:53:46.388Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v267-staging';
+const BUILD_DEPLOYED_AT = '2026-10-16T16:42:05.197Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -548,7 +548,7 @@ const ADMIN_SCREENS = new Set([
   'expense-payment-pending', 'fulfillment-pending',
   'expense-payment', 'joyo-denpyo-admin', 'event-admin', 'license-admin', 'health-admin',
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
-  'daily-report-needs-review-admin', 'daily-report-edit-requests-admin', 'attendance-fix-needed-admin',
+  'daily-report-needs-review-admin', 'daily-report-edit-requests-admin', 'attendance-fix-needed-admin', 'site-prime-missing-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
   'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
@@ -582,6 +582,7 @@ const PARENT_ROUTE = Object.freeze({
   'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard', 'attendance-fix-needed-admin': 'admin-dashboard',
+  'site-prime-missing-admin': 'admin-dashboard',
   // 注: ADMIN_SCREENS にある 'master-management-hub' は index.html に画面が無い(死んだ定義)ため、ここには載せない。
   // 匿名相談
   'anon-admin-thread': 'anon-admin',
@@ -16093,6 +16094,75 @@ function dailyReportEditDiffHtml(oldData, newData) {
   return blocks.length ? blocks.join('') : '<div class="hint-inline">(変更箇所を特定できませんでした。下のボタンで内容を承認/却下してください)</div>';
 }
 
+// 元請けが未入力の現場(日報担当向け)。2026-10-17: 元請け必須(2026-10-11〜)より前からある有効な現場は元請けが空のまま
+// 残っているため、「今日やること」から開き、現場ごとに元請け会社(または社内業務の理由)を入れて保存する。
+async function loadSitePrimeMissingAdmin() {
+  const session = getSession();
+  const list = document.getElementById('site-prime-missing-list');
+  const countEl = document.getElementById('site-prime-missing-count');
+  list.innerHTML = '<div class="hint">読み込み中...</div>';
+  countEl.textContent = '';
+  try {
+    const rows = await rpc('admin_list_sites_missing_prime', { p_admin_employee_code: session.employeeCode });
+    const showCount = () => {
+      const n = list.querySelectorAll('.spm-item').length;
+      countEl.textContent = n ? `元請けが未入力の現場: ${n}件` : '';
+      if (!n) list.innerHTML = '<div class="empty-state">元請けが未入力の現場はありません</div>';
+    };
+    if (!rows || rows.length === 0) { list.innerHTML = '<div class="empty-state">元請けが未入力の現場はありません</div>'; return; }
+    list.innerHTML = rows.map((r) => {
+      const addr = (String(r.notes || '').split('\n').find((l) => /^住所:/.test(l)) || '').replace(/^住所:\s*/, '');
+      const meta = [r.prefecture, addr].filter(Boolean).map(exdEsc).join(' / ');
+      return `<div class="history-item spm-item" data-site-id="${r.id}">
+        <div class="row1"><span>${exdEsc(r.site_name)}</span></div>
+        ${meta ? `<div class="hint-inline">${meta}</div>` : ''}
+        <label>元請け会社</label>
+        <input type="text" class="spm-prime" maxlength="200" placeholder="例: 〇〇建設株式会社">
+        <label><input type="checkbox" class="spm-internal">元請けなし（社内業務）</label>
+        <input type="text" class="spm-reason" maxlength="500" placeholder="社内業務で元請けがない理由" style="display:none;">
+        <div class="error spm-error"></div>
+        <div class="button-row" style="margin-top:6px;"><button type="button" class="spm-save">保存</button></div>
+      </div>`;
+    }).join('');
+    showCount();
+    list.querySelectorAll('.spm-item').forEach((item) => {
+      const prime = item.querySelector('.spm-prime');
+      const internal = item.querySelector('.spm-internal');
+      const reason = item.querySelector('.spm-reason');
+      const err = item.querySelector('.spm-error');
+      const save = item.querySelector('.spm-save');
+      internal.addEventListener('change', () => {
+        reason.style.display = internal.checked ? '' : 'none';
+        prime.style.display = internal.checked ? 'none' : '';
+        prime.previousElementSibling.style.display = internal.checked ? 'none' : '';
+      });
+      save.addEventListener('click', async () => {
+        err.textContent = '';
+        const primeVal = prime.value.trim();
+        const reasonVal = reason.value.trim();
+        if (internal.checked ? !reasonVal : !primeVal) {
+          err.textContent = internal.checked ? '社内業務の理由を入力してください。' : '元請け会社を入力してください。';
+          return;
+        }
+        save.disabled = true;
+        try {
+          await rpc('admin_set_site_prime', {
+            p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.siteId),
+            p_prime_contractor: internal.checked ? null : primeVal, p_internal_reason: internal.checked ? reasonVal : null,
+          });
+          item.remove();
+          showCount();
+        } catch (e) {
+          save.disabled = false;
+          err.textContent = e.message || '保存できませんでした。もう一度お試しください。';
+        }
+      });
+    });
+  } catch (e) {
+    list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
+  }
+}
+
 async function loadDailyReportEditRequestsAdmin() {
   const session = getSession();
   const list = document.getElementById('daily-report-edit-requests-list');
@@ -20450,6 +20520,7 @@ function init() {
   SCREEN_ENTER_HOOKS['daily-report-edit-requests-admin'] = loadDailyReportEditRequestsAdmin;
   SCREEN_ENTER_HOOKS['period-confirm-changes-admin'] = loadPeriodConfirmChangesAdmin;
   SCREEN_ENTER_HOOKS['attendance-fix-needed-admin'] = loadAttendanceFixNeededAdmin;
+  SCREEN_ENTER_HOOKS['site-prime-missing-admin'] = loadSitePrimeMissingAdmin;
   SCREEN_ENTER_HOOKS['daily-report-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
     loadDailyReportAdminList();
