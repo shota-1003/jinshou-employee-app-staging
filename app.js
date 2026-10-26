@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v272-staging';
-const BUILD_DEPLOYED_AT = '2026-10-26T14:50:12.750Z';
+const BUILD_DEPLOYED_AT = '2026-10-26T14:58:58.873Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -4046,7 +4046,7 @@ const REQUEST_TYPE_LABEL = {
   site_proposal: '新規現場申請', info_change: '個人情報変更申請',
 };
 const STATUS_LABEL = {
-  ready_for_review: '確認中', waiting_employee_info: '差し戻し(要修正)', needs_review: '確認中', stopped: '処理停止',
+  ready_for_review: '確認中', waiting_employee_info: '差し戻し(要修正)', needs_review: '差し戻し(要修正)', stopped: '処理停止',
   waiting_approval: '承認待ち', approved: '承認済み', rejected: '却下', on_hold: '保留',
   waiting_payment: '支払待ち', paid: '支払済み', cancelled: '取消',
   pending: '確認待ち', pending_verification: '確認待ち', active: '有効', expired: '期限切れ',
@@ -7145,6 +7145,11 @@ function exdBuildPaymentSectionHtml(full, opts) {
       <div class="hint-inline">支払処理をした人として、いまログインしている管理者の名前が記録されます。</div>
       <div class="error" id="exd-pay-error"></div>
       <button type="button" id="exd-pay-submit"${ok ? '' : ' disabled'}>支払を記録する</button>
+      ${Number(pay.paid_amount || 0) === 0 && Number(a.approved || 0) > 0 ? `<div class="exd-return-block" style="margin-top:16px;border-top:1px solid var(--border,#334);padding-top:12px;">
+        <div class="hint-inline">領収書の金額と申請の金額が違うときは、支払う前に本人へ差し戻し、正しい金額で出し直してもらってください(金額を管理者が書き換えることはしません)。</div>
+        <button type="button" class="secondary danger" id="exd-return-request" style="margin-top:6px;">金額などが違う: 本人に差し戻す</button>
+        <div class="error" id="exd-return-error"></div>
+      </div>` : ''}
     </div>`;
   }
   return html;
@@ -7905,6 +7910,22 @@ function wireExpenseRequestDetail(el, full, ctx) {
     });
   }
 
+  // 承認済み・未払いの申請を、金額違いなどで本人へ差し戻す(2026-10-26 Shota指示。管理者が金額を直すのではなく、本人に出し直してもらう)。
+  const returnBtn = el.querySelector('#exd-return-request');
+  if (returnBtn) {
+    returnBtn.addEventListener('click', async () => {
+      hideError('exd-return-error');
+      const reason = (window.prompt('本人に伝える差し戻しの理由を入力してください(必須)\n例: 領収書は13,937円ですが、申請が13,337円になっています。正しい金額で出し直してください。', '') || '').trim();
+      if (!reason) { showError('exd-return-error', '差し戻しの理由を入力してください。'); return; }
+      if (!window.confirm('この申請を本人へ差し戻します。\n・明細は除外され、経費の合計・税理士へ出す用紙から外れます\n・本人に理由が通知され、新しく申請し直してもらいます\nよろしいですか?')) return;
+      returnBtn.disabled = true;
+      try {
+        await rpc('admin_return_expense_request', { p_admin_employee_code: session.employeeCode, p_request_id: requestId, p_reason: reason });
+        await reload();
+      } catch (e) { returnBtn.disabled = false; showError('exd-return-error', e.message || '差し戻せませんでした。'); }
+    });
+  }
+
   // 支払記録(支払日 / 金額 / 方法 / 処理者)。
   const payBtn = el.querySelector('#exd-pay-submit');
   if (payBtn && !payBtn.disabled) {
@@ -7937,7 +7958,7 @@ function wireExpenseRequestDetail(el, full, ctx) {
             if (pr && pr.ok === false) {
               const missing = Array.isArray(pr.missing) ? pr.missing.join(' / ') : '';
               // DBが返す message(日本語の説明)を優先する。以前は reason の記号(over_approved_amount 等)がそのまま画面に出ていた(2026-10-26)。
-              const overHint = pr.reason === 'over_approved_amount' ? ' 領収書の金額が承認額と違う場合は、金額を支払欄で調整せず、申請の明細を差し戻して本人に正しい金額で出し直してもらってください。' : '';
+              const overHint = pr.reason === 'over_approved_amount' ? ' 領収書の金額が承認額と違う場合は、金額を支払欄で調整せず、下の「金額などが違う: 本人に差し戻す」で本人に正しい金額で出し直してもらってください。' : '';
               showError('exd-pay-error', `支払を記録できません: ${pr.reason_label || pr.message || pr.reason || '支払可能条件を満たしていません'}${missing ? '(不足: ' + missing + ')' : ''}${overHint}`);
               payBtn.disabled = false; return;
             }
