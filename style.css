@@ -1897,3 +1897,14 @@ body.assignment-calendar-open .app-header { display: none; }
 .exd-bulk-bar { margin: 10px 0 14px; }
 .exd-bulk-bar button { width: 100%; }
 .exd-bulk-bar .hint-inline { margin-top: 6px; }
+
+/* 画面が広いパソコンでの見え方(2026-10-27、Shota指摘「違うパソコンで開くと幅が合ってなくて見にくい」)。
+   画面幅が1500pxを超えると、内容は最大1280px(管理画面は1600px)で止まり、文字もスマホ用の小さな固定サイズのため、
+   広い画面では「左に小さく寄って、右が大きく空く」状態になっていた。画面の幅に応じて全体を拡大し、どのパソコンでも
+   同じ見た目の大きさになるようにする(zoom は画面全体=固定のサイドメニュー・上の帯・ポップアップごと拡大する)。
+   1500px以下(ノートPC・スマホ・タブレット)は従来のまま。 */
+@media (min-width: 1600px) { html { zoom: 1.15; } }
+@media (min-width: 1900px) { html { zoom: 1.3; } }
+@media (min-width: 2300px) { html { zoom: 1.5; } }
+@media (min-width: 2800px) { html { zoom: 1.75; } }
+@media (min-width: 3400px) { html { zoom: 2; } }
