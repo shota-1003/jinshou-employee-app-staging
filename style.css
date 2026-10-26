@@ -1787,6 +1787,19 @@ body.assignment-calendar-open .app-header { display: none; }
   .exd-top-split { display: grid; grid-template-columns: minmax(380px, 55%) 1fr; gap: 16px; align-items: start; margin-bottom: 10px; }
   .exd-top-split > .exd-top-side { position: sticky; top: 8px; margin-bottom: 0; }
 }
+/* 2026-10-27 Shota指摘「画面いっぱいっていうのはこれのことを言うんじゃないの」: ホームの
+   「配置予定」と「今日やること」が縦一列のまま、PCの広い画面では残りが全部空白だった。
+   .card自体のmax-width:640px(ログイン・単票フォーム向けの間延び防止)はそのまま残し、
+   個々のカードを間延びさせる代わりに、exd-top-splitと同じ考え方で横に並べて空白を減らす。
+   狭い画面ではdisplay:contentsで、このラッパー自体は見た目に影響しない(DOM順も変えていない)。 */
+.home-top-split { display: contents; }
+@media (min-width: 900px) {
+  .home-top-split {
+    display: grid; grid-template-columns: minmax(300px, 420px) minmax(0, 1fr);
+    gap: 20px; align-items: start; margin-bottom: 4px;
+  }
+  .home-top-left, .home-top-right { min-width: 0; }
+}
 /* 2026-09-29 Shota指摘「支払い管理みたいに左うえに戻るほしい」「この戻るボタン上までいかないと
    いけない」。経費申請の詳細は縦に長く、戻るボタン(画面の一番上、1個目の要素)まで毎回
    スクロールし直す必要があった。app-header(社員ポータルの帯、position:sticky top:0)の
