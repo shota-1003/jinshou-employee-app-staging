@@ -943,8 +943,11 @@
   grid-template-columns: minmax(0, 54fr) minmax(0, 46fr);
   gap: 14px;
   padding: 14px;
-  /* 2560px級のモニターでも横へ間延びさせない。 */
-  max-width: 1760px; width: 100%; margin: 0 auto;
+  /* 2026-10-26 Shota指摘「おい治ってないわ」: 1760pxで止めていたせいで、広いモニターでは
+     右側にまだ使っていない余白が残っていた。「もっと右を広げてほしい」という要望を
+     何度も受けているので、間延び防止の上限は参考程度に大きく緩め、普通〜ワイドモニター
+     ではほぼ画面幅いっぱいまで使うようにする。 */
+  max-width: 2400px; width: 100%; margin: 0 auto;
   /* スクロールは各カラムが受け持つ。 */
   overflow: hidden;
   align-items: stretch;
