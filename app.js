@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v269-staging';
-const BUILD_DEPLOYED_AT = '2026-10-26T04:55:49.677Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v270-staging';
+const BUILD_DEPLOYED_AT = '2026-10-26T12:44:39.188Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7936,7 +7936,9 @@ function wireExpenseRequestDetail(el, full, ctx) {
             const pr = Array.isArray(payRes) ? payRes[0] : payRes;
             if (pr && pr.ok === false) {
               const missing = Array.isArray(pr.missing) ? pr.missing.join(' / ') : '';
-              showError('exd-pay-error', `支払を記録できません: ${pr.reason_label || pr.reason || '支払可能条件を満たしていません'}${missing ? '(不足: ' + missing + ')' : ''}`);
+              // DBが返す message(日本語の説明)を優先する。以前は reason の記号(over_approved_amount 等)がそのまま画面に出ていた(2026-10-26)。
+              const overHint = pr.reason === 'over_approved_amount' ? ' 領収書の金額が承認額と違う場合は、金額を支払欄で調整せず、申請の明細を差し戻して本人に正しい金額で出し直してもらってください。' : '';
+              showError('exd-pay-error', `支払を記録できません: ${pr.reason_label || pr.message || pr.reason || '支払可能条件を満たしていません'}${missing ? '(不足: ' + missing + ')' : ''}${overHint}`);
               payBtn.disabled = false; return;
             }
             await reload(); return;
