@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v267-staging';
-const BUILD_DEPLOYED_AT = '2026-10-16T16:42:05.197Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v268-staging';
+const BUILD_DEPLOYED_AT = '2026-10-26T04:42:02.156Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -11764,6 +11764,21 @@ async function doUpdateEntertainmentActuals() {
 
 // 事前申請の一覧に「誰と(会社ごとの参加者名)」と「この事前申請に使われた経費」を添える。
 // 2026-09-21 Shota指摘: 事前申請の履歴を見ても、誰と行く予定で・いくらで・実際にどの経費が紐づいたのかが分からなかった。
+// 接待事前申請の参加者(誰と・自社)を1行で。経理専用の usage が無い管理者にも、承認の判断に必要な名前を出す。
+function entParticipantsText(p) {
+  if (!p) return '';
+  const companies = (p.companies && p.companies.length)
+    ? p.companies.map((c) => `${exdEsc(c.name || '')}(${exdEsc(c.count ?? '-')}名${c.names ? `: ${exdEsc(c.names)}` : ''})`).join(' / ')
+    : (p.partner_names ? exdEsc(p.partner_names) : '');
+  return `誰と: ${companies || '<span style="color:#ff8a80;font-weight:700;">参加者名なし</span>'}${p.our_names ? `　自社: ${exdEsc(p.our_names)}` : ''}`;
+}
+async function fetchEntParticipants(session, ids) {
+  try {
+    const rows = await rpc('admin_get_entertainment_participants', { p_admin_employee_code: session.employeeCode, p_ids: ids.map(Number) });
+    return new Map((rows || []).map((x) => [String(x.id), x]));
+  } catch (e) { return new Map(); }
+}
+
 function entPreappUsageHtml(r, u) {
   if (!u) return '';
   const y = (n) => `${Number(n || 0).toLocaleString('ja-JP')}円`;
@@ -11829,13 +11844,14 @@ async function loadEntertainmentAdminList() {
       const u = await rpc('admin_get_preapproval_usage', { p_admin_employee_code: session.employeeCode, p_ids: rows.map((r) => Number(r.id)) });
       (u || []).forEach((x) => usageById.set(String(x.id), x));
     } catch (e) { /* 使われた経費が取れなくても、事前申請の一覧そのものは出す */ }
+    const partById = usageById.size ? new Map() : await fetchEntParticipants(session, rows.map((r) => r.id));
     listEl.innerHTML = rows.map((r) => `
       <div class="qual-item" data-id="${r.id}">
         <div class="row1"><span>${r.employee_name}・${r.planned_store || '(店舗未記入)'}</span><span class="status-badge ${r.status === 'approved' ? 'done' : (r.status === 'rejected' ? 'rejected' : '')}">${ENT_STATUS_LABEL[r.status]}</span></div>
         <div class="row2">${new Date(r.planned_datetime).toLocaleString('ja-JP')}・${r.partner_name_snapshot || ''}(取引先${r.partner_participant_count ?? '-'}名/自社${r.our_participant_count ?? '-'}名)</div>
         <div class="row2">${r.purpose || ''}${r.planned_amount != null ? `・予定${Number(r.planned_amount).toLocaleString()}円` : ''}</div>
         <div class="row2">申請日時: ${new Date(r.created_at).toLocaleString('ja-JP')}</div>
-        ${entPreappUsageHtml(r, usageById.get(String(r.id)))}
+        ${usageById.has(String(r.id)) ? entPreappUsageHtml(r, usageById.get(String(r.id))) : (partById.has(String(r.id)) ? `<div class="row2">${entParticipantsText(partById.get(String(r.id)))}</div>` : '')}
         <div class="employee-row-flags" style="margin-top:6px;">
           <span class="mini-tag ${ENT_TIMING_TAG_CLASS[r.submission_timing] || 'muted'}">${r.submission_timing || ''}</span>
           ${r.used_backdate_exception ? '<span class="mini-tag warn">本人に過去日提出の特例許可あり</span>' : ''}
@@ -16561,6 +16577,12 @@ async function loadRequestDetailContent() {
       ...(method && method.approval_method !== 'none' ? [['承認方式', method.approval_method_label || method.approval_method]] : []),
       ...(method && method.approval_method_note ? [['承認方式の説明', method.approval_method_note]] : []),
     ].map(([label, value]) => `<div class="field-row"><span class="field-label">${label}</span><span class="field-value">${value}</span></div>`).join('');
+
+    if (sourceType === 'entertainment_preapproval') {
+      // 参加者(誰と・自社)。承認の判断に必要なため、日報管理者など経理でない管理者にも出す(2026-10-22)。
+      const part = (await fetchEntParticipants(session, [sourceId])).get(String(sourceId));
+      if (part) document.getElementById('rdetail-fields').insertAdjacentHTML('beforeend', `<div class="field-row"><span class="field-label">参加者</span><span class="field-value">${entParticipantsText(part).replace(/^誰と: /, '')}</span></div>`);
+    }
 
     // 承認判断の前に領収書原本を出す(2026-09-06追加)。金額だけ見て承認できてしまう状態を無くす。
     await renderRequestDetailReceipts(sourceType, sourceId, session);
