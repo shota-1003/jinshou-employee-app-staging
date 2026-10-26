@@ -959,16 +959,21 @@
 }
 .ac-root[data-layout="wide"] .ac-day { padding-bottom: 12px; }
 /* 曜日行はカラムの中で吸着させる。 */
-.ac-root[data-layout="wide"] .ac-dow div { font-size: 12px; padding: 4px 0; }
+.ac-root[data-layout="wide"] .ac-dow div { font-size: 15px; padding: 5px 0; }
 
-/* 月カレンダー: 横幅があるぶん、日付も現場名も大きくする。 */
-.ac-root[data-layout="wide"] .ac-num { font-size: 14px; }
+/* 月カレンダー: 横幅があるぶん、日付も現場名も大きくする。
+   2026-10-27 Shota指摘「文字がちっちゃすぎて見えん、こんだけ幅余ってたら」:
+   列(main/.ac-bodywrap)の最大幅は広げたが、中の文字サイズは以前のまま据え置きに
+   なっており、増えた幅がただの余白になっていた。列の実寸に合わせて文字・チップ自体も
+   大きくする(1セルに入るチップ数が多少減る可能性はあるが、既存の「+N」で収まる設計は
+   そのまま活きる)。 */
+.ac-root[data-layout="wide"] .ac-num { font-size: 18px; }
 .ac-root[data-layout="wide"] .ac-chip {
-  height: 19px; line-height: 19px; margin-top: 2px; border-radius: 3px;
-  font-size: 12px; padding: 0 5px; letter-spacing: 0;
+  height: 22px; line-height: 22px; margin-top: 2px; border-radius: 4px;
+  font-size: 14px; padding: 0 7px; letter-spacing: 0;
 }
-.ac-root[data-layout="wide"] .ac-cell { padding: 2px 3px; }
-.ac-root[data-layout="wide"] .ac-more { font-size: 11px; }
+.ac-root[data-layout="wide"] .ac-cell { padding: 3px 5px; }
+.ac-root[data-layout="wide"] .ac-more { font-size: 13px; }
 
 /* 選択日の人数サマリー: 一目で読める大きさにする。 */
 .ac-root[data-layout="wide"] .ac-daytitle { font-size: 19px; }
