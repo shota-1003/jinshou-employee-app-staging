@@ -612,10 +612,17 @@
         // 出したり消したりが細かく起きないよう、境界に少し幅を持たせている。
         // 画面幅ごとのレイアウト。ビューポートではなく「このモジュールが実際に
         // 使える幅」で決める(社員ポータルへ埋め込んでも、単体URLでも同じ判定になる)。
-        //   phone 〜767px / tab 768〜1199px / wide 1200px〜
+        //   phone 〜767px / tab 768〜999px / wide 1000px〜
+        // 2026-10-26 Shota指摘「パソコンによっては画面いっぱいにならない」: 社員ポータルへ
+        // 埋め込むと左ナビ(236px)+余白(64px)ぶん root.clientWidth がビューポートより
+        // 狭くなるため、旧しきい値1200pxだと1366/1440px幅という一般的なノートPCの画面では
+        // ウィンドウを最大化していても wide 判定に届かず、ずっと1カラム(tab)のまま
+        // 「PCなのに画面いっぱいにならない」状態になっていた。2カラムの中身自体は
+        // minmax(0, Xfr) で狭い幅にも追従する設計なので、しきい値を実機で一般的な
+        // ノートPC幅でも届く1000pxへ下げる。
         function layoutMode() {
             const w = root.clientWidth || window.innerWidth || 375;
-            if (w >= 1200) return 'wide';
+            if (w >= 1000) return 'wide';
             if (w >= 768) return 'tab';
             return 'phone';
         }
@@ -1024,11 +1031,22 @@
             clearTimeout(scrollIdleTimer);
             if (!touchDown) scrollIdleTimer = setTimeout(() => { scrollActive = false; }, SCROLL_IDLE_MS);
         }
+        // 2026-10-26 実機録画をフレーム単位で解析して判明: 減速の終盤(まだ動いている、
+        // 125msごとに-59px→-39px→-27pxと滑らかに減速中)の途中で scrollActive が false に
+        // なり、そこで区画の差し替えが走って同じ分だけ逆向きに戻るのを確認した(+27px→+25px、
+        // 直前のフレームとほぼ同じ大きさで逆転)。scrollActive は「最後の scroll イベントから
+        // 160ms経ったか」だけを見ており、iOS は減速の終盤ほど scroll イベントの間隔が開くことが
+        // あるため、本当はまだ動いている間に「止まった」と誤判定していた。scrollTop の値そのものが
+        // 連続2回の確認で動いていないことも合わせて見ることで、本当に止まるまで待つ。
         function scrollIdle(maxWaitMs) {
             const limit = Date.now() + (maxWaitMs || 2500);
+            let lastTop = null;
             return new Promise((resolve) => {
                 const tick = () => {
-                    if (!scrollActive || Date.now() > limit) resolve();
+                    const top = elBody.scrollTop;
+                    const positionStable = lastTop !== null && Math.abs(top - lastTop) < 1;
+                    lastTop = top;
+                    if ((!scrollActive && positionStable) || Date.now() > limit) resolve();
                     else setTimeout(tick, 60);
                 };
                 tick();
