@@ -612,19 +612,25 @@
         // 出したり消したりが細かく起きないよう、境界に少し幅を持たせている。
         // 画面幅ごとのレイアウト。ビューポートではなく「このモジュールが実際に
         // 使える幅」で決める(社員ポータルへ埋め込んでも、単体URLでも同じ判定になる)。
-        //   phone 〜767px / tab 768〜999px / wide 1000px〜
-        // 2026-10-26 Shota指摘「パソコンによっては画面いっぱいにならない」: 社員ポータルへ
-        // 埋め込むと左ナビ(236px)+余白(64px)ぶん root.clientWidth がビューポートより
-        // 狭くなるため、旧しきい値1200pxだと1366/1440px幅という一般的なノートPCの画面では
-        // ウィンドウを最大化していても wide 判定に届かず、ずっと1カラム(tab)のまま
-        // 「PCなのに画面いっぱいにならない」状態になっていた。2カラムの中身自体は
-        // minmax(0, Xfr) で狭い幅にも追従する設計なので、しきい値を実機で一般的な
-        // ノートPC幅でも届く1000pxへ下げる。
+        //   phone 〜767px / tab 768px〜 / wide はPC(マウス操作)かつ幅が足りるとき
+        // 2026-10-26 Shota指摘「パソコンによっては画面いっぱいにならない」:
+        // 社員ポータルへ埋め込むと左ナビ(236px)+余白(64px)ぶん root.clientWidth が
+        // ビューポートより狭くなる。最初しきい値を1200→1000pxへ下げたが、まだ別PCで
+        // 直らなかった(1280px幅ノートPC等は1280-300=980pxで1000pxにも届かない)。
+        // 幅のしきい値をさらに下げるだけでは、同じ幅になりうるタブレット横向き等
+        // タッチ端末まで誤って2カラムにしてしまう。幅だけでは「本当にPCか」を
+        // 区別できないため、マウス操作可能(hover:hover and pointer:fine、タッチ
+        // 端末では真にならない)かどうかも見て、PCと判定できたときだけ
+        // しきい値を大きく下げる(タッチ端末は従来どおり1200pxのまま)。
+        function isDesktopPointer() {
+            return typeof window.matchMedia === 'function'
+                && window.matchMedia('(hover: hover) and (pointer: fine)').matches;
+        }
         function layoutMode() {
             const w = root.clientWidth || window.innerWidth || 375;
-            if (w >= 1000) return 'wide';
-            if (w >= 768) return 'tab';
-            return 'phone';
+            if (w < 768) return 'phone';
+            const wideThreshold = isDesktopPointer() ? 700 : 1200;
+            return w >= wideThreshold ? 'wide' : 'tab';
         }
         function syncLayoutMode() {
             const m = layoutMode();
