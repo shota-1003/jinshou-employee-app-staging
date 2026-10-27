@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#151a2b">
+  <meta name="robots" content="noindex">
+  <title>システム管理 — 迅翔興業</title>
+  <link rel="icon" href="../icons/favicon-32-v2.png">
+  <link rel="stylesheet" href="ops.css">
+</head>
+<body>
+  <header class="top">
+    <div class="top-left">
+      <a class="back" href="../" aria-label="社員ポータルへ戻る">‹ ポータル</a>
+      <h1>システム管理 <span class="sub">AI統括管理社員</span></h1>
+    </div>
+    <div class="top-right">
+      <span id="who" class="who"></span>
+      <span id="updated" class="updated"></span>
+      <button id="btn-refresh" class="btn ghost" type="button">更新</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main id="login-needed" class="center" hidden>
+    <div class="card narrow">
+      <h2>社員ポータルでログインしてください</h2>
+      <p>この画面は社員ポータルと同じログインを使います。ログインしたあと、もう一度この画面を開いてください。</p>
+      <a class="btn primary" href="../">社員ポータルを開く</a>
+    </div>
+  </main>
+
+  <main id="app" class="layout" hidden>
+    <section class="col-main">
+      <div id="tiles" class="tiles"></div>
+
+      <div class="section-head">
+        <h2>アプリの状態</h2>
+        <span class="hint">数字や文はAIの見張りが10分おきに確認した結果です。「未監視」「確認不能」は正常ではありません。</span>
+      </div>
+      <div id="apps" class="apps"></div>
+
+      <div class="section-head">
+        <h2>依頼(不具合報告・修正)</h2>
+        <button id="btn-new-item" class="btn primary sm" type="button">＋ 不具合・修正を依頼</button>
+      </div>
+      <div id="items" class="list"></div>
+
+      <div class="section-head"><h2>最近の変化</h2></div>
+      <div id="events" class="list compact"></div>
+
+      <div id="admin-area" hidden>
+        <div class="section-head"><h2>権限の設定</h2><span class="hint">システム管理者と社長だけに表示されます。変更はすべて記録されます。</span></div>
+        <div class="card">
+          <form id="role-form" class="row-form">
+            <input name="target" placeholder="社員番号" required inputmode="numeric">
+            <select name="app"></select>
+            <select name="role">
+              <option value="fixer">修正担当</option>
+              <option value="app_admin">アプリ管理者</option>
+              <option value="system_admin">システム管理者(社長のみ付与可)</option>
+            </select>
+            <button class="btn primary sm" name="grant" value="1">付与</button>
+            <button class="btn ghost sm" name="revoke" value="1">取り消し</button>
+          </form>
+          <div id="members" class="list compact"></div>
+        </div>
+        <div class="section-head"><h2>アプリの追加</h2></div>
+        <div class="card">
+          <form id="app-form" class="row-form">
+            <input name="app_name" placeholder="アプリID(英小文字・例 new-app)" required pattern="[a-z][a-z0-9-]{1,40}">
+            <input name="display_name" placeholder="表示名" required>
+            <input name="url" placeholder="本番URL(https://…)" type="url">
+            <input name="repo_dir" placeholder="修正先フォルダ(任意)">
+            <label class="chk"><input type="checkbox" name="high"> 給与・支払い・個人情報を扱う</label>
+            <button class="btn primary sm">登録</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <aside class="col-chat card">
+      <div class="chat-head">
+        <h2>AI社員に聞く</h2>
+        <span class="hint">例: 「今日のシステム状況を教えて」「承認待ちは何件？」「配置カレンダーの不具合を修正して」</span>
+      </div>
+      <div id="chat-log" class="chat-log" aria-live="polite"></div>
+      <form id="chat-form" class="chat-form">
+        <textarea id="chat-input" rows="2" placeholder="AI社員への質問・依頼を入力" maxlength="2000"></textarea>
+        <div class="chat-actions">
+          <button id="btn-mic" class="btn ghost sm" type="button" title="音声で入力">🎤 話す</button>
+          <button class="btn primary sm" type="submit">送信</button>
+        </div>
+      </form>
+    </aside>
+  </main>
+
+  <dialog id="dlg-item" class="dlg">
+    <div class="dlg-body" id="dlg-item-body"></div>
+  </dialog>
+
+  <dialog id="dlg-new" class="dlg">
+    <form id="new-form" class="dlg-body" method="dialog">
+      <h2>不具合・修正を依頼</h2>
+      <label>対象のアプリ<select name="app" required></select></label>
+      <label>種類
+        <select name="kind">
+          <option value="bug_report">不具合を報告する(誰でも)</option>
+          <option value="fix_request">AIに修正を任せる(修正担当以上)</option>
+          <option value="direct_session">AI(Claude Code)と相談しながら直す(修正担当以上)</option>
+        </select>
+      </label>
+      <label>件名<input name="title" required maxlength="200" placeholder="例: 日報の保存ボタンを押すと止まる"></label>
+      <label>内容<textarea name="body" rows="5" placeholder="いつ・どの画面で・何をしたら・どうなったか"></textarea></label>
+      <label>急ぎ度
+        <select name="priority"><option value="normal">通常</option><option value="high">急ぎ</option><option value="urgent">至急(業務が止まっている)</option><option value="low">いつでもよい</option></select>
+      </label>
+      <p id="new-error" class="error" hidden></p>
+      <div class="dlg-actions">
+        <button class="btn ghost" value="cancel" formnovalidate>やめる</button>
+        <button class="btn primary" id="new-submit" value="submit">送る</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="ops.js"></script>
+</body>
+</html>
