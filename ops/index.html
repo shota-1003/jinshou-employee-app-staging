@@ -63,6 +63,21 @@
       <div id="admin-area" hidden>
         <div class="section-head"><h2>権限の設定</h2><span class="hint">システム管理者と社長だけに表示されます。変更はすべて記録されます。</span></div>
         <div class="card">
+          <h3 class="card-title">標準の権限を当てる</h3>
+          <p class="hint">全員、最初は「一般社員」です(見てよい情報の確認・不具合の報告・自分の申請の確認・AIへの質問ができます)。必要な人にだけ、標準の権限を当ててください。当てると、その人の今の役割は標準の内容に置きかわります。</p>
+          <form id="template-form" class="row-form">
+            <input name="target" placeholder="社員番号" required inputmode="numeric">
+            <select name="template">
+              <option value="fixer">修正担当(担当アプリでAIへ修正を依頼できる。本番への反映は管理者の承認が要る)</option>
+              <option value="app_admin">アプリ管理者(担当アプリの修正の承認・承認待ちの確認ができる)</option>
+              <option value="system_admin">システム管理者(担当アプリの重要データの修正も承認できる。社長だけが付けられる)</option>
+              <option value="staff">一般社員に戻す(役割をすべて外す)</option>
+            </select>
+            <button class="btn primary sm">当てる</button>
+          </form>
+          <p id="template-apps-hint" class="hint">担当アプリ: 選ばなければ全アプリになります(アプリ管理者は1つ以上選んでください)。</p>
+          <div id="template-apps" class="chips"></div>
+          <h3 class="card-title">個別に追加・取り消し</h3>
           <form id="role-form" class="row-form">
             <input name="target" placeholder="社員番号" required inputmode="numeric">
             <select name="app"></select>
@@ -74,6 +89,7 @@
             <button class="btn primary sm" name="grant" value="1">付与</button>
             <button class="btn ghost sm" name="revoke" value="1">取り消し</button>
           </form>
+          <h3 class="card-title">社員ごとの権限</h3>
           <div id="members" class="list compact"></div>
         </div>
         <div class="section-head"><h2>アプリの追加</h2></div>

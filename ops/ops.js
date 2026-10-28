@@ -17,6 +17,7 @@ const WORK_STATUS_JA = {
 };
 const KIND_JA = { bug_report: '不具合報告', fix_request: 'AI修正', direct_session: '相談しながら修正', improvement: '改善' };
 const ROLE_JA = { fixer: '修正担当', app_admin: 'アプリ管理者', system_admin: 'システム管理者' };
+const STANDARD_JA = { executive: '社長(全権限)', system_admin: 'システム管理者', app_admin: 'アプリ管理者', fixer: '修正担当', staff: '一般社員' };
 const RANK_JA = ['一般社員', '修正担当', 'アプリ管理者', 'システム管理者', '社長'];
 
 const $ = (s) => document.querySelector(s);
@@ -480,9 +481,32 @@ async function loadAdmin() {
   if (access.global_rank < 3) return;
   $('#admin-area').hidden = false;
   $('#role-form [name=app]').innerHTML = '<option value="">全アプリ</option>' + access.apps.map((a) => `<option value="${esc(a.app_name)}">${esc(a.display_name)}</option>`).join('');
-  const members = await rpc('ops_list_members', {});
-  $('#members').innerHTML = members.length ? members.map((m) => `<div class="row">${esc(m.employee_code)} ${esc(m.employee_name)} — ${esc(ROLE_JA[m.role])}(${esc(m.app_name ? appName(m.app_name) : '全アプリ')})・付与 ${esc(m.granted_by || '')} ${esc(jst(m.granted_at))}</div>`).join('')
-    : '<div class="empty">まだ誰にも権限を付与していません(社長は常に全権限)。</div>';
+  $('#template-apps').innerHTML = access.apps.filter((a) => a.app_name !== 'ops-center').map((a) =>
+    `<label class="chk"><input type="checkbox" name="tapp" value="${esc(a.app_name)}"> ${esc(a.display_name)}${a.sensitivity === 'high' ? '(重要データ)' : ''}</label>`).join('');
+  const people = await rpc('ops_member_overview', {});
+  const withRoles = people.filter((p) => p.standard !== 'staff');
+  const staffCount = people.length - withRoles.length;
+  $('#members').innerHTML = withRoles.map((p) => {
+    const detail = p.roles.length
+      ? p.roles.map((r) => `${ROLE_JA[r.role]}(${r.app_name ? appName(r.app_name) : '全アプリ'})`).join('・')
+      : '全アプリ・全権限';
+    const by = p.roles.length ? `付与 ${esc(p.roles[0].granted_by || '')} ${esc(jst(p.roles[0].granted_at))}` : '';
+    return `<div class="row"><b>${esc(p.employee_code)} ${esc(p.employee_name)}</b> — ${esc(STANDARD_JA[p.standard])}: ${esc(detail)} <span class="hint">${by}</span></div>`;
+  }).join('') + `<div class="row">ほかの ${staffCount} 人は一般社員です(不具合の報告・自分の申請の確認・質問ができます)。</div>`;
+}
+async function submitTemplate(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const template = f.template.value;
+  const apps = [...document.querySelectorAll('#template-apps input[name=tapp]:checked')].map((x) => x.value);
+  if (template === 'app_admin' && !apps.length) { toast('アプリ管理者にするアプリを1つ以上選んでください'); return; }
+  const target = f.target.value.trim();
+  const scope = template === 'staff' ? '' : `(担当アプリ: ${apps.length ? apps.map(appName).join('・') : '全アプリ'})`;
+  if (!window.confirm(`社員番号 ${target} を「${STANDARD_JA[template]}」${scope}にします。今の役割は標準の内容に置きかわります。よろしいですか？`)) return;
+  try {
+    const r = await rpc('ops_apply_role_template', { p_target_employee_code: target, p_template: template, p_apps: template === 'staff' || !apps.length ? null : apps });
+    toast(`${STANDARD_JA[template]}にしました(付けた役割 ${r.added}件・外した役割 ${r.removed}件)`); loadAdmin();
+  } catch (e) { toast(e.message); }
 }
 async function submitRole(ev) {
   ev.preventDefault();
@@ -544,5 +568,10 @@ $('#new-form [value=cancel]').addEventListener('click', () => $('#dlg-new').clos
 $('#chat-form').addEventListener('submit', sendChat);
 $('#chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendChat(e); });
 $('#role-form').addEventListener('submit', submitRole);
+$('#template-form').addEventListener('submit', submitTemplate);
+$('#template-form [name=template]').addEventListener('change', (e) => {
+  const staff = e.target.value === 'staff';
+  $('#template-apps').hidden = staff; $('#template-apps-hint').hidden = staff;
+});
 $('#app-form').addEventListener('submit', submitApp);
 init();

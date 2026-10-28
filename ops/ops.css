@@ -105,6 +105,8 @@ h2 { font-size: 15px; margin: 0; }
 @keyframes mic-pulse { 50% { opacity: 0.75; } }
 .voice-status { margin: 0; font-size: 13px; color: var(--warn); line-height: 1.5; }
 .voice-status.info { color: var(--muted); }
+.card-title { font-size: 13.5px; margin: 12px 0 6px; color: var(--muted); }
+.card-title:first-child { margin-top: 0; }
 .row-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .row-form input, .row-form select { width: auto; flex: 1 1 140px; }
 .chk { display: flex; gap: 4px; align-items: center; font-size: 12.5px; color: var(--muted); }
