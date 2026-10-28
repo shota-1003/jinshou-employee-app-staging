@@ -494,6 +494,125 @@ async function loadAdmin() {
     return `<div class="row"><b>${esc(p.employee_code)} ${esc(p.employee_name)}</b> — ${esc(STANDARD_JA[p.standard])}: ${esc(detail)} <span class="hint">${by}</span></div>`;
   }).join('') + `<div class="row">ほかの ${staffCount} 人は一般社員です(不具合の報告・自分の申請の確認・質問ができます)。</div>`;
 }
+// ---------------- 社員AI操作報告 ----------------
+// 見られる範囲はDB(ops_ai_reports)が決める: 社長・全アプリのシステム管理者=全員分 / 担当アプリの管理者=担当アプリの依頼 / ほか=自分の分だけ
+const EVENT_JA = {
+  question: '質問・指示', instruction: '追加の指示', answer: 'AIの回答', refusal: '拒否', work_created: '依頼の登録',
+  ai_started: 'AIの作業開始', ai_result: 'AIの作業結果', ai_report: 'AIの報告', approval: '承認・却下', release: '本番反映',
+  completed: '完了', error: 'エラー・未解決', cancelled: '中断', note: '状態の変化',
+};
+const ACTOR_JA = { employee: '社員', ai: 'AI', approver: '承認者', system: 'システム' };
+let reports = null;
+
+function reportFilters() {
+  const f = $('#reports-form');
+  return { p_from: f.from.value || null, p_to: f.to.value || null, p_employee: (f.employee.value || '').trim() || null,
+    p_app: f.app.value || null, p_only_alert: f.alert.checked };
+}
+async function loadReports(ev) {
+  if (ev) ev.preventDefault();
+  reports = await rpc('ops_ai_reports', reportFilters());
+  const area = $('#reports-area');
+  area.hidden = false;
+  const self = reports.scope === 'self';
+  $('#reports-title').textContent = self ? '自分のAI操作の記録' : '社員AI操作報告';
+  $('#reports-form [name=employee]').hidden = self;
+  if (self) $('#reports-hint').textContent = 'あなたがAIに指示した内容とAIの作業の記録です。ほかの人の記録は表示されません。';
+  else if (reports.scope === 'apps') $('#reports-hint').textContent = 'あなたの担当アプリの依頼の記録と、あなた自身の記録を表示します。記録は誰も消したり書き換えたりできません。';
+  $('#reports').innerHTML = reports.cases.length ? reports.cases.map((c) => `
+    <div class="row clickable" data-case="${esc(c.case_no)}">
+      <b>${esc(c.case_no)}</b> ${esc(jst(c.opened_at))} ${self ? '' : `${esc(c.employee_name || '')}(${esc(c.employee_code || '')})`}
+      <span class="hint">${esc(c.device || '')}</span>
+      ${c.alerts ? `<span class="badge error">権限外の試行 ${esc(c.alerts)}</span>` : ''}
+      ${c.refusals && !c.alerts ? `<span class="badge warn">拒否 ${esc(c.refusals)}</span>` : ''}
+      ${c.approvals ? `<span class="badge ok">承認・却下 ${esc(c.approvals)}</span>` : ''}
+      ${(c.apps || []).map((a) => `<span class="badge">${esc(a)}</span>`).join('')}
+      <div class="hint">${esc(c.first_instruction || '')}${c.last_summary ? ` → ${esc(c.last_summary)}` : ''}</div>
+    </div>`).join('') : '<div class="row">この条件の記録はありません。</div>';
+}
+
+// 報告書の項目(社長指示の15項目)を、記録から組み立てる
+function reportFields(d) {
+  const ev = d.events; const c = d.case;
+  const of = (types) => ev.filter((e) => types.includes(e.type));
+  const last = ev[ev.length - 1];
+  const approvals = of(['approval']);
+  const releases = of(['release']);
+  // 質問だけの受付番号(依頼なし)は、最後に回答・拒否した時点で完了
+  const done = d.work_items.length
+    ? of(['completed', 'release']).filter((e) => e.type === 'completed' || /反映しました|合格/.test(e.summary))
+    : of(['answer', 'refusal']);
+  const uniq = (a) => [...new Set(a.filter(Boolean))];
+  const tests = d.work_items.map((w) => (w.tests && w.tests.ran != null ? `#${w.id}: ${w.tests.ran ? (w.tests.passed ? '合格' : '不合格') : (w.tests.note || 'なし')}` : null)).filter(Boolean);
+  return [
+    ['受付番号', c.case_no],
+    ['指示した社員', `${c.employee_name || '不明'}(社員番号 ${c.employee_code || '-'})`],
+    ['指示日時', jst(c.opened_at)],
+    ['操作した端末', uniq([c.device].concat(of(['question', 'instruction', 'work_created']).map((e) => e.device))).join('、') || '記録なし'],
+    ['対象アプリ', uniq(ev.map((e) => e.app)).join('、') || '特定のアプリなし(質問)'],
+    ['指示内容', of(['question', 'instruction', 'work_created']).map((e) => `${jst(e.at)} ${e.content || e.summary}`).join('\n') || '記録なし'],
+    ['AIが実行した作業', of(['answer', 'ai_started', 'ai_result', 'ai_report', 'work_created']).filter((e) => e.actor === 'ai').map((e) => `${jst(e.at)} ${e.summary}`).join('\n') || 'なし'],
+    ['参照した情報の種類', uniq(ev.flatMap((e) => e.info || [])).join('、') || 'なし'],
+    ['変更したファイル・設定', uniq(ev.flatMap((e) => e.files || [])).join('\n') || 'なし'],
+    ['テスト結果', tests.join('\n') || 'なし'],
+    ['承認した担当者', approvals.map((e) => `${e.employee_name || ''}: ${e.summary}(${jst(e.at)})`).join('\n') || 'なし'],
+    ['本番反映の有無', releases.some((e) => /反映しました|合格/.test(e.summary)) ? 'あり' : 'なし'],
+    ['作業完了日時', done.length ? jst(done[done.length - 1].at) : '未完了'],
+    ['最終結果', last ? last.summary : '記録なし'],
+    ['エラー・未解決事項', of(['error', 'refusal']).map((e) => `${jst(e.at)} ${e.summary}`).join('\n') || 'なし'],
+  ];
+}
+
+async function openReport(caseNo) {
+  const d = await rpc('ops_ai_report_detail', { p_case_no: caseNo });
+  const fields = reportFields(d);
+  $('#dlg-report-body').innerHTML = `
+    <h2>AI操作報告書 ${esc(d.case.case_no)}</h2>
+    <dl class="kv">${fields.map(([k, v]) => `<dt>${esc(k)}</dt><dd class="pre">${esc(v)}</dd>`).join('')}</dl>
+    <h3 class="card-title">時系列の記録</h3>
+    <div class="list compact">${d.events.map((e) => `
+      <div class="row ${e.severity === 'alert' ? 'alert' : ''}">
+        <b>${esc(jst(e.at))} ${esc(EVENT_JA[e.type] || e.type)}</b> <span class="hint">${esc(ACTOR_JA[e.actor] || e.actor)} ${esc(e.employee_name || '')} ${esc(e.device || '')}</span>
+        ${e.severity !== 'normal' ? `<span class="badge ${e.severity === 'alert' ? 'error' : 'warn'}">${e.severity === 'alert' ? '権限外の試行' : '重要'}</span>` : ''}
+        <div>${esc(e.summary)}</div>
+        ${e.content ? `<div class="pre hint">${esc(e.content)}</div>` : ''}
+      </div>`).join('')}</div>
+    ${d.work_items.length ? `<h3 class="card-title">修正履歴との照合</h3>
+      <div class="list compact">${d.work_items.map((w) => `
+        <div class="row clickable" data-item="${esc(w.id)}"><b>#${esc(w.id)} ${esc(w.title)}</b> — ${esc(WORK_STATUS_JA[w.status] || w.status)}
+          <div class="hint">アプリ ${esc(w.app)}${w.commit ? `・修正の版 ${esc(String(w.commit).slice(0, 8))}` : ''}${w.decided_by ? `・判断 ${esc(w.decided_by)} ${esc(jst(w.decided_at))}` : ''}${w.protected_change ? '・認証/権限/監査に触れる修正(承認は社長のみ)' : ''}</div>
+        </div>`).join('')}</div>` : ''}
+    <div class="dlg-actions">
+      <button class="btn ghost" data-report-export>報告書を出力(テキスト)</button>
+      <button class="btn ghost" data-report-print>印刷</button>
+      <button class="btn" data-close>閉じる</button>
+    </div>`;
+  const dlg = $('#dlg-report');
+  if (!dlg.open) dlg.showModal();
+  dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+  dlg.querySelector('[data-report-print]').addEventListener('click', () => window.print());
+  dlg.querySelector('[data-report-export]').addEventListener('click', () => {
+    const text = [`AI操作報告書 ${d.case.case_no}`, '', ...fields.map(([k, v]) => `■${k}\n${v}`), '', '■時系列の記録',
+      ...d.events.map((e) => `${jst(e.at)} [${EVENT_JA[e.type] || e.type}] ${ACTOR_JA[e.actor] || e.actor} ${e.employee_name || ''}: ${e.summary}${e.content ? `\n    ${String(e.content).replace(/\n/g, '\n    ')}` : ''}`),
+      '', `出力: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })} ${access.employee_name}`].join('\n');
+    download(`AI操作報告書_${d.case.case_no}.txt`, text, 'text/plain');
+  });
+}
+
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob(['﻿' + text], { type: `${type};charset=utf-8` }));
+  const a = document.createElement('a'); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function exportReportsCsv() {
+  if (!reports || !reports.cases.length) { toast('出力する記録がありません'); return; }
+  const q = (v) => `"${String(v == null ? '' : v).replace(/"/g, '""')}"`;
+  const rows = [['受付番号', '指示日時', '社員番号', '氏名', '端末', 'アプリ', '最初の指示', '最後の状態', '権限外の試行', '拒否', '承認・却下', '依頼番号']]
+    .concat(reports.cases.map((c) => [c.case_no, jst(c.opened_at), c.employee_code, c.employee_name, c.device, (c.apps || []).join('・'),
+      c.first_instruction, c.last_summary, c.alerts, c.refusals, c.approvals, (c.work_items || []).join('・')]));
+  download(`社員AI操作報告_${new Date().toISOString().slice(0, 10)}.csv`, rows.map((r) => r.map(q).join(',')).join('\r\n'), 'text/csv');
+}
+
 async function submitTemplate(ev) {
   ev.preventDefault();
   const f = ev.target;
@@ -549,6 +668,8 @@ async function init() {
   await Promise.all([loadDashboard(), loadChat()]);
   loadPending().catch((e) => toast(`承認待ちの一覧を読めませんでした: ${e.message}`));
   loadAdmin().catch((e) => toast(e.message));
+  $('#reports-form [name=app]').innerHTML = '<option value="">全アプリ</option>' + access.apps.map((a) => `<option value="${esc(a.app_name)}">${esc(a.display_name)}</option>`).join('');
+  loadReports().catch((e) => toast(`AI操作の記録を読めませんでした: ${e.message}`));
   setupVoice();
   setInterval(() => { if (!document.hidden) { loadDashboard().catch(() => {}); loadPending().catch(() => {}); } }, REFRESH_MS);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard().catch(() => {}); });
@@ -557,6 +678,7 @@ async function init() {
 document.addEventListener('click', (e) => {
   const pf = e.target.closest('[data-pfilter]'); if (pf) { pendingFilter = pf.dataset.pfilter || null; renderPending(); return; }
   const pi = e.target.closest('[data-pidx]'); if (pi) { openPending(Number(pi.dataset.pidx)); return; }
+  const rc = e.target.closest('[data-case]'); if (rc) { openReport(rc.dataset.case).catch((err) => toast(err.message)); return; }
   const rep = e.target.closest('[data-report]'); if (rep) { e.stopPropagation(); openNewItem(rep.dataset.report); return; }
   const it = e.target.closest('[data-item]'); if (it) { openItem(it.dataset.item).catch((err) => toast(err.message)); }
 });
@@ -574,4 +696,6 @@ $('#template-form [name=template]').addEventListener('change', (e) => {
   $('#template-apps').hidden = staff; $('#template-apps-hint').hidden = staff;
 });
 $('#app-form').addEventListener('submit', submitApp);
+$('#reports-form').addEventListener('submit', (e) => loadReports(e).catch((err) => toast(err.message)));
+$('#reports-csv').addEventListener('click', exportReportsCsv);
 init();

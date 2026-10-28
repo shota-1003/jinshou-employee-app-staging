@@ -60,6 +60,23 @@
       <div class="section-head"><h2>最近の変化</h2></div>
       <div id="events" class="list compact"></div>
 
+      <div id="reports-area" hidden>
+        <div class="section-head">
+          <h2 id="reports-title">社員AI操作報告</h2>
+          <span id="reports-hint" class="hint">社員がAIに指示した内容・AIの作業・拒否した指示・承認を、受付番号ごとにまとめています。記録は誰も消したり書き換えたりできません。</span>
+        </div>
+        <form id="reports-form" class="row-form">
+          <input type="date" name="from" aria-label="いつから">
+          <input type="date" name="to" aria-label="いつまで">
+          <input name="employee" placeholder="社員番号・氏名" aria-label="社員">
+          <select name="app" aria-label="アプリ"></select>
+          <label class="chk"><input type="checkbox" name="alert"> 権限外の試行・重要な操作だけ</label>
+          <button class="btn primary sm">表示</button>
+          <button class="btn ghost sm" type="button" id="reports-csv">一覧をCSVで出力</button>
+        </form>
+        <div id="reports" class="list"></div>
+      </div>
+
       <div id="admin-area" hidden>
         <div class="section-head"><h2>権限の設定</h2><span class="hint">システム管理者と社長だけに表示されます。変更はすべて記録されます。</span></div>
         <div class="card">
@@ -127,6 +144,10 @@
 
   <dialog id="dlg-item" class="dlg">
     <div class="dlg-body" id="dlg-item-body"></div>
+  </dialog>
+
+  <dialog id="dlg-report" class="dlg wide">
+    <div class="dlg-body" id="dlg-report-body"></div>
   </dialog>
 
   <dialog id="dlg-new" class="dlg">

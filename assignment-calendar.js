@@ -759,7 +759,7 @@
                     } catch (e) { extraFailed = true; fail(e); }
                 }
                 // 連続タイムラインは日付ごとのキャッシュから描くので、取得した日付の枠へ入れる。
-                state.days.set(date, { day: dayData, issues, confirmation: conf, full: !extraFailed });
+                state.days.set(date, { day: dayData, issues, confirmation: conf, full: !extraFailed, at: Date.now() });
                 // 画面の「いまの日」の状態は、まだその日を選んでいるときだけ更新する。
                 if (state.selected === date) {
                     state.day_data = dayData;
@@ -1030,6 +1030,13 @@
         // 画面の切り替えは起きない。前後は近づいたときだけ足す(必要なぶんだけ読む)。
         // ---------------------------------------------------------------
         // 最初は選んだ日だけを描き、前後は描いたあとに TL_STEP 日ずつ足していく。
+        // 2026-10-28 現場(桑原さん)から「縦スクロールに止まりが欲しく、横移動によって日付を
+        // 変えたい」との要望。日を縦につないで読み足していく作りが、かくつき・急な日付ずれ・
+        // 「翌日にもコピーされた」ように見える誤解の元だったため、スマホ/タブレットの日別表示は
+        // 「1日ぶんだけ」を出し、前後の日へは横スワイプ(または下の前日・翌日ボタン)で動く。
+        // PCは月と日別を左右2カラムで出す別の作りのため、この定数の影響を受けない。
+        // false に戻せば従来の連続スクロールに戻る(区画を足す処理は残してある)。
+        const TL_SINGLE_DAY = true;
         const TL_STEP = 3;        // 一度に足す日数
         const TL_MAX_DAYS = 45;   // DOMが無限に伸びないための上限
         const TL_EDGE = 800;      // 下端まで何pxに近づいたら足すか
@@ -1082,7 +1089,7 @@
             if (!force && state.days.has(date)) return state.days.get(date);
             try {
                 const day = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
-                const rec = { day, issues: null, confirmation: null, full: !state.canEdit };
+                const rec = { day, issues: null, confirmation: null, full: !state.canEdit, at: Date.now() };
                 state.days.set(date, rec);
                 state.offline = false;
                 return rec;
@@ -1143,6 +1150,9 @@
             focusDate(date);
             renderDay(sec);
             [state.selected, state.day_data, state.issues, state.confirmation] = keep;
+            // 1日ぶんだけの表示では、日の最後に「前の日 / 次の日」を置く(縦スクロールの止まり)。
+            // 横スワイプでも動けるが、できない人・気づかない人のために押せる形でも出す。
+            if (TL_SINGLE_DAY) sec.append(buildDayNav(date));
             return sec;
         }
 
@@ -1184,6 +1194,9 @@
         let monthSyncTimer = null;
         function syncViewedDate(date) {
             if (!date || date === state.selected) return;
+            applyViewedDate(date);
+        }
+        function applyViewedDate(date) {
             focusDate(date);
             loadDayDetail(date);
             state.weekStart = mondayOf(date);
@@ -1282,6 +1295,7 @@
         // 前後へ日を足す。上へ足すときは、増えた高さぶんスクロールを送って
         // 「見ている現場が突然動く」ことがないようにする。
         async function extendTimelineNow(dir) {
+            if (TL_SINGLE_DAY) return;
             // 1日ずつ読んでは並べる。途中で日付の移動が入ったらそこで切り上げる。
             for (let i = 0; i < TL_STEP; i += 1) {
                 const tl = timelineEl();
@@ -1374,6 +1388,7 @@
 
         function onTimelineScroll() {
             if (isWide() || state.view === 'me') return;
+            if (TL_SINGLE_DAY) return;   // 1日ぶんだけ。スクロールで日付は変わらない
             const tl = timelineEl();
             if (!tl) return;
             syncViewedDate(viewedDate());
@@ -1392,6 +1407,7 @@
             if (state.mobileMode === 'month') return;
             const tl = timelineEl();
             if (!tl) { selectDate(date); return; }
+            if (TL_SINGLE_DAY) { await showDayCore(date, 0); return; }
             // 範囲の外なら、届くまで足す。遠すぎる場合はそこを中心に組み直す。
             if (date < state.tl.from || date > state.tl.to) {
                 const gapDays = Math.abs(Math.round(
@@ -1419,6 +1435,134 @@
             }
             syncViewedDate(date);
         }
+
+        // ---------------------------------------------------------------
+        // 1日ぶんだけを出す日別表示(TL_SINGLE_DAY)。前後の日へは横スワイプか、
+        // 日の最後にある「前の日 / 次の日」ボタンで動く。縦スクロールはその日の中だけ。
+        // ---------------------------------------------------------------
+        const DAY_FRESH_MS = 60 * 1000;
+        // 警告・確認状況だけを取る(描かない)。失敗しても日別の配置そのものは出す。
+        async function loadDayDetailData(date) {
+            if (!state.canEdit) return null;
+            try {
+                const [issues, confirmation] = await Promise.all([
+                    readRpc('assignment_validate_day', { p_employee_code: me, p_date: date }),
+                    readRpc('assignment_get_confirmation_status', { p_employee_code: me, p_date: date }),
+                ]);
+                return { issues, confirmation };
+            } catch (e) { return null; }
+        }
+        let swipeTarget = null;   // 連続スワイプで、まだ描いていない移動先
+        function showDay(date, dir) { return tlRunNav(() => showDayCore(date, dir || 0)); }
+        async function showDayCore(date, dir) {
+            if (!date) return;
+            const cur = timelineEl();
+            // すでにその日だけが出ているなら何もしない(起動直後の位置合わせ等)。
+            // 読み込み失敗の表示(data-error)は「出ている」に数えず、取り直せるようにする。
+            if (cur && state.tl.from === date && state.tl.to === date
+                && cur.querySelector(`.ac-daysec[data-date="${date}"]:not([data-error])`)) {
+                if (state.selected !== date) applyViewedDate(date);
+                return;
+            }
+            // 配置・警告・確認状況を「出す前に」まとめて取る。配置だけ先に出して警告帯が後から
+            // 差し込まれると、読んでいる/押そうとしている位置が動いてしまう(ボタンの押し損ねの原因)。
+            // 手元にあっても1分より古ければ取り直す(他の人の登録が反映されないままにしない)。
+            const cached = state.days.get(date);
+            const usable = cached && (cached.full || !state.canEdit) && (Date.now() - (cached.at || 0) < DAY_FRESH_MS);
+            let rec = cached;
+            if (!usable) {
+                const [r, detail] = await Promise.all([loadDayData(date, true), loadDayDetailData(date)]);
+                rec = r;
+                if (rec && detail) {
+                    rec.issues = detail.issues; rec.confirmation = detail.confirmation;
+                    rec.full = true; rec.at = Date.now();
+                }
+            }
+            if (tlNavWaiting) return;            // 後ろに別の移動が待っている。この日は描かずに譲る
+            const tl = timelineEl();
+            if (!tl || state.mobileMode === 'month' || isWide() || state.view === 'me') return;
+            // 取得に失敗したときも、移動先の日を出す(スワイプしても何も起きないように見せない)。
+            // ただし「配置なし」とは絶対に出さない(読めていないだけの日に二重登録させないため)。
+            const fresh = rec ? buildDaySection(date) : buildDayErrorSection(date);
+            if (dir) fresh.classList.add(dir > 0 ? 'ac-slide-next' : 'ac-slide-prev');
+            tl.innerHTML = '';
+            tl.append(fresh);
+            state.tl.from = date;
+            state.tl.to = date;
+            elBody.scrollTop = 0;
+            applyViewedDate(date);
+            if (dir) setTimeout(() => { fresh.classList.remove('ac-slide-next', 'ac-slide-prev'); }, 300);
+        }
+        function buildDayErrorSection(date) {
+            const sec = el('div', 'ac-daysec');
+            sec.dataset.date = date;
+            sec.dataset.error = '1';
+            const box = el('div', 'ac-day');
+            const head = el('div', 'ac-dayhead');
+            head.append(el('div', 'ac-daytitle', labelDate(date)));
+            box.append(head);
+            box.append(el('div', 'ac-empty',
+                '読み込めませんでした。通信が混んでいることがあります。この日の配置は、読み込めるまで追加しないでください。'));
+            const retry = el('button', 'ac-btn ac-primary', 'もう一度読み込む');
+            retry.type = 'button';
+            retry.style.margin = '0 12px 16px';
+            retry.addEventListener('click', () => { state.days.delete(date); showDay(date, 0); });
+            box.append(retry);
+            sec.append(box);
+            sec.append(buildDayNav(date));
+            return sec;
+        }
+        function buildDayNav(date) {
+            const nav = el('div', 'ac-daynav');
+            const prev = el('button', 'ac-daynavbtn', `◀ ${labelDate(addDays(date, -1))}`);
+            const next = el('button', 'ac-daynavbtn', `${labelDate(addDays(date, 1))} ▶`);
+            prev.type = 'button'; next.type = 'button';
+            prev.addEventListener('click', () => stepDay(-1));
+            next.addEventListener('click', () => stepDay(1));
+            nav.append(prev, next);
+            return nav;
+        }
+        // 前の日・次の日へ1日動く。続けて押した/スワイプしたときは、まだ描いていない移動先から数える。
+        let dayNavPending = 0;
+        function stepDay(dir) {
+            const base = (dayNavPending > 0 && swipeTarget) ? swipeTarget : state.selected;
+            swipeTarget = addDays(base, dir);
+            dayNavPending += 1;
+            const p = showDay(swipeTarget, dir);
+            p.catch(() => {}).then(() => { dayNavPending -= 1; });
+            return p;
+        }
+        // 横にスクロールする部品(社員チップの列など)の上から始めた指の動きは、日付送りに使わない。
+        function insideHScroll(node) {
+            for (let n = node; n && n !== elBody; n = n.parentElement) {
+                const tag = n.tagName;
+                if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+                if (n.scrollWidth > n.clientWidth + 2) {
+                    const ox = window.getComputedStyle(n).overflowX;
+                    if (ox === 'auto' || ox === 'scroll') return true;
+                }
+            }
+            return false;
+        }
+        let dsx = null; let dsy = null; let dst = 0; let dsBlocked = false;
+        elBody.addEventListener('touchstart', (ev) => {
+            if (ev.touches.length !== 1) { dsx = null; return; }
+            dsx = ev.touches[0].clientX; dsy = ev.touches[0].clientY; dst = Date.now();
+            dsBlocked = insideHScroll(ev.target);
+        }, { passive: true });
+        elBody.addEventListener('touchcancel', () => { dsx = null; }, { passive: true });
+        elBody.addEventListener('touchend', (ev) => {
+            if (dsx === null) return;
+            const x0 = dsx; const y0 = dsy; const t0 = dst; const blocked = dsBlocked;
+            dsx = null;
+            if (blocked || !TL_SINGLE_DAY || isWide() || state.view === 'me' || state.mobileMode === 'month') return;
+            if (!timelineEl() || root.querySelector('.ac-sheet')) return;
+            const t = ev.changedTouches[0];
+            const dx = t.clientX - x0; const dy = t.clientY - y0;
+            // 縦スクロールの途中で誤って日が変わらないよう、横が明確に大きいときだけ拾う
+            if (Math.abs(dx) < 70 || Math.abs(dx) < Math.abs(dy) * 1.8 || Date.now() - t0 > 800) return;
+            stepDay(dx < 0 ? 1 : -1);
+        }, { passive: true });
 
         function rebuildTimeline(date) { return tlRunNav(() => rebuildTimelineNow(date)); }
         async function rebuildTimelineNow(date) {

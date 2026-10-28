@@ -1148,6 +1148,28 @@
   position: sticky; top: 0; z-index: 6;
   background: #fff; box-shadow: 0 1px 0 var(--ac-line);
 }
+/* 2026-10-28 スマホ/タブレットの日別表示は「1日ぶんだけ」(横スワイプで前後の日へ)。
+   以前は月グリッドを画面外へ送りきるために日別パネルへ画面1枚ぶんの最低の高さを持たせていたが、
+   1日だけを出す今は不要。短い日に大きな空白ができ、前の日/次の日ボタンが遠くなるため外す。 */
+.ac-root[data-layout="phone"] .ac-daysec .ac-day,
+.ac-root[data-layout="tab"] .ac-daysec .ac-day { min-height: 0; }
+.ac-daynav {
+  display: flex; gap: 10px; padding: 14px 12px calc(28px + var(--ac-safe-bottom));
+  background: #f4f7fb; border-top: 1px solid var(--ac-line);
+}
+.ac-daynavbtn {
+  flex: 1 1 0; min-height: 48px; padding: 8px 6px; border-radius: 10px;
+  border: 1px solid var(--ac-line-strong); background: #fff; cursor: pointer;
+  color: var(--ac-accent); font-size: 15px; font-weight: 800; white-space: nowrap;
+}
+.ac-daynavbtn:active { background: #e7ecf3; }
+@keyframes ac-slide-next { from { transform: translateX(32px); opacity: .25; } to { transform: none; opacity: 1; } }
+@keyframes ac-slide-prev { from { transform: translateX(-32px); opacity: .25; } to { transform: none; opacity: 1; } }
+.ac-daysec.ac-slide-next { animation: ac-slide-next .18s ease-out; }
+.ac-daysec.ac-slide-prev { animation: ac-slide-prev .18s ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .ac-daysec.ac-slide-next, .ac-daysec.ac-slide-prev { animation: none; }
+}
 /* PCは左右2カラムのままなのでタイムラインは使わない */
 .ac-root[data-layout="wide"] .ac-daysec { border-top: 0; }
 .ac-root[data-layout="wide"] .ac-daysec .ac-dayhead { position: static; box-shadow: none; }
