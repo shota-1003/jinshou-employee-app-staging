@@ -93,6 +93,11 @@ h2 { font-size: 15px; margin: 0; }
 .chat-form { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
 .chat-form textarea, .dlg textarea, .dlg input, .dlg select, .row-form input, .row-form select {
   font: inherit; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.chip { font: inherit; font-size: 13px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border-strong); background: var(--card-2); color: var(--text); cursor: pointer; }
+.chip.on { background: var(--primary); border-color: transparent; color: white; font-weight: 600; }
+.item .age-old { color: var(--warn); font-weight: 600; }
+.box.prewrap { white-space: pre-wrap; }
 .chat-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: wrap; }
 .chat-actions .voice-opt { margin-right: auto; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
 .btn.mic { font-weight: 600; padding: 8px 14px; border-color: var(--primary); }

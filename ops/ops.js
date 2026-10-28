@@ -53,13 +53,14 @@ function report(kind, endpoint, message, status) {
   else REPORTER.reportRuntimeError(new Error(`ops画面: ${message}`), Object.assign({ stage: endpoint }, extra));
 }
 
-async function rpc(name, params) {
+// rawParams=true のときは p_employee_code を足さない(各アプリの既存の処理は引数の名前が違う。例 p_admin_employee_code)
+async function rpc(name, params, rawParams) {
   let res;
   try {
     res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${name}`, {
       method: 'POST',
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'X-Device-Token': auth.token },
-      body: JSON.stringify({ p_employee_code: auth.employeeCode, ...params }),
+      body: JSON.stringify(rawParams ? params : { p_employee_code: auth.employeeCode, ...params }),
     });
   } catch (e) {
     report('fetch', name, e && e.message);
@@ -160,6 +161,94 @@ function appName(id) { const a = dash && dash.apps.find((x) => x.app_name === id
 function diffJa(stat) {
   return String(stat || '').replace(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/,
     (_, f, a, d) => `${f}個のファイルを変更(追加 ${a || 0}行・削除 ${d || 0}行)`);
+}
+
+// ---------------- 承認待ち・未処理(全アプリ) ----------------
+// 一覧はDBの ops_pending_items(読むだけ)。承認・差し戻しは、下の対応表にある「各アプリの既存の処理」だけを呼ぶ。
+// DBから届くのは操作の名前(approve/return)だけで、呼ぶ処理名はここに固定する(届いた名前の処理をそのまま呼ばない)。
+// 権限・二重処理の確認は、呼ばれた各アプリの処理が自分で行う(例: 既に処理済みなら「承認待ちの状態ではありません」で止まる)。
+const PENDING_ACTIONS = {
+  'portal.request': {
+    approve: { label: '承認する', verb: '承認', done: '承認しました', call: (it) => rpc('admin_decide_request', { p_admin_employee_code: auth.employeeCode, p_request_id: Number(it.id), p_action: 'approved', p_rejection_reason: null }, true) },
+    return: { label: '差し戻す', verb: '差し戻し', done: '差し戻しました', needReason: '差し戻しの理由(申請者に表示されます)',
+      call: (it, reason) => rpc('admin_decide_request', { p_admin_employee_code: auth.employeeCode, p_request_id: Number(it.id), p_action: 'needs_review', p_rejection_reason: reason }, true) },
+  },
+};
+let pending = null;
+let pendingFilter = null;
+// 件名が空のもの(採用の下書きは本番30件中26件が件名なし)は、本文の書き出しで見分けられるようにする
+function pendingTitle(it) {
+  const body = it.detail && it.detail['本文'];
+  if (/^\((件名なし|内容の要約なし)\)$/.test(it.title) && body) return `${body.replace(/\s+/g, ' ').slice(0, 40)}…`;
+  return it.title;
+}
+
+async function loadPending() {
+  pending = await rpc('ops_pending_items', {});
+  if (!pending.sources.length) { $('#pending-area').hidden = true; return; }
+  $('#pending-area').hidden = false;
+  if (pendingFilter && !pending.sources.some((s) => s.source === pendingFilter)) pendingFilter = null;
+  renderPending();
+}
+function renderPending() {
+  const total = pending.sources.reduce((n, s) => n + s.count, 0);
+  $('#pending-sources').innerHTML = [`<button class="chip ${pendingFilter ? '' : 'on'}" data-pfilter="">すべて ${total}件</button>`]
+    .concat(pending.sources.map((s) => `<button class="chip ${pendingFilter === s.source ? 'on' : ''}" data-pfilter="${esc(s.source)}">${esc(s.label)} ${esc(s.count)}件</button>`)).join('');
+  const list = pending.items.filter((it) => !pendingFilter || it.source === pendingFilter);
+  $('#pending-list').innerHTML = list.length ? list.map((it, i) => `
+    <div class="item" data-pidx="${pending.items.indexOf(it)}">
+      <span class="badge ${it.age_days >= 3 ? 'warn' : ''}">${esc(it.status_label)}</span>
+      <div><div class="t">${esc(it.kind_label)}: ${esc(pendingTitle(it))}</div>
+        <div class="m">${esc(appName(it.app_name))}・${esc(it.who_label)} ${esc(it.who)}・${esc(jst(it.created_at))}・<span class="${it.age_days >= 3 ? 'age-old' : ''}">${esc(it.age_days)}日たっています</span>${it.actions.length ? '・この画面で処理できます' : ''}</div></div>
+      <span class="m">›</span>
+    </div>`).join('') : '<div class="empty">承認待ち・未処理はありません。</div>';
+  const shown = list.length; const all = pendingFilter ? (pending.sources.find((s) => s.source === pendingFilter) || {}).count : total;
+  if (all > shown) $('#pending-list').insertAdjacentHTML('beforeend', `<div class="empty">ほかに${esc(all - shown)}件あります(古い順に表示)。残りは各アプリで確認してください。</div>`);
+}
+function openPending(idx) {
+  const it = pending.items[idx];
+  const acts = PENDING_ACTIONS[it.source] || {};
+  const usable = it.actions.filter((a) => acts[a]);
+  const detail = Object.entries(it.detail || {}).filter(([k]) => k !== '本文');
+  $('#dlg-item-body').innerHTML = `
+    <h2>${esc(it.kind_label)}: ${esc(pendingTitle(it))}</h2>
+    <dl class="kv">
+      <dt>アプリ</dt><dd>${esc(appName(it.app_name))}</dd>
+      <dt>${esc(it.who_label)}</dt><dd>${esc(it.who)}</dd>
+      <dt>日時</dt><dd>${esc(jst(it.created_at))}(${esc(it.age_days)}日たっています)</dd>
+      <dt>状態</dt><dd><b>${esc(it.status_label)}</b></dd>
+      ${detail.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(typeof v === 'number' && k === '金額' ? `${v.toLocaleString('ja-JP')}円` : v)}</dd>`).join('')}
+    </dl>
+    ${it.detail && it.detail['本文'] ? `<div><div class="hint">本文</div><pre class="box prewrap">${esc(it.detail['本文'])}</pre></div>` : ''}
+    ${it.action_note ? `<p class="hint">${esc(it.action_note)}</p>` : ''}
+    <p id="pending-error" class="error" hidden></p>
+    <div class="dlg-actions">
+      ${usable.map((a) => `<button class="btn ${a === 'approve' ? 'primary' : 'danger'}" data-pact="${esc(a)}">${esc(acts[a].label)}</button>`).join('')}
+      ${it.link_url ? `<a class="btn" href="${esc(it.link_url)}" target="_blank" rel="noopener">${esc(it.link_label || 'アプリで開く')}</a>` : ''}
+      <button class="btn" data-close>閉じる</button>
+    </div>`;
+  const dlg = $('#dlg-item');
+  if (!dlg.open) dlg.showModal();
+  dlg.querySelector('[data-close]').addEventListener('click', () => dlg.close());
+  dlg.querySelectorAll('[data-pact]').forEach((b) => b.addEventListener('click', async () => {
+    const act = acts[b.dataset.pact];
+    let reason = null;
+    if (act.needReason) {
+      reason = window.prompt(act.needReason);
+      if (reason == null) return;
+      if (!reason.trim()) { $('#pending-error').textContent = '理由を入力してください'; $('#pending-error').hidden = false; return; }
+    } else if (!window.confirm(`「${it.kind_label}: ${pendingTitle(it)}」を${act.verb}します。よろしいですか？`)) return;
+    dlg.querySelectorAll('[data-pact]').forEach((x) => { x.disabled = true; });   // 二度押しで2回呼ばない
+    try {
+      await act.call(it, reason && reason.trim());
+      toast(act.done);
+      dlg.close();
+    } catch (err) {
+      $('#pending-error').textContent = err.message; $('#pending-error').hidden = false;
+    } finally {
+      loadPending().catch(() => {});
+    }
+  }));
 }
 
 // ---------------- 依頼 ----------------
@@ -434,17 +523,20 @@ async function init() {
   $('#app').hidden = false;
   $('#who').textContent = `${access.employee_name}(${RANK_JA[access.global_rank] || '一般社員'})`;
   await Promise.all([loadDashboard(), loadChat()]);
+  loadPending().catch((e) => toast(`承認待ちの一覧を読めませんでした: ${e.message}`));
   loadAdmin().catch((e) => toast(e.message));
   setupVoice();
-  setInterval(() => { if (!document.hidden) loadDashboard().catch(() => {}); }, REFRESH_MS);
+  setInterval(() => { if (!document.hidden) { loadDashboard().catch(() => {}); loadPending().catch(() => {}); } }, REFRESH_MS);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard().catch(() => {}); });
 }
 
 document.addEventListener('click', (e) => {
+  const pf = e.target.closest('[data-pfilter]'); if (pf) { pendingFilter = pf.dataset.pfilter || null; renderPending(); return; }
+  const pi = e.target.closest('[data-pidx]'); if (pi) { openPending(Number(pi.dataset.pidx)); return; }
   const rep = e.target.closest('[data-report]'); if (rep) { e.stopPropagation(); openNewItem(rep.dataset.report); return; }
   const it = e.target.closest('[data-item]'); if (it) { openItem(it.dataset.item).catch((err) => toast(err.message)); }
 });
-$('#btn-refresh').addEventListener('click', () => loadDashboard().then(() => toast('更新しました')).catch((e) => toast(e.message)));
+$('#btn-refresh').addEventListener('click', () => Promise.all([loadDashboard(), loadPending()]).then(() => toast('更新しました')).catch((e) => toast(e.message)));
 $('#btn-new-item').addEventListener('click', () => openNewItem());
 $('#new-form').addEventListener('submit', submitNewItem);
 $('#new-form [name=app]').addEventListener('change', syncKindOptions);
