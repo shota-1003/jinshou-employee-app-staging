@@ -93,7 +93,13 @@ h2 { font-size: 15px; margin: 0; }
 .chat-form { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px; }
 .chat-form textarea, .dlg textarea, .dlg input, .dlg select, .row-form input, .row-form select {
   font: inherit; width: 100%; background: var(--bg); color: var(--text); border: 1px solid var(--border-strong); border-radius: 10px; padding: 8px; }
-.chat-actions { display: flex; justify-content: flex-end; gap: 6px; }
+.chat-actions { display: flex; justify-content: flex-end; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chat-actions .voice-opt { margin-right: auto; font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 4px; }
+.btn.mic { font-weight: 600; padding: 8px 14px; border-color: var(--primary); }
+.btn.mic.listening { background: var(--err); border-color: transparent; color: white; animation: mic-pulse 1.2s ease-in-out infinite; }
+@keyframes mic-pulse { 50% { opacity: 0.75; } }
+.voice-status { margin: 0; font-size: 13px; color: var(--warn); line-height: 1.5; }
+.voice-status.info { color: var(--muted); }
 .row-form { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
 .row-form input, .row-form select { width: auto; flex: 1 1 140px; }
 .chk { display: flex; gap: 4px; align-items: center; font-size: 12.5px; color: var(--muted); }

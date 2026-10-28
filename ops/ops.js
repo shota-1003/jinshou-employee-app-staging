@@ -70,6 +70,11 @@ async function rpc(name, params) {
     let msg = `通信エラー(${res.status})`;
     try { const j = JSON.parse(text); if (j.message) msg = j.message; } catch { /* そのまま */ }
     report('http', name, msg, res.status);
+    // DB側の決まったエラーは日本語。英語のまま返ってきたもの(内部のエラー)は、利用者向けの日本語に置き換える(原文は上の記録に残る)
+    if (!/[\u3040-\u30ff\u4e00-\u9fff]/.test(msg)) {
+      msg = res.status >= 500 ? 'システムの内部でエラーが起きました。少し待ってからもう一度お試しください。続く場合は「依頼」から報告してください。'
+        : 'この操作を受け付けられませんでした。画面を「更新」してからもう一度お試しください。';
+    }
     if (/セッションが確認できません|ご利用いただけません/.test(msg)) showLogin();
     throw new Error(msg);
   }
@@ -116,7 +121,11 @@ function render() {
   if (monMin > MONITOR_STALE_MIN) warnings.push(`見張りが${Number.isFinite(monMin) ? `${Math.round(monMin)}分` : '一度も'}動いていません。下の状態は古い可能性があります。`);
   if (hbMin > AGENT_STALE_MIN) warnings.push(`AI社員(会話・修正担当)が${Number.isFinite(hbMin) ? `${Math.round(hbMin)}分` : 'まだ一度も'}応答していません。会話の返事や修正が止まっています。`);
   $('#banner').hidden = !warnings.length;
-  $('#banner').innerHTML = warnings.map(esc).join('<br>') + (warnings.length ? '<br><span class="hint">復旧手順: 24時間用PCのタスク「AICompanyBrain-OpsAgent」「AICompanyBrain-OpsFleetMonitor」を確認(システム管理者)</span>' : '');
+  // 復旧手順(タスク名)はシステム管理者だけに出す。他の人には「管理者が対応する」とだけ伝える
+  const recovery = access && access.global_rank >= 3
+    ? '復旧手順: 24時間用PCのタスク「AICompanyBrain-OpsAgent」「AICompanyBrain-OpsFleetMonitor」を確認してください'
+    : 'システム管理者に連絡が必要です。急ぎの場合は社長かシステム管理者へお知らせください。';
+  $('#banner').innerHTML = warnings.map(esc).join('<br>') + (warnings.length ? `<br><span class="hint">${esc(recovery)}</span>` : '');
 
   $('#apps').innerHTML = dash.apps.map((a) => `
     <article class="app s-${esc(a.overall_status)}" data-app="${esc(a.app_name)}">
@@ -147,6 +156,11 @@ function render() {
 }
 
 function appName(id) { const a = dash && dash.apps.find((x) => x.app_name === id); return a ? a.display_name : id; }
+// 「2 files changed, 5 insertions(+), 1 deletion(-)」を日本語にする
+function diffJa(stat) {
+  return String(stat || '').replace(/(\d+) files? changed(?:, (\d+) insertions?\(\+\))?(?:, (\d+) deletions?\(-\))?/,
+    (_, f, a, d) => `${f}個のファイルを変更(追加 ${a || 0}行・削除 ${d || 0}行)`);
+}
 
 // ---------------- 依頼 ----------------
 function openNewItem(appNameValue) {
@@ -189,10 +203,10 @@ async function openItem(id) {
       <dt>アプリ</dt><dd>${esc(appName(w.app_name))}${w.app_sensitivity === 'high' ? '(重要データ: 承認はシステム管理者か社長)' : ''}</dd>
       <dt>種類</dt><dd>${esc(KIND_JA[w.kind] || w.kind)}</dd>
       <dt>依頼者</dt><dd>${esc(w.requested_by_name || 'AIの見張り')}・${esc(jst(w.created_at))}</dd>
-      ${w.branch_name ? `<dt>作業ブランチ</dt><dd>${esc(w.branch_name)}</dd>` : ''}
-      ${tests ? `<dt>テスト</dt><dd>${tests.ran ? (tests.passed ? '合格' : `不合格(終了コード ${esc(tests.exit)})`) + `「${esc(tests.cmd)}」` : esc(tests.note || '')}</dd>` : ''}
+      ${w.branch_name && w.my_rank >= 3 ? `<dt>作業ブランチ</dt><dd>${esc(w.branch_name)}</dd>` : ''}
+      ${tests ? `<dt>自動テスト</dt><dd>${tests.ran ? (tests.passed ? '合格' : '不合格') + (w.my_rank >= 3 ? `(「${esc(tests.cmd)}」終了コード ${esc(tests.exit)})` : '') : esc(tests.note || '')}</dd>` : ''}
     </dl>
-    ${w.diff_summary ? `<div><div class="hint">変更したファイル</div><pre class="box">${esc(w.diff_summary)}</pre></div>` : ''}
+    ${w.diff_summary && w.my_rank >= 2 ? `<div><div class="hint">変更したファイル</div><pre class="box">${esc(diffJa(w.diff_summary))}</pre></div>` : ''}
     <div class="thread">${w.messages.map((m) => `<div class="msg ${esc(m.role)}">${m.role === 'user' ? `<b>${esc(m.author || '')}</b>\n` : ''}${esc(m.content)}<span class="ts">${esc(jst(m.created_at))}</span></div>`).join('')}</div>
     ${canAct && !closed ? `<form id="item-msg-form" class="chat-form"><textarea name="c" rows="2" placeholder="AIへの追加の指示(送るとAIが作業を再開します)"></textarea>
       <div class="chat-actions"><button class="btn primary sm">指示を送る</button></div></form>` : ''}
@@ -247,7 +261,7 @@ async function loadChat() {
   return list || [];
 }
 async function sendChat(ev) {
-  ev.preventDefault();
+  if (ev) ev.preventDefault();
   const input = $('#chat-input');
   const text = input.value.trim();
   if (!text) return;
@@ -256,7 +270,7 @@ async function sendChat(ev) {
     await rpc('ops_chat_send', { p_content: text });
     await loadChat();
     waitForAnswer();
-  } catch (e) { toast(`送れませんでした: ${e.message}`); input.value = text; }
+  } catch (e) { toast(`送れませんでした: ${e.message}`); input.value = text; voice.speakNext = false; setVoiceStatus(''); }
 }
 // 返事が来るまでだけ短い間隔で見に行く(最長3分)。来たら止める。
 function waitForAnswer() {
@@ -266,6 +280,9 @@ function waitForAnswer() {
     const list = await loadChat().catch(() => []);
     if (list.some((m) => m.role === 'ai') || Date.now() - started > 180000) {
       clearInterval(chatWaitTimer);
+      const reply = list.filter((m) => m.role === 'ai').pop();
+      if (reply && voice.speakNext) speak(reply.content);
+      voice.speakNext = false;
       if (!list.some((m) => m.role === 'ai') && Date.now() - started > 180000) {
         toast('AI社員の返事が遅れています。上の赤い表示が出ていないか確認してください。');
         report('stage', 'chat_no_reply', '質問から3分たっても返事が画面に出ない');
@@ -275,18 +292,98 @@ function waitForAnswer() {
   }, 4000);
 }
 
-function setupMic() {
+// ---------------- 音声(共有PC向け。スマホは文字で十分) ----------------
+// ブラウザに入っている音声認識(日本語)と読み上げを使う。追加の費用・外部APIの契約は無い。
+// マイクが無い・許可されていない・聞き取れないときは、理由を日本語で出して文字入力で続けられるようにする。
+const voice = { sr: null, listening: false, speakNext: false };
+const VOICE_ERR_JA = {
+  'not-allowed': 'マイクの使用が許可されていません。アドレス欄の左の鍵のマークを押し、マイクを「許可」にしてください。文字で入力しても使えます。',
+  'service-not-allowed': 'このブラウザでは音声入力が使えない設定です。文字で入力してください。',
+  'audio-capture': 'マイクが見つかりません。マイクがつながっているか確認してください。文字で入力しても使えます。',
+  'no-speech': '声が聞こえませんでした。もう一度「話しかける」を押してからお話しください。文字で入力しても使えます。',
+  network: '音声の聞き取りに必要な通信ができませんでした。文字で入力してください。',
+  'language-not-supported': 'このブラウザは日本語の音声入力に対応していません。文字で入力してください。',
+};
+function setVoiceStatus(msg, info) {
+  const el = $('#voice-status');
+  el.textContent = msg || ''; el.hidden = !msg; el.classList.toggle('info', !!info);
+}
+function jaVoice() {
+  const vs = (window.speechSynthesis && speechSynthesis.getVoices()) || [];
+  const ja = vs.filter((v) => /^ja/i.test(v.lang));
+  return ja.find((v) => /Nanami|Google|Natural/i.test(v.name)) || ja[0] || null;
+}
+// 読み上げ用に整える(#12 → 12番、URLは読まない、長すぎる返事は途中まで)
+function forSpeech(t) {
+  return String(t).replace(/https?:\/\/\S+/g, '').replace(/#(\d+)/g, '$1番').replace(/・/g, '、').replace(/[()（）]/g, '、')
+    .replace(/\n+/g, '。').replace(/。{2,}/g, '。').slice(0, 700);
+}
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  stopSpeaking();
+  const u = new SpeechSynthesisUtterance(forSpeech(text));
+  u.lang = 'ja-JP'; u.rate = 1.05;
+  const v = jaVoice(); if (v) u.voice = v;
+  if (!v && speechSynthesis.getVoices().length) setVoiceStatus('このPCには日本語の読み上げ音声がないため、うまく読めないことがあります。返事は画面でもお読みいただけます。');
+  else setVoiceStatus('返事を読み上げています。', true);
+  u.onend = u.onerror = () => { $('#btn-stop-speak').hidden = true; if ($('#voice-status').classList.contains('info')) setVoiceStatus(''); };
+  $('#btn-stop-speak').hidden = false;
+  speechSynthesis.speak(u);
+}
+function stopSpeaking() {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  const b = $('#btn-stop-speak'); if (b) b.hidden = true;
+}
+function micIdle() { const b = $('#btn-mic'); b.classList.remove('listening'); b.textContent = '🎤 話しかける'; }
+function startListening(SR) {
+  stopSpeaking();
+  const input = $('#chat-input');
+  const base = input.value.trim() ? `${input.value.trim()} ` : '';
+  let finalText = ''; let errCode = null;
+  const r = new SR();
+  r.lang = 'ja-JP'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+  r.onstart = () => {
+    voice.listening = true;
+    const b = $('#btn-mic'); b.classList.add('listening'); b.textContent = '■ 聞いています(押すと終わる)';
+    setVoiceStatus('どうぞお話しください。話し終わると自動で送ります。', true);
+  };
+  r.onresult = (e) => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i += 1) {
+      if (e.results[i].isFinal) finalText += e.results[i][0].transcript; else interim += e.results[i][0].transcript;
+    }
+    input.value = base + finalText + interim;
+  };
+  r.onerror = (e) => { errCode = e.error; };
+  r.onend = () => {
+    voice.listening = false; voice.sr = null; micIdle();
+    if (errCode && errCode !== 'aborted') { input.value = (base + finalText).trim(); setVoiceStatus(VOICE_ERR_JA[errCode] || '音声を聞き取れませんでした。もう一度お試しいただくか、文字で入力してください。'); return; }
+    if (!finalText.trim()) { if (errCode !== 'aborted') setVoiceStatus(VOICE_ERR_JA['no-speech']); return; }
+    input.value = (base + finalText).trim();
+    voice.speakNext = $('#voice-reply').checked;
+    setVoiceStatus('送りました。返事を待っています…', true);
+    sendChat(null);
+  };
+  try { r.start(); voice.sr = r; } catch { micIdle(); setVoiceStatus('音声入力を始められませんでした。文字で入力してください。'); }
+}
+function setupVoice() {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const btn = $('#btn-mic');
-  if (!SR) { btn.hidden = true; return; }
-  btn.addEventListener('click', () => {
-    const r = new SR(); r.lang = 'ja-JP'; r.interimResults = false;
-    btn.disabled = true; btn.textContent = '🎤 聞いています…';
-    r.onresult = (e) => { $('#chat-input').value += e.results[0][0].transcript; };
-    r.onend = () => { btn.disabled = false; btn.textContent = '🎤 話す'; };
-    r.onerror = () => { toast('音声を聞き取れませんでした'); };
-    r.start();
-  });
+  const btn = $('#btn-mic'); const chk = $('#voice-reply');
+  const wide = window.matchMedia && matchMedia('(min-width: 900px)').matches;
+  // 読み上げの既定: 共有PC(広い画面)は読み上げる、スマホは読まない。選んだ値は端末ごとに覚える
+  let saved = null; try { saved = localStorage.getItem('ops_voice_reply'); } catch { /* 使えない端末 */ }
+  chk.checked = saved == null ? wide : saved === '1';
+  chk.addEventListener('change', () => { try { localStorage.setItem('ops_voice_reply', chk.checked ? '1' : '0'); } catch { /* 無視 */ } if (!chk.checked) stopSpeaking(); });
+  if (!('speechSynthesis' in window)) $('#voice-reply-wrap').hidden = true;
+  else speechSynthesis.getVoices();   // Chrome は最初に呼ぶと声の一覧を読み込み始める
+  $('#btn-stop-speak').addEventListener('click', () => { stopSpeaking(); setVoiceStatus(''); });
+  if (!SR) {
+    btn.disabled = true;
+    btn.title = 'このブラウザは音声入力に対応していません';
+    if (wide) setVoiceStatus('このブラウザは「話しかける」に対応していません(会社のPCでは Chrome か Edge で使えます)。文字で入力すれば同じことができます。');
+    return;
+  }
+  btn.addEventListener('click', () => { if (voice.listening && voice.sr) voice.sr.stop(); else startListening(SR); });
 }
 
 // ---------------- 権限・アプリ追加(システム管理者・社長) ----------------
@@ -338,7 +435,7 @@ async function init() {
   $('#who').textContent = `${access.employee_name}(${RANK_JA[access.global_rank] || '一般社員'})`;
   await Promise.all([loadDashboard(), loadChat()]);
   loadAdmin().catch((e) => toast(e.message));
-  setupMic();
+  setupVoice();
   setInterval(() => { if (!document.hidden) loadDashboard().catch(() => {}); }, REFRESH_MS);
   document.addEventListener('visibilitychange', () => { if (!document.hidden) loadDashboard().catch(() => {}); });
 }

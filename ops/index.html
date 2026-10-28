@@ -84,15 +84,18 @@
     <aside class="col-chat card">
       <div class="chat-head">
         <h2>AI社員に聞く</h2>
-        <span class="hint">例: 「今日のシステム状況を教えて」「承認待ちは何件？」「配置カレンダーの不具合を修正して」</span>
+        <span class="hint">話しかけるか文字で送ってください。例: 「今日のシステムの状況は？」「私の申請はどうなってる？」「配置カレンダーが開かない」「社員ポータルの日報の保存を直して」</span>
       </div>
       <div id="chat-log" class="chat-log" aria-live="polite"></div>
       <form id="chat-form" class="chat-form">
         <textarea id="chat-input" rows="2" placeholder="AI社員への質問・依頼を入力" maxlength="2000"></textarea>
         <div class="chat-actions">
-          <button id="btn-mic" class="btn ghost sm" type="button" title="音声で入力">🎤 話す</button>
+          <label class="chk voice-opt" id="voice-reply-wrap"><input type="checkbox" id="voice-reply"> 返事を声で読み上げる</label>
+          <button id="btn-stop-speak" class="btn ghost sm" type="button" hidden>🔇 読み上げを止める</button>
+          <button id="btn-mic" class="btn mic" type="button">🎤 話しかける</button>
           <button class="btn primary sm" type="submit">送信</button>
         </div>
+        <p id="voice-status" class="voice-status" aria-live="polite" hidden></p>
       </form>
     </aside>
   </main>
