@@ -589,8 +589,32 @@
         // 取得した期間を日付ごとのキャッシュへ入れる。
         // 月表示・週ストリップの両方がここだけを見るようにして、
         // 「月表示には出るが週ストリップには出ない」というズレを作らない。
+        // 2026-10-28 現場から「追加した配置が翌日にもコピーされている」「追加してから数時間後に
+        // 開くと追加前に戻っている」「同じ配置が二つある」との報告。原因の1つがここ:
+        // 以前は「追加・更新」しかせず、サーバー側で削除・日付移動された予定が手元のキャッシュに
+        // 残り続けた(移動なら元の日と新しい日の両方に出る=コピーされたように見える)。
+        // サーバーはこの期間の予定を全件返す(LIMIT無し)ので、取得した期間は
+        // サーバーの答えそのもので置き換える。
         function mergeRange(data, from, to) {
+            const f = from || data.date_from;
+            const t = to || data.date_to;
+            const inRange = (d) => !!(f && t && d >= f && d <= t);
+            if (f && t) {
+                const bySchedDate = new Map();
+                for (const x of (data.schedules || [])) {
+                    if (!bySchedDate.has(x.date)) bySchedDate.set(x.date, []);
+                    bySchedDate.get(x.date).push(x);
+                }
+                const hcDates = new Set((data.headcounts || []).map((h) => h.date));
+                for (let d = f; d <= t; d = addDays(d, 1)) {
+                    state.cache.schedules.set(d, bySchedDate.get(d) || []);
+                    if (!hcDates.has(d)) state.cache.counts.delete(d);
+                    state.cache.loaded.add(d);
+                }
+            }
+            // 期間の外へ返ってきた分(通常は無い)だけ、従来どおり id で足し込む。
             for (const x of (data.schedules || [])) {
+                if (inRange(x.date)) continue;
                 if (!state.cache.schedules.has(x.date)) state.cache.schedules.set(x.date, []);
                 const arr = state.cache.schedules.get(x.date);
                 const i = arr.findIndex((y) => y.id === x.id);
@@ -598,14 +622,6 @@
             }
             for (const h of (data.holidays || [])) state.cache.holidays.set(h.date, h.name);
             for (const h of (data.headcounts || [])) state.cache.counts.set(h.date, h);
-            const f = from || data.date_from;
-            const t = to || data.date_to;
-            if (f && t) {
-                for (let d = f; d <= t; d = addDays(d, 1)) {
-                    if (!data.schedules.some((x) => x.date === d)) state.cache.schedules.set(d, state.cache.schedules.get(d) || []);
-                    state.cache.loaded.add(d);
-                }
-            }
         }
 
         // 月グリッドが画面外へ出たら週ストリップを出す(同じカレンダーが縮んで残るイメージ)。
@@ -1032,6 +1048,8 @@
         let touchDown = false;
         let scrollIdleTimer = null;
         let lastUserTouchAt = 0;
+        // 保存系(配置の登録・メモ)の二重送信防止。保存中は次の保存を受け付けない。
+        let writeBusy = false;
         function markScrollActive() {
             scrollActive = true;
             clearTimeout(scrollIdleTimer);
@@ -3420,6 +3438,7 @@
         // 新しい表は作らない。
         // -----------------------------------------------------------
         function openMemoSheet() {
+            const memoDate = state.selected;   // 開いた時点の日付で保存する(裏で画面が動いても別の日へ入れない)
             const draft = { title: '' };
             let inputEl = null;
             async function save() {
@@ -3429,9 +3448,11 @@
                 // (種別そのものはメモの見た目には使わない。表示はis_memoで専用色にする)
                 const fallbackCat = state.categories.find((c) => c.code === 'other_work')
                     || state.categories[state.categories.length - 1] || state.categories[0] || {};
+                if (writeBusy) return;
+                writeBusy = true;
                 try {
                     await rpc('assignment_save_schedule', {
-                        p_employee_code: me, p_schedule_id: null, p_date: state.selected,
+                        p_employee_code: me, p_schedule_id: null, p_date: memoDate,
                         p_site_id: null, p_category_id: fallbackCat.id,
                         p_title: title, p_start_time: null, p_end_time: null,
                         p_meeting_time: null, p_note: null, p_members: [],
@@ -3441,7 +3462,7 @@
                     render();
                     api.close();
                     toast('メモを登録しました');
-                } catch (e) { fail(e); }
+                } catch (e) { fail(e); } finally { writeBusy = false; }
             }
             const api = sheet(
                 `${labelDate(state.selected)} のメモ`,
@@ -3468,11 +3489,14 @@
         // 配置の登録・編集(連続高速入力)
         // -----------------------------------------------------------
         async function openEntrySheet(existing) {
+            // シートを開こうとした時点の日付を先に控える(下の通信を待つ間に画面が動くことがある)。
+            const sheetDate = state.selected;
             await loadEmployees();
             let sites = [];
             try { sites = await rpc('search_sites', { p_query: '', p_employee_code: me }); } catch (e) { fail(e); }
 
             const draft = {
+                date: sheetDate,
                 schedule_id: existing ? existing.id : null,
                 site_id: existing ? existing.site_id : null,
                 site_name: existing ? (existing.site_name || existing.label) : null,
@@ -3528,7 +3552,7 @@
             let savedCount = 0;
 
             const api = sheet(
-                `${labelDate(state.selected)} の配置を${existing ? '編集' : '登録'}`,
+                `${labelDate(draft.date)} の配置を${existing ? '編集' : '登録'}`,
                 (box) => buildEntryForm(box, draft, sites),
                 [
                     sheetBtn('登録して次の現場へ', async () => {
@@ -3539,7 +3563,7 @@
                             draft.schedule_id = null; draft.site_id = null; draft.site_name = null;
                             draft.title = ''; draft.members = []; draft.subs = [];
                             draft.meeting_time = ''; draft.note = '';
-                            api.setTitle(`${labelDate(state.selected)} の配置を登録（${savedCount}件登録済み）`);
+                            api.setTitle(`${labelDate(draft.date)} の配置を登録（${savedCount}件登録済み）`);
                             api.scroll.innerHTML = '';
                             buildEntryForm(api.scroll, draft, sites);
                             api.scroll.scrollTop = 0;
@@ -4306,11 +4330,23 @@
                 return false;
             }
             if (!draft.category_id) { toast('種別を選んでください'); return false; }
+            // 2026-10-28 二重送信の防止。登録ログに同じ保存が0.07秒差で2回走った記録が
+            // 複数あり(二重タップ・通信が遅いときの押し直し)、新規登録なら同じ配置が
+            // 二つできる。保存中の押し直しは無視する。
+            if (writeBusy) return false;
+            writeBusy = true;
+            try {
+                return await saveDraftNow(draft);
+            } finally { writeBusy = false; }
+        }
+        async function saveDraftNow(draft) {
             try {
                 await rpc('assignment_save_schedule', {
                     p_employee_code: me,
                     p_schedule_id: draft.schedule_id,
-                    p_date: state.selected,
+                    // シートを開いた時点の日付で保存する。裏で画面が動いて state.selected が
+                    // 変わっても、別の日へ登録されないようにする。
+                    p_date: draft.date || state.selected,
                     p_site_id: draft.site_id,
                     p_category_id: draft.category_id,
                     p_title: draft.title || null,
@@ -4340,7 +4376,11 @@
                     p_status: 'draft',
                 });
                 toast('登録しました');
-                await Promise.all([loadMonth(), loadDay()]);
+                const savedDate = draft.date || state.selected;
+                await Promise.all([
+                    loadMonth(), loadDay(),
+                    ...(savedDate !== state.selected ? [loadDayData(savedDate, true)] : []),
+                ]);
                 render();
                 return true;
             } catch (e) { fail(e); return false; }
@@ -5274,6 +5314,38 @@
                 resizeTimer = setTimeout(() => { syncHostOffset(); syncHeaderHeight(); }, 120);
             });
         }
+
+        // 2026-10-28 現場報告「配置を追加してから数時間後に開くと、追加する前の状態に戻っている」。
+        // 開きっぱなしのタブ・ホーム画面のアプリを後で開き直すと、画面は昔の取得結果のままで、
+        // その間に自分や他の人が登録・削除した内容が反映されていなかった(取り直す処理が無かった)。
+        // その状態で追加すると、他の人が登録済みの同じ配置を重ねて登録してしまう原因にもなる。
+        // 一定時間以上離れていた画面に戻ったときは、サーバーの最新に取り直す。
+        const RESUME_STALE_MS = 30 * 1000;
+        let hiddenAt = 0;
+        let refreshingFromServer = false;
+        async function refreshFromServer() {
+            if (refreshingFromServer || writeBusy) return;
+            // 入力中のシートがあるときは触らない(入力を消さない)。次に戻ったときに取り直す。
+            if (root.querySelector('.ac-sheet')) return;
+            refreshingFromServer = true;
+            try {
+                if (state.view === 'me') { await loadMine(); render(); return; }
+                state.days.clear();
+                if (!isWide() && state.mobileMode !== 'month') {
+                    await rebuildTimeline(state.selected);
+                } else {
+                    await Promise.all([loadMonth(), loadDay()]);
+                    render();
+                }
+            } catch (e) { fail(e); } finally { refreshingFromServer = false; }
+        }
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) { hiddenAt = Date.now(); return; }
+            if (hiddenAt && Date.now() - hiddenAt >= RESUME_STALE_MS) refreshFromServer();
+            hiddenAt = 0;
+        });
+        // iOSのホーム画面アプリは、復帰時に visibilitychange が飛ばず pageshow だけのことがある。
+        window.addEventListener('pageshow', (ev) => { if (ev.persisted) refreshFromServer(); });
 
         // 初期ロード。管理者かどうかはサーバーの判定(is_assignment_admin)を正とする。
         (async function init() {
