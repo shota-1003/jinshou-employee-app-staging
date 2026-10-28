@@ -13,7 +13,7 @@ const AGENT_STALE_MIN = 5;           // AI社員は1分おきに生存を書く
 const STATUS_JA = { ok: '正常', warn: '注意', error: '異常', unknown: '確認不能', unmonitored: '未監視', partial: '一部のみ監視' };
 const WORK_STATUS_JA = {
   open: '受付済み', queued: 'AIの作業待ち', running: 'AIが作業中', waiting_input: '次の指示待ち', fix_ready: '修正済み・確認待ち',
-  approved: '本番反映の承認済み', deployed: '本番反映済み', done: '完了', failed: '修正できず', cancelled: '中断', rejected: '却下',
+  approved: '本番反映の承認済み', releasing: '本番へ反映中', deployed: '本番反映済み', done: '完了', failed: '修正できず', cancelled: '中断', rejected: '却下',
 };
 const KIND_JA = { bug_report: '不具合報告', fix_request: 'AI修正', direct_session: '相談しながら修正', improvement: '改善' };
 const ROLE_JA = { fixer: '修正担当', app_admin: 'アプリ管理者', system_admin: 'システム管理者' };
@@ -37,6 +37,22 @@ function getAuth() {
   return null;
 }
 
+// 画面で起きた失敗(ログイン情報が見つからない・通信失敗・送信失敗・JSエラー)を本番の errors へ残す。
+// 2026-10-27 スマホから「開いたのに届かない」ことがあり、画面側の記録が無く原因を追えなかったため。
+// 報告はポータルと同じ client-error-reporter.js(見張りの client_errors 検査がこの記録を数える)。
+const REPORTER = window.ClientErrorReporter || null;
+if (REPORTER) {
+  REPORTER.init({ supabaseUrl: SUPABASE_URL, supabaseAnonKey: SUPABASE_ANON_KEY, agentName: 'ops-center-client',
+    getEmployeeCode: () => (auth ? auth.employeeCode : null) });
+}
+function report(kind, endpoint, message, status) {
+  if (!REPORTER) return;
+  const extra = { screen: 'ops', standalone: !!(window.navigator.standalone || (window.matchMedia && matchMedia('(display-mode: standalone)').matches)) };
+  if (kind === 'http') REPORTER.reportHttpError(endpoint, status, message, extra);
+  else if (kind === 'fetch') REPORTER.reportFetchFailure(endpoint, message, extra);
+  else REPORTER.reportRuntimeError(new Error(`ops画面: ${message}`), Object.assign({ stage: endpoint }, extra));
+}
+
 async function rpc(name, params) {
   let res;
   try {
@@ -45,11 +61,15 @@ async function rpc(name, params) {
       headers: { apikey: SUPABASE_ANON_KEY, Authorization: `Bearer ${SUPABASE_ANON_KEY}`, 'Content-Type': 'application/json', 'X-Device-Token': auth.token },
       body: JSON.stringify({ p_employee_code: auth.employeeCode, ...params }),
     });
-  } catch { throw new Error('通信できませんでした。電波の良い場所でもう一度お試しください。'); }
+  } catch (e) {
+    report('fetch', name, e && e.message);
+    throw new Error('通信できませんでした。電波の良い場所でもう一度お試しください。');
+  }
   const text = await res.text();
   if (!res.ok) {
     let msg = `通信エラー(${res.status})`;
     try { const j = JSON.parse(text); if (j.message) msg = j.message; } catch { /* そのまま */ }
+    report('http', name, msg, res.status);
     if (/セッションが確認できません|ご利用いただけません/.test(msg)) showLogin();
     throw new Error(msg);
   }
@@ -236,7 +256,7 @@ async function sendChat(ev) {
     await rpc('ops_chat_send', { p_content: text });
     await loadChat();
     waitForAnswer();
-  } catch (e) { toast(e.message); input.value = text; }
+  } catch (e) { toast(`送れませんでした: ${e.message}`); input.value = text; }
 }
 // 返事が来るまでだけ短い間隔で見に行く(最長3分)。来たら止める。
 function waitForAnswer() {
@@ -246,7 +266,10 @@ function waitForAnswer() {
     const list = await loadChat().catch(() => []);
     if (list.some((m) => m.role === 'ai') || Date.now() - started > 180000) {
       clearInterval(chatWaitTimer);
-      if (!list.some((m) => m.role === 'ai') && Date.now() - started > 180000) toast('AI社員の返事が遅れています。上の赤い表示が出ていないか確認してください。');
+      if (!list.some((m) => m.role === 'ai') && Date.now() - started > 180000) {
+        toast('AI社員の返事が遅れています。上の赤い表示が出ていないか確認してください。');
+        report('stage', 'chat_no_reply', '質問から3分たっても返事が画面に出ない');
+      }
       loadDashboard().catch(() => {});
     }
   }, 4000);
@@ -296,10 +319,21 @@ async function submitApp(ev) {
 
 async function init() {
   auth = getAuth();
-  if (!auth) { showLogin(); return; }
+  if (!auth) {
+    let hasLocal = false; try { hasLocal = localStorage.getItem(DEVICE_AUTH_KEY) != null; } catch { /* 使えない端末 */ }
+    report('stage', 'no_auth', `ログイン情報が見つからない(保存あり=${hasLocal} cookieあり=${document.cookie.includes(DEVICE_AUTH_COOKIE)})`);
+    showLogin(); return;
+  }
   try {
     access = await rpc('ops_my_access', {});
-  } catch (e) { if (!$('#login-needed').hidden) return; toast(e.message); return; }
+  } catch (e) {
+    if (!$('#login-needed').hidden) return;
+    // 白い画面のまま止めない。何が起きたかを画面に出す
+    $('#login-needed').hidden = false;
+    $('#login-needed h2').textContent = 'システム管理画面を開けませんでした';
+    $('#login-needed p').textContent = `${e.message} — 少し待って「更新」を押すか、社員ポータルを開き直してください。`;
+    return;
+  }
   $('#app').hidden = false;
   $('#who').textContent = `${access.employee_name}(${RANK_JA[access.global_rank] || '一般社員'})`;
   await Promise.all([loadDashboard(), loadChat()]);

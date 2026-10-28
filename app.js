@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v278-staging';
-const BUILD_DEPLOYED_AT = '2026-10-27T05:53:01.476Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v279-staging';
+const BUILD_DEPLOYED_AT = '2026-10-28T02:34:59.682Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -5361,6 +5361,10 @@ async function announceDeepLink(announcementId) {
     showScreen('daily-report');
     return;
   }
+  if (t.related_type === 'attendance_period') {
+    openMyAttendanceBookOfLatestEndedPeriod();
+    return;
+  }
   if (t.related_type === 'employee_requests' && t.target_id) {
     openMyRequestDetail(t.target_id, 'announcements');
     return;
@@ -5387,6 +5391,19 @@ async function announceDeepLink(announcementId) {
     return;
   }
   showScreen('announcements');
+}
+// 出勤簿提出のお知らせ(related_type='attendance_period')から、自分の出勤簿(最後に終わった給与期間)を直接開く。
+// 給与期間は前月26日〜当月25日。26日以降なら当月分、25日までなら前月分が「最後に終わった期間」。
+function openMyAttendanceBookOfLatestEndedPeriod() {
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
+  let y = now.getFullYear();
+  let m = now.getMonth() + 1;
+  if (now.getDate() <= 25) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
+  dailyReportSummaryPeriodType = 'pay_period';
+  dailyReportPeriodYear = y;
+  dailyReportPeriodMonth = m;
+  showScreen('my-daily-reports');
+  setDailyReportView('ledger');
 }
 // item4: PINリセット通知等から管理者社員管理へ来たとき、対象社員を自動選択するための保留id。
 let pendingAdminPreselectEmployeeId = null;
@@ -5433,6 +5450,7 @@ async function loadAnnouncements(includeArchived) {
         ${a.related_type === 'employee_requests' ? `<button type="button" class="secondary announce-detail-btn" data-request-id="${a.related_id}">この申請の詳細を見る</button>` : ''}
         ${a.related_type === 'assignment_member' ? `<button type="button" class="secondary announce-assign-btn">配置を確認する</button>` : ''}
         ${a.related_type === 'employees' ? `<button type="button" class="secondary announce-admin-btn">暗証番号のリセットへ</button>` : ''}
+        ${a.related_type === 'attendance_period' ? `<button type="button" class="secondary announce-admin-btn">出勤簿を開く</button>` : ''}
         ${a.importance !== 'normal' ? `
           <div class="announce-ack-row">
             ${a.acknowledged_at
