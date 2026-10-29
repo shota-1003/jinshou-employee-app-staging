@@ -27,7 +27,7 @@ const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
 const APP_BUILD_VERSION = 'jinshou-employee-app-v286-staging';
-const BUILD_DEPLOYED_AT = '2026-10-29T10:26:16.069Z';
+const BUILD_DEPLOYED_AT = '2026-10-29T10:39:37.850Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -10090,9 +10090,21 @@ async function openAttendanceDetail(groupId, groupLabel) {
           rpc('admin_get_employee_daily_report_entries', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
           rpc('admin_get_employee_period_confirmation', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end }),
         ]);
-        const confirmHtml = confirmRows && confirmRows.length > 0
-          ? `<div class="hint" style="color:var(--success,#2e7d4f);">✅ ${start}〜${end} を本人が${new Date(confirmRows[0].confirmed_at).toLocaleString('ja-JP')}に最終確認・提出済みです</div>`
-          : `<div class="hint">${start}〜${end} はまだ本人の最終確認がされていません</div>`;
+        // 日報担当(と社長)は、ここから日の内容を直したり、本人が確認できない人(退職・休職など)の代わりに確認OKにできる
+        // (2026-10-29 経理・日報担当の依頼)。経理は見るだけ(ボタンは出さない。サーバー側も日報担当/社長だけ許可)。
+        const canEditDays = (await isNippoAdmin()) && groupId !== session.employeeCode;
+        const jstToday = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10);
+        const confirmRow = confirmRows && confirmRows.length > 0 ? confirmRows[0] : null;
+        const confirmHtml = confirmRow
+          ? (confirmRow.confirmed_by_self === false
+            ? `<div class="hint" style="color:var(--success,#2e7d4f);">✅ ${start}〜${end} を、管理者の${exdEsc(confirmRow.confirmed_by_name || '')}さんが本人の代わりに${new Date(confirmRow.confirmed_at).toLocaleString('ja-JP')}に確認しました</div>`
+            : `<div class="hint" style="color:var(--success,#2e7d4f);">✅ ${start}〜${end} を本人が${new Date(confirmRow.confirmed_at).toLocaleString('ja-JP')}に最終確認・提出済みです</div>`)
+          : `<div class="hint">${start}〜${end} はまだ本人の最終確認がされていません</div>`
+            + (canEditDays && end < jstToday
+              ? `<div style="margin:6px 0 10px;"><button type="button" id="ad-admin-confirm">本人の代わりに、この期間の出勤簿を確認OKにする</button>`
+                + `<div class="hint-inline">退職・休職などで本人が確認できないときに使います。確認OKにすると給与計算の対象に入ります。内容は、下の表の「直す」で先に直せます。</div>`
+                + `<div id="ad-admin-confirm-msg" class="error" style="display:none;"></div></div>`
+              : '');
         // 本人の出勤簿(日付=1行)と同じ並び・粒度にする(2026-10-01 Shota指摘「なんで本人の方の
         // 表示と同じにせんの」)。そのうえで手当関係(早出・残業・通勤早出・通勤残業・100km超・
         // 運搬・現場作業・営業・県外・欠勤・出張・出張手当・リーダー・夜勤)を省略せず出す
@@ -10185,7 +10197,7 @@ async function openAttendanceDetail(groupId, groupLabel) {
         const tagCell = (arr) => arr.length === 0 ? '' : arr.map((t) => `<span class="ledger-tag">${exdEsc(t)}</span>`).join('');
         const ledgerHtml = `<div class="form-title" style="margin-top:16px;">出勤簿(${start}〜${end})</div>${confirmHtml}` +
           (days.length === 0 ? '<div class="hint">この期間の日報はありません。</div>' : `<div class="attendance-ledger-wrap"><table class="attendance-ledger-table">
-            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>出張</th><th>残業</th><th>通勤</th><th>その他</th><th>備考</th><th>状態</th></tr></thead>
+            <thead><tr><th>日付</th><th>現場</th><th>区分</th><th>人工</th><th>出張</th><th>残業</th><th>通勤</th><th>その他</th><th>備考</th><th>状態</th>${canEditDays ? '<th></th>' : ''}</tr></thead>
             <tbody>${days.map((d) => `<tr>
                 <td>${d.report_date}</td>
                 <td>${exdEsc(d.sites.join('・'))}</td>
@@ -10197,10 +10209,11 @@ async function openAttendanceDetail(groupId, groupLabel) {
                 <td>${tagCell(d.other)}</td>
                 <td>${exdEsc(d.notes.join('・'))}</td>
                 <td>${dailyReportStatusBadgeHtml({ report_status: d.status })}</td>
+                ${canEditDays ? `<td><button type="button" class="secondary ad-day-edit" data-date="${exdEsc(d.report_date)}" style="padding:2px 10px;">直す</button></td>` : ''}
               </tr>`).join('')}
-              <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="6"></td></tr>
+              <tr style="font-weight:700;border-top:2px solid var(--border);"><td colspan="3">合計</td><td class="numeral">${grandTotal.toFixed(2).replace(/\.?0+$/, '') || '0'}</td><td colspan="${canEditDays ? 7 : 6}"></td></tr>
             </tbody>
-          </table></div>`);
+          </table></div>${canEditDays ? '<div id="ad-day-panel-area"></div>' : ''}`);
         // スプレッドシートと同じ形式の出勤簿プレビュー(2026-10-02 Shota指示)。失敗しても下の詳細は出す。
         let bookHtml = '';
         try {
@@ -10211,6 +10224,7 @@ async function openAttendanceDetail(groupId, groupLabel) {
             <div class="attendance-summary-col"><div class="form-title">現場別合計(${start}〜${end})</div>${siteTotalsHtml}</div>
             <div class="attendance-summary-col"><div class="form-title">勤怠・手当集計(${start}〜${end})</div>${teateTotalsHtml}</div>
           </div>`;
+        if (canEditDays) wireAttendanceDetailAdminEditing(listEl, session, { employeeCode: groupId, employeeName: groupLabel, start, end, reload: () => openAttendanceDetail(groupId, groupLabel) });
       } catch (e) {
         listEl.innerHTML = '<div class="hint">出勤簿の読み込みに失敗しました。</div>';
       }
@@ -10229,6 +10243,122 @@ async function openAttendanceDetail(groupId, groupLabel) {
   } catch (e) {
     listEl.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
+}
+
+// 出面集計 → 社員の出勤簿 の画面で、日報担当(と社長)が、誤って出された日を直す・本人の代わりに確認OKにする
+// (2026-10-29 経理・日報担当の依頼「誤って出面提出してる日を管理者が直せるように」「辞めた人の出面も管理者が確認OKにできるように」)。
+// 日の内容は既存の関数(現場・人工=admin_correct_daily_report、残業・100km=admin_update_daily_report_payroll_fields、
+// 取消=admin_cancel_daily_report_by_id)を使い、新しい上書きの仕組みは作らない。出張チェックだけ admin_set_daily_report_trip_flag を足した。
+// 直した記録(誰が・いつ・何を・なぜ)は audit_logs に残り、本人の確認後の変更は給与の再確認の対象になる。
+function wireAttendanceDetailAdminEditing(root, session, ctx) {
+  const confirmBtn = root.querySelector('#ad-admin-confirm');
+  if (confirmBtn) {
+    const msg = root.querySelector('#ad-admin-confirm-msg');
+    confirmBtn.addEventListener('click', async () => {
+      if (!window.confirm(`${ctx.employeeName}さんの ${ctx.start}〜${ctx.end} の出勤簿を、本人の代わりに確認OKにします。\n確認OKにすると給与計算の対象に入ります。よろしいですか?`)) return;
+      confirmBtn.disabled = true; msg.style.display = 'none';
+      try {
+        await rpc('admin_confirm_attendance_period_for_employee', { p_admin_employee_code: session.employeeCode, p_employee_code: ctx.employeeCode, p_period_start: ctx.start, p_period_end: ctx.end });
+        ctx.reload();
+      } catch (e) {
+        msg.style.whiteSpace = 'pre-wrap'; msg.textContent = e.message || '確認OKにできませんでした。'; msg.style.display = 'block'; msg.classList.add('show');
+        confirmBtn.disabled = false;
+      }
+    });
+  }
+  const keepReload = () => { const sc = document.scrollingElement || document.documentElement; const y = sc.scrollTop; Promise.resolve(ctx.reload()).then(() => { sc.scrollTop = y; }); };
+  root.querySelectorAll('.ad-day-edit').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const date = btn.dataset.date;
+      // 表は横に長いので、直す欄は表の中ではなく表の下に1つだけ出す(別の日を押すと切り替わる)
+      const panel = root.querySelector('#ad-day-panel-area');
+      const wasOpen = panel.dataset.date === date;
+      root.querySelectorAll('.ad-day-edit').forEach((b) => { b.textContent = '直す'; });
+      if (wasOpen) { panel.innerHTML = ''; panel.dataset.date = ''; return; }
+      panel.dataset.date = date; btn.textContent = '閉じる';
+      panel.innerHTML = '<div class="hint">読み込み中...</div>';
+      panel.scrollIntoView({ block: 'nearest' });
+      try {
+        const rows = await rpc('admin_list_reports_for_day', { p_admin_employee_code: session.employeeCode, p_employee_code: ctx.employeeCode, p_work_date: date });
+        if (!rows || rows.length === 0) { panel.innerHTML = '<div class="hint">この日の日報はありません(画面を開き直してください)。</div>'; return; }
+        const n = attendanceBookNum;
+        const statusLabel = { submitted: '提出済み(承認待ち)', confirmed: '確定済み', rejected: '差戻し中' };
+        panel.innerHTML = '<div class="hint-inline">' + exdEsc(ctx.employeeName) + 'さんの ' + exdEsc(date) + ' の日報です。直す所だけ変えて、理由を書いて「この内容に直す」を押してください(変えない所は触らなくて大丈夫です)。直した記録は残ります。</div>'
+          + rows.map((r) => '<div class="ad-rpt" data-id="' + r.id + '" style="padding:8px;border:1px solid var(--border,#555);border-radius:8px;margin:8px 0;">'
+            + '<div><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span> <span class="hint-inline">' + exdEsc(r.work_type) + '・' + n(r.headcount) + '人工</span></div>'
+            + '<div class="hint-inline">現場を変えるときだけ、現場名を入れて探して選んでください。</div>'
+            + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;"><input type="text" class="ad-site-q" placeholder="現場名(例: ファスプレ)" style="flex:1;min-width:150px;"><button type="button" class="secondary ad-site-find">探す</button></div>'
+            + '<select class="ad-site-sel" style="display:none;margin-top:4px;width:100%;"></select>'
+            + '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px;"><span class="hint-inline">区分・人工:</span><select class="ad-wt"><option value="">変えない</option><option value="終日|1">終日・1人工</option><option value="午前|0.5">午前・0.5人工</option><option value="午後|0.5">午後・0.5人工</option></select>'
+            + '<label class="hint-inline">残業(時間) <input type="number" class="ad-ot" min="0" max="24" step="0.25" value="' + (Number(r.overtime_hours) || 0) + '" style="width:80px;"></label>'
+            + '<label class="hint-inline"><input type="checkbox" class="ad-trip"' + (r.is_business_trip ? ' checked' : '') + '> 出張</label>'
+            + '<label class="hint-inline"><input type="checkbox" class="ad-100km"' + (r.is_over_100km ? ' checked' : '') + '> 100km超</label></div>'
+            + '<input type="text" class="ad-reason" placeholder="直す理由(必須。例: 人工の入力間違い)" style="width:100%;margin-top:6px;">'
+            + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="ad-save">この内容に直す</button><button type="button" class="secondary ad-cancel-rpt">この日報を取り消す</button></div>'
+            + '<div class="ad-msg error" style="display:none;white-space:pre-wrap;"></div>'
+            + '</div>').join('');
+        panel.querySelectorAll('.ad-rpt').forEach((box, idx) => {
+          const r = rows[idx];
+          const id = Number(box.dataset.id);
+          const msgEl = box.querySelector('.ad-msg');
+          const showMsg = (t) => { msgEl.textContent = t; msgEl.style.display = t ? 'block' : 'none'; msgEl.classList.toggle('show', !!t); };
+          const lock = (v) => box.querySelectorAll('button').forEach((x) => { x.disabled = v; });
+          const sel = box.querySelector('.ad-site-sel');
+          box.querySelector('.ad-site-find').addEventListener('click', async () => {
+            const q = box.querySelector('.ad-site-q').value.trim();
+            if (!q) { showMsg('現場名を入れてください。'); return; }
+            try {
+              const found = await rpc('admin_search_sites_simple', { p_admin_employee_code: session.employeeCode, p_query: q });
+              if (!found || found.length === 0) { showMsg('その名前の現場がありません。'); return; }
+              showMsg('');
+              sel.style.display = 'block';
+              sel.innerHTML = '<option value="">選んでください</option>' + found.map((x) => '<option value="' + x.id + '">' + exdEsc(x.site_name) + '</option>').join('');
+            } catch (e) { showMsg(e.message || '探せませんでした。'); }
+          });
+          box.querySelector('.ad-save').addEventListener('click', async () => {
+            const reason = box.querySelector('.ad-reason').value.trim();
+            if (!reason) { showMsg('直す理由を入力してください。'); return; }
+            const siteId = sel.value ? Number(sel.value) : null;
+            const wt = box.querySelector('.ad-wt').value;
+            const [wtName, hc] = wt ? wt.split('|') : [null, null];
+            const ot = Number(box.querySelector('.ad-ot').value);
+            const trip = box.querySelector('.ad-trip').checked;
+            const km = box.querySelector('.ad-100km').checked;
+            if (!(ot >= 0 && ot <= 24)) { showMsg('残業は0〜24時間で入力してください。'); return; }
+            const otChanged = ot !== (Number(r.overtime_hours) || 0);
+            const kmChanged = km !== !!r.is_over_100km;
+            const tripChanged = trip !== !!r.is_business_trip;
+            const siteWtChanged = !!siteId || !!wtName;
+            if (!otChanged && !kmChanged && !tripChanged && !siteWtChanged) { showMsg('変えた所がありません。'); return; }
+            const bits = [];
+            if (siteId) bits.push('現場を「' + sel.options[sel.selectedIndex].text + '」');
+            if (wtName) bits.push('区分・人工を「' + wtName + '・' + hc + '人工」');
+            if (otChanged) bits.push('残業を ' + ot + ' 時間');
+            if (tripChanged) bits.push('出張を ' + (trip ? 'あり' : 'なし'));
+            if (kmChanged) bits.push('100km超を ' + (km ? 'あり' : 'なし'));
+            if (!window.confirm(ctx.employeeName + 'さんの ' + date + ' の日報を、次の内容に直します。\n・' + bits.join('\n・') + '\n\n理由: ' + reason + '\nよろしいですか?')) return;
+            lock(true); showMsg('');
+            try {
+              if (otChanged || kmChanged) await rpc('admin_update_daily_report_payroll_fields', { p_admin_employee_code: session.employeeCode, p_daily_report_id: id, p_overtime_hours: otChanged ? ot : null, p_is_over_100km: kmChanged ? km : null, p_reason: reason });
+              if (tripChanged) await rpc('admin_set_daily_report_trip_flag', { p_admin_employee_code: session.employeeCode, p_daily_report_id: id, p_value: trip, p_reason: reason });
+              if (siteWtChanged) await rpc('admin_correct_daily_report', { p_admin_employee_code: session.employeeCode, p_daily_report_id: id, p_site_id: siteId, p_work_type: wtName, p_headcount: hc ? Number(hc) : null, p_reason: reason });
+              keepReload();
+            } catch (e) { showMsg(e.message || '直せませんでした。'); lock(false); }
+          });
+          box.querySelector('.ad-cancel-rpt').addEventListener('click', async () => {
+            const reason = box.querySelector('.ad-reason').value.trim();
+            if (!reason) { showMsg('取り消す理由を入力してください。'); return; }
+            if (!window.confirm(ctx.employeeName + 'さんの ' + date + ' の「' + (r.site_name || '-') + '」の日報を取り消します(出勤簿・給与に数えなくなります)。\n理由: ' + reason + '\nよろしいですか?')) return;
+            lock(true); showMsg('');
+            try {
+              await rpc('admin_cancel_daily_report_by_id', { p_admin_employee_code: session.employeeCode, p_report_id: id, p_reason: reason });
+              keepReload();
+            } catch (e) { showMsg(e.message || '取り消せませんでした。'); lock(false); }
+          });
+        });
+      } catch (e) { panel.innerHTML = '<div class="error show">読み込めませんでした。</div>'; }
+    });
+  });
 }
 
 async function loadEmployeeDetailQual() {
