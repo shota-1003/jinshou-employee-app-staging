@@ -54,6 +54,10 @@
     padding: 3px 10px; cursor: pointer; font-family: inherit; white-space: nowrap;
   }
   #assignment-calendar-root { background: #fff; }
+  /* iPhoneの上端の余白(ステータスバー分)は上の .cal-topbar がすでに使っている。
+     カレンダーのヘッダーも同じ余白を足すと二重になり、年月の行の上に
+     余白ぶんの空きができる(2026-10-29 現場指摘「この分さらに上にあがらんのかな」)。 */
+  #assignment-calendar-root, #assignment-calendar-root .ac-root { --ac-safe-top: 0px; }
 
   /* ログインが必要・承認待ち・エラーのときだけ出る案内。認証操作そのものは
      社員ポータル側の画面で行うため、ここはボタン1つの案内に留める。 */

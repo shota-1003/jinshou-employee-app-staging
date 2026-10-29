@@ -724,6 +724,37 @@
             }
         }
 
+        // 2026-10-29 現場から「色ごと(種別ごと)に自動でまとまって表示されてほしい。現場関係(仕事・常傭・
+        // 応援…)はひとかたまりに、事務や営業は上に固めてほしい」との要望。
+        // 上から ①事務・営業 → ②現場系(仕事・常傭・運搬・応援…) → ③それ以外(会議・休み等) → ④メモ。
+        // 同じ種別の中は、サーバーから来た順(=手で並べた↑↓の順)をそのまま保つ(sort は安定)。
+        // 取得した直後に1か所で並べ替えるので、月表示・週ストリップ・日別一覧が同じ順になる。
+        const FIELD_GROUPS = ['craft', 'haul', 'doba'];
+        function scheduleGroupRank(s) {
+            if (s.is_memo) return 3;
+            const c = (state.categories || []).find((x) => x.id === s.category_id) || {};
+            const name = String(s.category_name || c.name || '');
+            if (c.headcount_group === 'office' || c.headcount_group === 'sales'
+                || c.code === 'toko' || /事務|営業/.test(name)) return 0;
+            if (FIELD_GROUPS.includes(c.headcount_group)) return 1;
+            return 2;
+        }
+        function scheduleCategoryOrder(s) {
+            const c = (state.categories || []).find((x) => x.id === s.category_id);
+            return c && c.sort_order != null ? Number(c.sort_order) : 9999;
+        }
+        function orderSchedules(list) {
+            if (!Array.isArray(list) || list.length < 2) return list;
+            if (!(state.categories || []).length) return list;
+            const key = new Map(list.map((s) => [s, [scheduleGroupRank(s), scheduleCategoryOrder(s)]]));
+            list.sort((a, b) => {
+                if (a.date !== b.date) return a.date < b.date ? -1 : 1;
+                const ka = key.get(a); const kb = key.get(b);
+                return (ka[0] - kb[0]) || (ka[1] - kb[1]);
+            });
+            return list;
+        }
+
         async function loadMonth() {
             try {
                 state.month_data = await readRpc('assignment_get_month', {
@@ -733,6 +764,7 @@
                 // 月データを取得できた時点で認証済み社員であることが確定しているため編集可。
                 state.canEdit = true;
                 state.categories = state.month_data.categories || [];
+                orderSchedules(state.month_data.schedules);
                 state.monthLoaded = `${state.year}-${state.month}`;
                 // 月表示は月曜始まりの6週間ぶんを返す(前月末・翌月初を含む)。
                 mergeRange(state.month_data);
@@ -747,6 +779,7 @@
             const date = state.selected;
             try {
                 const dayData = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
+                orderSchedules(dayData && dayData.schedules);
                 let issues = null; let conf = null;
                 let extraFailed = false;
                 if (state.canEdit) {
@@ -1089,7 +1122,8 @@
             if (!force && state.days.has(date)) return state.days.get(date);
             try {
                 const day = await readRpc('assignment_get_day', { p_employee_code: me, p_date: date });
-                const rec = { day, issues: null, confirmation: null, full: !state.canEdit, at: Date.now() };
+                orderSchedules(day && day.schedules);
+                const rec ={ day, issues: null, confirmation: null, full: !state.canEdit, at: Date.now() };
                 state.days.set(date, rec);
                 state.offline = false;
                 return rec;
@@ -4534,10 +4568,17 @@
         // サーバー側は「その日の全idを順番に受け取る」設計なので、
         // 将来ドラッグ操作を足す場合もこの関数を差し替えるだけで済む。
         async function moveScheduleOrder(scheduleId, delta) {
-            const ids = (state.day_data.schedules || []).map((x) => x.id);
+            const list = state.day_data.schedules || [];
+            const ids = list.map((x) => x.id);
             const i = ids.indexOf(scheduleId);
             const j = i + delta;
             if (i < 0 || j < 0 || j >= ids.length) return;
+            // 表示は種別ごとにまとまるので、並べ替えられるのは同じ種別の中だけ。
+            // 隣が別の種別だと保存しても表示順が変わらず、押したのに動かないように見えてしまう。
+            if (list[i].category_id !== list[j].category_id) {
+                toast('同じ種別の中でだけ並べ替えられます');
+                return;
+            }
             ids[i] = ids[j]; ids[j] = scheduleId;
             try {
                 await rpc('assignment_set_schedule_order', {
