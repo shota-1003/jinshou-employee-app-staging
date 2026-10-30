@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v286-staging';
-const BUILD_DEPLOYED_AT = '2026-10-29T10:39:37.850Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v288-staging';
+const BUILD_DEPLOYED_AT = '2026-10-30T05:57:51.249Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -554,7 +554,7 @@ const ADMIN_SCREENS = new Set([
   'daily-report-admin', 'daily-report-management', 'daily-report-detail', 'daily-report-people', 'purpose-admin',
   'daily-report-needs-review-admin', 'daily-report-edit-requests-admin', 'attendance-fix-needed-admin', 'site-prime-missing-admin',
   'subcontractor-company-admin', 'subcontractor-worker-admin', 'personnel-ledger-hub',
-  'supply-holdings-admin', 'supply-request-admin', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
+  'supply-holdings-admin', 'supply-request-admin', 'supply-admin-hub', 'joyo-denpyo-summary', 'master-management-hub', 'employee-create',
   'first-login-codes-admin', 'pin-reset-admin', 'loan-admin', 'loan-ledger-admin', 'lucky-admin', 'lucky-preview',
   'vehicle-admin', 'expense-ledger-admin', 'entertainment-monthly-report',
 ]);
@@ -583,7 +583,7 @@ const PARENT_ROUTE = Object.freeze({
   'event-admin': 'admin-dashboard', 'license-admin': 'admin-dashboard', 'purpose-admin': 'admin-dashboard',
   'expense-ledger-admin': 'admin-dashboard', 'expense-payment-pending': 'admin-dashboard', 'fulfillment-pending': 'admin-dashboard',
   'entertainment-monthly-report': 'admin-dashboard',
-  'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
+  'supply-admin-hub': 'menu', 'supply-request-admin': 'admin-dashboard', 'loan-admin': 'admin-dashboard', 'loan-ledger-admin': 'admin-dashboard', 'lucky-admin': 'admin-dashboard',
   'lucky-preview': 'admin-dashboard', 'vehicle-admin': 'admin-dashboard', 'pin-reset-admin': 'admin-dashboard',
   'personnel-ledger-hub': 'admin-dashboard', 'daily-report-management': 'admin-dashboard', 'attendance-fix-needed-admin': 'admin-dashboard',
   'site-prime-missing-admin': 'admin-dashboard',
@@ -1994,6 +1994,21 @@ async function renderHomeAdminBanner(session) {
         <span style="text-align:left;">
           <span class="main-menu-label" style="display:block;">日報管理(日報担当)</span>
           <span class="main-menu-desc">日報の確認・未提出者確認・新規現場の承認・トラックマスター</span>
+        </span>
+        <span style="margin-left:auto; color:var(--text-faint);">${icon('chevron-right')}</span>
+      </button>
+    `;
+  }
+  // 2026-10-30: 支給品担当(supply_admin)には、支給品の保有一覧・申請の確認・品目マスターへ直接入れる入口を出す
+  // (管理者ダッシュボードの奥を探さなくてよいように)。権限そのものは各RPC側(is_supply_admin_or_executive)が判定する。
+  const supplyCaps = showAdmin ? await getMyAdminCapabilities() : { roleTypes: [] };
+  if (supplyCaps.roleTypes.includes('supply_admin')) {
+    html += `
+      <button type="button" class="main-menu-card" data-nav="supply-admin-hub" style="width:100%; flex-direction:row; align-items:center; gap:14px; margin-top:8px;">
+        <span class="main-menu-card-icon">${icon('package')}</span>
+        <span style="text-align:left;">
+          <span class="main-menu-label" style="display:block;">支給品管理(支給品担当)</span>
+          <span class="main-menu-desc">全員の保有一覧・保有の訂正・支給品申請の確認</span>
         </span>
         <span style="margin-left:auto; color:var(--text-faint);">${icon('chevron-right')}</span>
       </button>
@@ -6440,7 +6455,8 @@ function groupExpenseLedgerRows(rows) {
     if (r.item_approval_status === 'rejected') g.has_rejected = true;
     else if (r.item_approval_status === 'approved') g.has_approved = true;
     else g.has_pending = true;
-    if (r.has_receipt && !r.original_receipt_collected_at) g.original_uncollected_count += 1;
+    // 2026-10-30 Shota指示: 原本の未回収は、お金を払っている(支払い済み)ものだけ数える(ホーム・絞り込みと同じ基準)。
+    if (r.has_receipt && !r.original_receipt_collected_at && r.payment_status === 'paid') g.original_uncollected_count += 1;
     if (!g.scheduled_payment_date && r.scheduled_payment_date) g.scheduled_payment_date = r.scheduled_payment_date;
     if (!g.paid_at && r.paid_at) g.paid_at = r.paid_at;
     if (r.payment_status) g.payment_status = r.payment_status;
@@ -10712,13 +10728,111 @@ function openSupplyHoldingItemBreakdown(employeeCode, itemName) {
 async function renderSupplyHoldingHistoryInto(box, employeeCode, itemName, size) {
   const session = getSession();
   try {
-    const hist = await rpc('admin_get_supply_item_history', {
+    // 2026-10-30 Shota指示: 保有を表から直せるように(履歴を残す)。1件ずつの記録に「直す」を付け、
+    // 直した履歴(だれが・いつ・なぜ・前後)をその下に出す。記録は admin_update_supply_issuance が
+    // 変更前/変更後/理由/担当者を audit_logs へ残す。
+    const recs = await rpc('admin_get_supply_issuance_records', {
       p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode,
       p_item_name: itemName, p_size: size || null,
     });
-    box.innerHTML = hist.length === 0 ? '<div class="hint">履歴がありません。</div>' : hist.map((h) => `
-      <div class="row2">${formatSupplyHoldingsDate(h.issued_date)}・${SUPPLY_CORRECTION_SOURCE_LABEL[h.source_type] || h.source_type}・${h.quantity}個${h.returned_date ? `・返却日: ${formatSupplyHoldingsDate(h.returned_date)}` : ''}${h.note ? `・${h.note}` : ''}</div>
-    `).join('');
+    const dateLabel = (r) => (r.date_precision === 'approximate' ? `おおよそ: ${exdText(r.approximate_note)}`
+      : r.date_precision === 'unknown' ? '日付不明'
+        : r.date_precision === 'year_month' ? (r.issued_date ? `${new Date(r.issued_date).getFullYear()}年${new Date(r.issued_date).getMonth() + 1}月` : '-')
+          : formatSupplyHoldingsDate(r.issued_date));
+    box.innerHTML = (recs.length === 0 ? '<div class="hint">履歴がありません。</div>' : recs.map((r) => `
+      <div class="supply-record" data-id="${r.id}" style="border-top:1px solid var(--border,#ddd);padding:8px 0;">
+        <div class="row2">${exdEsc(dateLabel(r))}・${exdEsc(SUPPLY_CORRECTION_SOURCE_LABEL[r.source_type] || r.source_type)}・${r.quantity}個${r.returned_date ? `・返却日: ${exdEsc(formatSupplyHoldingsDate(r.returned_date))}` : ''}${r.note ? `・${exdEsc(r.note)}` : ''}</div>
+        <button type="button" class="sha-rec-edit-btn" style="width:auto;margin:4px 0 0;">この記録を直す</button>
+        <div class="sha-rec-edit-form" style="display:none;"></div>
+      </div>
+    `).join('')) + `
+      <button type="button" class="sha-changelog-btn" style="width:auto;margin:8px 0 0;">直した履歴を見る</button>
+      <div class="sha-changelog-box" style="display:none;"></div>`;
+
+    box.querySelectorAll('.sha-rec-edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const wrap = btn.closest('.supply-record');
+        const form = wrap.querySelector('.sha-rec-edit-form');
+        if (form.style.display !== 'none') { form.style.display = 'none'; return; }
+        const r = recs.find((x) => String(x.id) === wrap.dataset.id);
+        const ymd = r.issued_date ? String(r.issued_date).slice(0, 10) : '';
+        form.style.display = 'block';
+        form.innerHTML = `
+          <label>数量</label><input type="number" class="sha-f-qty" min="1" value="${r.quantity}">
+          <label>サイズ(無ければ空)</label><input type="text" class="sha-f-size" value="${exdEsc(r.size || '')}">
+          <label>支給日の分かり方</label>
+          <select class="sha-f-prec">
+            <option value="exact">日付が分かる</option>
+            <option value="year_month">年月だけ分かる</option>
+            <option value="approximate">おおよその時期</option>
+            <option value="unknown">不明</option>
+          </select>
+          <div class="sha-f-date-wrap"><label>支給日</label><input type="date" class="sha-f-date" value="${ymd}"></div>
+          <div class="sha-f-approx-wrap" style="display:none;"><label>おおよその時期(例: 3年くらい前)</label><input type="text" class="sha-f-approx" value="${exdEsc(r.approximate_note || '')}"></div>
+          <label>備考</label><input type="text" class="sha-f-note" value="${exdEsc(r.note || '')}">
+          <label>直す理由<span class="required-mark">(必須)</span></label><input type="text" class="sha-f-reason" placeholder="例: 入力ミスのため">
+          <div class="error sha-f-error"></div>
+          <button type="button" class="sha-f-save" style="width:auto;margin:6px 0 0;">この内容に直す</button>`;
+        const prec = form.querySelector('.sha-f-prec');
+        prec.value = r.date_precision;
+        const syncPrec = () => {
+          const v = prec.value;
+          form.querySelector('.sha-f-date-wrap').style.display = (v === 'exact' || v === 'year_month') ? '' : 'none';
+          form.querySelector('.sha-f-approx-wrap').style.display = v === 'approximate' ? '' : 'none';
+        };
+        prec.addEventListener('change', syncPrec); syncPrec();
+        form.querySelector('.sha-f-save').addEventListener('click', async () => {
+          const errEl = form.querySelector('.sha-f-error');
+          errEl.textContent = '';
+          const qty = Number(form.querySelector('.sha-f-qty').value);
+          const reason = form.querySelector('.sha-f-reason').value.trim();
+          const precision = prec.value;
+          const dateVal = form.querySelector('.sha-f-date').value;
+          if (!qty || qty < 1) { errEl.textContent = '数量は1以上で入力してください。'; return; }
+          if (!reason) { errEl.textContent = '直す理由を入力してください。'; return; }
+          if ((precision === 'exact' || precision === 'year_month') && !dateVal) { errEl.textContent = '支給日を入力してください。'; return; }
+          if (!window.confirm(`数量${qty}個に直します(記録は履歴に残ります)。よろしいですか?`)) return;
+          try {
+            await rpc('admin_update_supply_issuance', {
+              p_admin_employee_code: session.employeeCode, p_issuance_id: Number(r.id),
+              p_item_name: itemName, p_size: form.querySelector('.sha-f-size').value.trim(), p_quantity: qty,
+              p_date_precision: precision, p_issued_date: (precision === 'exact' || precision === 'year_month') ? dateVal : null,
+              p_approximate_note: precision === 'approximate' ? form.querySelector('.sha-f-approx').value.trim() : null,
+              p_note: form.querySelector('.sha-f-note').value.trim(), p_reason: reason,
+            });
+            // 表の数字も直した値にする(サイズを変えた場合は内訳の並びも変わるため、表ごと取り直す)。
+            supplyHoldingsMatrixCache = await rpc('admin_get_supply_holdings_matrix', { p_admin_employee_code: session.employeeCode });
+            renderSupplyHoldingsMatrix(supplyHoldingsMatrixCache, document.getElementById('sha-matrix-wrap'), document.getElementById('sha-count'));
+            openSupplyHoldingItemBreakdown(employeeCode, itemName);
+            const reopen = document.querySelector('#sha-history-panel .sha-breakdown-history-btn');
+            if (reopen) reopen.click();
+          } catch (e) {
+            errEl.textContent = e.message || '直せませんでした。';
+          }
+        });
+      });
+    });
+
+    box.querySelector('.sha-changelog-btn').addEventListener('click', async (ev) => {
+      const logBox = box.querySelector('.sha-changelog-box');
+      if (logBox.style.display !== 'none') { logBox.style.display = 'none'; return; }
+      logBox.style.display = 'block';
+      logBox.innerHTML = '<div class="hint">読み込み中...</div>';
+      try {
+        const logs = await rpc('admin_get_supply_change_log', {
+          p_admin_employee_code: session.employeeCode, p_target_employee_code: employeeCode, p_item_name: itemName,
+        });
+        const sum = (s) => (s ? `${s.quantity}個${s.size ? `・サイズ${exdEsc(s.size)}` : ''}${s.note ? `・${exdEsc(s.note)}` : ''}` : '(記録なし)');
+        logBox.innerHTML = logs.length === 0 ? '<div class="hint">直した履歴はまだありません。</div>' : logs.map((l) => `
+          <div class="row2" style="padding:6px 0;border-top:1px solid var(--border,#ddd);">
+            ${exdEsc(new Date(l.logged_at).toLocaleString('ja-JP'))}・${exdEsc(l.actor_name)}<br>
+            ${l.action === 'supply_correction_recorded' ? '記録を追加' : `変更前: ${sum(l.before_state)} → 変更後: ${sum(l.after_state)}`}<br>
+            理由: ${exdText(l.reason)}
+          </div>`).join('');
+      } catch (e) {
+        logBox.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
+      }
+    });
   } catch (e) {
     box.innerHTML = '<div class="hint">読み込みに失敗しました。</div>';
   }
@@ -15393,6 +15507,87 @@ document.addEventListener('click', (e) => {
   if (b) printAttendanceBook(b);
 });
 
+// 出勤簿の一括印刷・一括CSV(2026-10-30 Shota指示「旅費表も出勤簿も一括で印刷・抜き出せるように」)。
+// 出面集計で選んだ月の給与期間(前月26日〜当月25日)について、在籍中の全員の出勤簿を、既存の
+// admin_get_employee_attendance_book と attendanceBookHtml をそのまま使って取得・描画する(集計の数え方は変えない)。
+function amBookPeriod() {
+  const ym = currentAttendanceMonth();
+  if (!ym) return null;
+  const prev = ym.month === 1 ? { year: ym.year - 1, month: 12 } : { year: ym.year, month: ym.month - 1 };
+  const p2 = (n) => String(n).padStart(2, '0');
+  return { ym, start: `${prev.year}-${p2(prev.month)}-26`, end: `${ym.year}-${p2(ym.month)}-25` };
+}
+async function loadAllAttendanceBooks(statusEl) {
+  const session = getSession();
+  const per = amBookPeriod();
+  if (!per) throw new Error('対象月を選んでください');
+  const emps = await rpc('list_active_employees', { p_admin_employee_code: session.employeeCode });
+  const out = [];
+  for (let i = 0; i < emps.length; i += 4) {
+    statusEl.textContent = `読み込み中… ${Math.min(i + 4, emps.length)}/${emps.length}人`;
+    const part = await Promise.all(emps.slice(i, i + 4).map(async (e) => {
+      const rows = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: e.employee_code, p_period_start: per.start, p_period_end: per.end });
+      return { emp: e, rows: rows || [] };
+    }));
+    out.push(...part);
+  }
+  // 出勤も有給も無い人(全日が空)は、白紙のページを出さないため除く。
+  return { per, books: out.filter((b) => b.rows.some((r) => (Number(r.headcount) > 0 && r.site_names) || r.is_paid_leave)) };
+}
+async function printAllAttendanceBooks() {
+  const btn = document.getElementById('am-book-print-all'); const st = document.getElementById('am-book-bulk-status');
+  btn.disabled = true;
+  try {
+    const { per, books } = await loadAllAttendanceBooks(st);
+    if (!books.length) { st.textContent = 'この期間に出勤の記録がある人がいません'; return; }
+    const root = document.createElement('div');
+    root.id = 'ab-print-root';
+    root.innerHTML = books.map((b) => `<div class="ab-bulk-page">${attendanceBookHtml(b.rows, null, { title: `${per.ym.year}年${per.ym.month}月度`, name: b.emp.employee_name, periodLabel: `${per.start}〜${per.end}` })}</div>`).join('');
+    root.querySelectorAll('.ab-print-btn').forEach((b) => b.remove());
+    document.body.appendChild(root);
+    document.body.classList.add('printing-ab');
+    const done = () => { document.body.classList.remove('printing-ab'); root.remove(); window.removeEventListener('afterprint', done); };
+    window.addEventListener('afterprint', done);
+    st.textContent = `${books.length}人分を印刷します`;
+    window.print();
+  } catch (e) { st.textContent = '読み込めませんでした。もう一度試してください'; } finally { btn.disabled = false; }
+}
+async function downloadAllAttendanceBooksCsv() {
+  const btn = document.getElementById('am-book-csv-all'); const st = document.getElementById('am-book-bulk-status');
+  btn.disabled = true;
+  try {
+    const { per, books } = await loadAllAttendanceBooks(st);
+    if (!books.length) { st.textContent = 'この期間に出勤の記録がある人がいません'; return; }
+    const esc = (v) => {
+      let s = v == null ? '' : String(v);
+      if (typeof v === 'string' && /^[=+@-]/.test(s)) s = `'${s}`;
+      return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const mark = (b) => (b ? '〇' : '');
+    const header = ['社員番号', '氏名', '期間', '日付', '曜日', '現場', '人工', '残業', '通勤早出', '通勤残業', '100㎞', '出張先', '出張日数', '深夜', '日曜', '有給'];
+    const lines = [header.map(esc).join(',')];
+    for (const b of books) {
+      for (const r of b.rows) {
+        lines.push([b.emp.employee_code, b.emp.employee_name, `${per.start}〜${per.end}`, r.work_date, r.weekday_jp, r.site_names || '', r.headcount,
+          r.overtime_hours, r.early_commute_hours, r.commute_overtime_hours, mark(r.is_over_100km), r.is_trip_by_site ? (r.trip_prefectures || '') : '',
+          mark(r.is_trip_by_site), mark(r.is_night), mark(r.is_sunday_work), mark(r.is_paid_leave)].map(esc).join(','));
+      }
+    }
+    const blob = new Blob([`﻿${lines.join('\r\n')}\r\n`], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `出勤簿_${per.ym.year}-${String(per.ym.month).padStart(2, '0')}月度.csv`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    st.textContent = `${books.length}人分をCSVにしました`;
+  } catch (e) { st.textContent = 'CSVを作れませんでした。もう一度試してください'; } finally { btn.disabled = false; }
+}
+document.addEventListener('click', (e) => {
+  const t = e.target && e.target.closest ? e.target.closest('#am-book-print-all, #am-book-csv-all') : null;
+  if (!t) return;
+  if (t.id === 'am-book-print-all') printAllAttendanceBooks(); else downloadAllAttendanceBooksCsv();
+});
+
 // 出勤簿(2026-09-29 Shota指示「スプレッドシートの出勤簿のように反映させたい」→ 2026-10-02に
 // スプレッドシートと同じ見た目のプレビューへ作り直し)。
 async function loadDailyReportLedger() {
@@ -15556,10 +15751,14 @@ async function loadDailyReportCalendar() {
   grid.innerHTML = '<div class="hint">読み込み中...</div>';
   document.getElementById('dr-cal-day-detail').innerHTML = '';
   try {
-    const [rows, eventRows] = await Promise.all([
+    const [rows, eventRows, outRows] = await Promise.all([
       rpc('get_my_home_calendar_month', { p_employee_code: session.employeeCode, p_year: dailyReportCalYear, p_month: dailyReportCalMonth }),
       rpc('get_my_calendar_events', { p_employee_code: session.employeeCode, p_year: dailyReportCalYear, p_month: dailyReportCalMonth }),
+      // 県外の印(旅費の対象)。この関数が無い・失敗しても、予定の表示は止めない。
+      rpc('get_my_calendar_event_out', { p_employee_code: session.employeeCode, p_year: dailyReportCalYear, p_month: dailyReportCalMonth }).catch(() => []),
     ]);
+    const outById = new Map((outRows || []).map((o) => [String(o.id), o]));
+    (eventRows || []).forEach((ev) => { const o = outById.get(String(ev.id)); if (o) { ev.is_out_of_prefecture = true; ev.out_prefecture = o.out_prefecture; } });
     const byDate = new Map((rows || []).map((r) => [r.calendar_date, r]));
     dailyReportCalDayInfoByDate = byDate;
     dailyReportCalEventsByDate = new Map();
@@ -15748,6 +15947,14 @@ function openPersonalEventForm(eventId, dateStr) {
       <label>備考(任意)</label>
       <input type="text" id="pev-note" value="${existing && existing.note ? existing.note.replace(/"/g, '&quot;') : ''}">
       <div class="checkbox-row">
+        <input type="checkbox" id="pev-out" ${existing && existing.is_out_of_prefecture ? 'checked' : ''}>
+        <label for="pev-out">県外(この日を旅費の対象にする。現場の登録は要りません)</label>
+      </div>
+      <div id="pev-out-pref-wrap" style="${existing && existing.is_out_of_prefecture ? '' : 'display:none;'}">
+        <label>県外の都道府県</label>
+        <select id="pev-out-pref">${JAPAN_PREFECTURES.filter((pf) => pf !== '徳島県').map((pf) => `<option value="${pf}" ${existing && existing.out_prefecture === pf ? 'selected' : ''}>${pf}</option>`).join('')}</select>
+      </div>
+      <div class="checkbox-row">
         <input type="checkbox" id="pev-notify" ${existing && existing.notify_enabled ? 'checked' : ''}>
         <label>通知する(将来の通知機能に対応予定)</label>
       </div>
@@ -15757,6 +15964,7 @@ function openPersonalEventForm(eventId, dateStr) {
       <button type="button" class="link" id="pev-cancel">キャンセル</button>
     </div>
   `;
+  document.getElementById('pev-out').addEventListener('change', (ev) => { document.getElementById('pev-out-pref-wrap').style.display = ev.target.checked ? '' : 'none'; });
   document.getElementById('pev-save').addEventListener('click', () => savePersonalEvent(dateStr));
   document.getElementById('pev-cancel').addEventListener('click', () => onDailyReportCalDayClick(dateStr, null));
   const delBtn = document.getElementById('pev-delete');
@@ -15778,16 +15986,24 @@ async function savePersonalEvent(originalDateStr) {
       document.getElementById('pev-location').value.trim() || null, document.getElementById('pev-counterpart').value.trim() || null,
       document.getElementById('pev-note').value.trim() || null, document.getElementById('pev-notify').checked,
     ];
+    let savedEventId = personalEventEditingId;
     if (personalEventEditingId) {
       await rpc('update_my_calendar_event', {
         p_employee_code: params[0], p_event_id: personalEventEditingId, p_event_date: params[1], p_title: params[2],
         p_start_time: params[3], p_end_time: params[4], p_location: params[5], p_counterpart: params[6], p_note: params[7], p_notify_enabled: params[8],
       });
     } else {
-      await rpc('add_my_calendar_event', {
+      const added = await rpc('add_my_calendar_event', {
         p_employee_code: params[0], p_event_date: params[1], p_title: params[2],
         p_start_time: params[3], p_end_time: params[4], p_location: params[5], p_counterpart: params[6], p_note: params[7], p_notify_enabled: params[8],
       });
+      savedEventId = Array.isArray(added) ? added[0] : added;
+    }
+    // 県外の印(旅費の対象)。付けた日は旅費に、外した日は旅費から外れる(次の旅費の計算で反映)。
+    const outChecked = document.getElementById('pev-out').checked;
+    const hadOut = !!(personalEventEditingId && (dailyReportCalEventsByDate.get(originalDateStr) || []).find((e) => e.id === personalEventEditingId && e.is_out_of_prefecture));
+    if (savedEventId && (outChecked || hadOut)) {
+      await rpc('set_my_calendar_event_out', { p_employee_code: params[0], p_event_id: savedEventId, p_is_out: outChecked, p_prefecture: outChecked ? document.getElementById('pev-out-pref').value : null });
     }
     await loadDailyReportCalendar();
     renderHomeUpcomingEvents(session);
@@ -17137,7 +17353,7 @@ function renderAdminRoleCandidates(query) {
 const ADMIN_ROLE_LABEL = {
   general_admin: '全体管理者', nippo_admin: '日報担当', accounting_admin: '経理承認担当',
   hr_admin: '社員管理担当', subcontractor_admin: '外注管理担当', site_admin: '現場管理担当', device_admin: '端末承認担当',
-  expense_approval_exempt: '経費承認免除', loan_admin: '貸付管理担当',
+  expense_approval_exempt: '経費承認免除', loan_admin: '貸付管理担当', supply_admin: '支給品担当',
 };
 
 async function doGrantAdminRole(employeeCode, employeeName) {
@@ -20299,6 +20515,9 @@ function init() {
   SCREEN_ENTER_HOOKS['info-change-admin'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
     loadInfoChangeAdmin();
+  };
+  SCREEN_ENTER_HOOKS['supply-admin-hub'] = async () => {
+    if (!(await isAnyAdmin())) { enterMenu(); return; }
   };
   SCREEN_ENTER_HOOKS['supply-master-admin'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }

@@ -467,6 +467,7 @@ function setupVoice() {
   if (!('speechSynthesis' in window)) $('#voice-reply-wrap').hidden = true;
   else speechSynthesis.getVoices();   // Chrome は最初に呼ぶと声の一覧を読み込み始める
   $('#btn-stop-speak').addEventListener('click', () => { stopSpeaking(); setVoiceStatus(''); });
+  $('#btn-voice-check').addEventListener('click', () => { voiceCheck().catch((e) => setVoiceStatus(`音声の確認を続けられませんでした: ${e.message}`)); });
   if (!SR) {
     btn.disabled = true;
     btn.title = 'このブラウザは音声入力に対応していません';
@@ -474,6 +475,44 @@ function setupVoice() {
     return;
   }
   btn.addEventListener('click', () => { if (voice.listening && voice.sr) voice.sr.stop(); else startListening(SR); });
+}
+
+// 共有PCのスピーカーとマイクの確認(人が聞いて・話す)。結果は会話として送るので、AI操作の記録に端末つきで残る
+// (開発の担当は、この記録で実機の確認ができたかを確かめる。自動の確認では、本物のマイク・スピーカーは確かめられない)
+async function voiceCheck() {
+  stopSpeaking();
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const v = jaVoice();
+  const r = { tts: 'speechSynthesis' in window, voice: v ? v.name : null, mic: !!SR, heard: false, micText: '', micError: null };
+  if (r.tts) {
+    setVoiceStatus('音声の確認 1/3: これから読み上げます。スピーカーの音を聞いてください。', true);
+    await new Promise((res) => {
+      const u = new SpeechSynthesisUtterance('音声の確認です。この声が聞こえたら、次の画面で、オーケーを押してください。');
+      u.lang = 'ja-JP'; if (v) u.voice = v; u.onend = res; u.onerror = res;
+      speechSynthesis.speak(u); setTimeout(res, 15000);
+    });
+    r.heard = window.confirm('音声の確認 2/3: 読み上げの声が聞こえましたか？\n聞こえたら「OK」、聞こえなかったら「キャンセル」を押してください。');
+  }
+  if (SR) {
+    window.alert('音声の確認 3/3: 「OK」を押したあと、マイクに向かって「音声の確認です」と話してください。\n(マイクの使用の許可を聞かれたら「許可」を押してください)');
+    const got = await new Promise((res) => {
+      const rec = new SR(); let t = ''; let err = null;
+      rec.lang = 'ja-JP'; rec.interimResults = false; rec.maxAlternatives = 1;
+      rec.onresult = (e) => { for (let i = e.resultIndex; i < e.results.length; i += 1) if (e.results[i].isFinal) t += e.results[i][0].transcript; };
+      rec.onerror = (e) => { err = e.error; };
+      rec.onend = () => res({ t, err });
+      try { rec.start(); setVoiceStatus('どうぞ「音声の確認です」と話してください。', true); } catch { res({ t: '', err: 'start-failed' }); }
+    });
+    r.micText = got.t.trim(); r.micError = got.err;
+  }
+  const ua = (navigator.userAgent.match(/(Edg|Chrome|Firefox|Version)\/[\d.]+/) || [''])[0].replace('Edg/', 'Edge/').replace('Version/', 'Safari/');
+  const micJa = !r.mic ? 'このブラウザは音声入力に対応していない'
+    : r.micText ? `「${r.micText.slice(0, 40)}」と聞き取れた` : `聞き取れなかった(${VOICE_ERR_JA[r.micError] ? VOICE_ERR_JA[r.micError].split('。')[0] : '声が届かなかった'})`;
+  $('#chat-input').value = `【音声の確認】読み上げ: ${!r.tts ? 'このブラウザは読み上げに対応していない' : r.heard ? '聞こえた' : '聞こえなかった'}(声: ${r.voice || '日本語の声なし'}) / マイク: ${micJa} / ブラウザ: ${ua}`;
+  voice.speakNext = $('#voice-reply').checked;
+  await sendChat(null);
+  setVoiceStatus(r.heard && r.micText ? '音声の確認ができました(読み上げ・マイクとも使えます)。結果は記録しました。'
+    : 'うまくいかなかった点がありました。結果は記録しました。システム管理者に知らせてください。', r.heard && !!r.micText);
 }
 
 // ---------------- 権限・アプリ追加(システム管理者・社長) ----------------

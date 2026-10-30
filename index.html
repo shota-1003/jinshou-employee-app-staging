@@ -1024,7 +1024,7 @@
     <div class="section-title">現在の日報担当</div>
     <div id="arm-nippo-list"></div>
 
-    <div class="section-title">その他の専門権限(経理承認・社員管理・外注管理・現場管理・端末承認)</div>
+    <div class="section-title">その他の専門権限(経理承認・社員管理・外注管理・現場管理・端末承認・支給品)</div>
     <div id="arm-other-list"></div>
 
     <div class="card">
@@ -1039,6 +1039,7 @@
         <option value="subcontractor_admin">外注管理担当(subcontractor_admin、外注会社・作業員の管理)</option>
         <option value="site_admin">現場管理担当(site_admin、現場の承認)</option>
         <option value="device_admin">端末承認担当(device_admin)</option>
+        <option value="supply_admin">支給品担当(supply_admin、支給品の保有一覧・訂正・申請の承認)</option>
         <!-- 【撤去 2026-09-06】expense_approval_exempt(本人の経費申請の自動承認)は新規付与できない。
              自動承認トリガは DROP 済み。既に付与されている行の表示だけは残す。 -->
       </select>
@@ -2445,6 +2446,11 @@
         <div class="menu-item-body">社員一覧<span class="desc">在籍状況・資格・支給品・申請履歴をまとめて確認</span></div>
         <span class="icon-slot arrow" data-icon="chevron-right"></span>
       </button>
+      <button type="button" class="menu-item" data-nav="pin-reset-admin">
+        <span class="icon-slot" data-icon="lock"></span>
+        <div class="menu-item-body">暗証番号のリセット<span class="desc">暗証番号を忘れた社員を、本人確認のうえリセットして初回登録コードを発行</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
       <button type="button" class="menu-item" data-nav="subcontractor-company-admin">
         <span class="icon-slot" data-icon="users-round"></span>
         <div class="menu-item-body">外注会社一覧<span class="desc">外注会社・所属作業員の追加・停止</span></div>
@@ -2614,7 +2620,7 @@
       <button type="button" class="filter-chip" data-status="rejected">却下</button>
       <button type="button" class="filter-chip" data-status="unpaid">立替未精算</button>
       <button type="button" class="filter-chip" data-status="paid">支払済み</button>
-      <button type="button" class="filter-chip" data-status="original_uncollected">原本未回収</button>
+      <button type="button" class="filter-chip" data-status="original_uncollected">原本未回収(支払い済み)</button>
     </div>
     <div class="hint" id="ela-count" style="margin:10px 0;"></div>
     <button type="button" class="secondary" id="ela-export-csv">税理士向けCSVを書き出す</button>
@@ -2780,6 +2786,30 @@
   </section>
 
   <!-- 支給品マスター管理(管理者) -->
+  <!-- 支給品管理(支給品担当のまとめ画面): 保有一覧・申請の確認・品目マスターへの入口 -->
+  <section id="screen-supply-admin-hub" class="screen">
+    <button type="button" class="back-link" data-nav="menu">ホームに戻る</button>
+    <div class="form-title">支給品管理</div>
+    <div class="hint" style="margin-bottom:12px;">全員の支給品の保有を確認し、記録を直し、支給品の申請を承認します。直した内容は履歴に残ります。</div>
+    <div class="menu-list" style="margin-bottom:20px;">
+      <button type="button" class="menu-item" data-nav="supply-holdings-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品保有一覧<span class="desc">誰が何をいくつ持っているか(表)。数字をタップして記録を直す・直した履歴を見る</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="supply-request-admin">
+        <span class="icon-slot" data-icon="package"></span>
+        <div class="menu-item-body">支給品申請の確認<span class="desc">品目ごとに承認/却下、受渡の記録</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+      <button type="button" class="menu-item" data-nav="supply-master-admin">
+        <span class="icon-slot" data-icon="filter"></span>
+        <div class="menu-item-body">支給品マスター管理<span class="desc">選択肢の追加・編集・停止</span></div>
+        <span class="icon-slot arrow" data-icon="chevron-right"></span>
+      </button>
+    </div>
+  </section>
+
   <!-- 支給品保有一覧(横断): 「今、誰が、何を、いくつ持っているか」を全社員分まとめて確認する -->
   <section id="screen-supply-holdings-admin" class="screen">
     <button type="button" class="back-link" data-nav="personnel-ledger-hub">人員・台帳管理に戻る</button>
@@ -3509,6 +3539,11 @@
       </div>
       <button type="button" class="month-nav-today" id="am-month-today">今月</button>
       <input type="month" id="am-month" style="display:none;">
+    </div>
+    <div class="filter-row" id="am-book-bulk" style="margin:8px 0;">
+      <button type="button" class="secondary" id="am-book-print-all">この給与期間の全員の出勤簿をまとめて印刷</button>
+      <button type="button" class="secondary" id="am-book-csv-all">全員の出勤簿をCSVで抜き出す</button>
+      <span class="hint-inline" id="am-book-bulk-status"></span>
     </div>
     <label for="am-year" style="display:none;">対象年</label>
     <input type="number" id="am-year" style="display:none;" min="2020" max="2100">
