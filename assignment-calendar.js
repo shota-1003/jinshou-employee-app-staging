@@ -3679,6 +3679,8 @@
                 site_id: existing ? existing.site_id : null,
                 site_name: existing ? (existing.site_name || existing.label) : null,
                 title: existing && !existing.site_id ? existing.title : '',
+                // 現場がない予定(ゴルフ・打合せなど)の県外と都道府県(旅費に反映する、2026-10-30)
+                out_flag: false, out_pref: '', out_had: false,
                 category_id: existing ? existing.category_id
                     : (state.categories.find((c) => c.code === 'work') || state.categories[0] || {}).id,
                 start_time: existing ? (existing.start_time || '') : '',
@@ -3740,6 +3742,7 @@
                             // 翌日の配置は「現場を変えて同じ操作を繰り返す」ため、これが最短経路になる。
                             draft.schedule_id = null; draft.site_id = null; draft.site_name = null;
                             draft.title = ''; draft.members = []; draft.subs = [];
+                            draft.out_flag = false; draft.out_pref = ''; draft.out_had = false; draft.out_loaded = false;
                             draft.meeting_time = ''; draft.note = '';
                             api.setTitle(`${labelDate(draft.date)} の配置を登録（${savedCount}件登録済み）`);
                             api.scroll.innerHTML = '';
@@ -3755,6 +3758,14 @@
         }
 
         function buildEntryForm(box, draft, sites) {
+            // 登録済みの予定を開いたとき、県外の印を取り直して入力欄に反映する(取れなければ空のまま)
+            if (draft.schedule_id && !draft.out_loaded) {
+                draft.out_loaded = true;
+                rpc('assignment_get_out_info', { p_employee_code: me, p_schedule_id: draft.schedule_id }).then((r) => {
+                    const o = Array.isArray(r) ? r[0] : r;
+                    if (o && o.is_out_of_prefecture) { draft.out_flag = true; draft.out_had = true; draft.out_pref = o.out_prefecture || ''; syncOut(); }
+                }).catch(() => {});
+            }
             // 1) 現場(検索して選ぶ。フリーテキスト入力はしない)
             const siteField = el('div', 'ac-field');
             siteField.append(el('div', 'ac-label', '現場（現場マスターから選ぶ）'));
@@ -3765,6 +3776,7 @@
 
             function renderSitePick() {
                 picked.innerHTML = '';
+                if (typeof syncOut === 'function') syncOut();
                 if (draft.site_id) {
                     picked.append(el('span', null, draft.site_name));
                     const clear = el('button', 'ac-btn ac-sm', '変更');
@@ -3803,6 +3815,40 @@
             titleInput.placeholder = '現場を選んだ場合は空のままで構いません';
             titleInput.addEventListener('input', () => { draft.title = titleInput.value; });
             titleField.append(titleInput);
+
+            // 現場がない予定の県外(ゴルフ・打合せ・出張など)。チェックして都道府県を選ぶと旅費の対象になる。前のりは予定名の先頭に付ける。
+            const outField = el('div', 'ac-field');
+            const outRow = el('label', 'ac-checkrow');
+            const outChk = el('input'); outChk.type = 'checkbox'; outChk.checked = !!draft.out_flag;
+            outRow.append(outChk, el('span', null, ' 県外（旅費の対象にする）'));
+            outField.append(el('div', 'ac-sub2', '出勤扱いにならない種別（ゴルフ・打ち合わせ・出張など）で、現場を選ばずに登録すると、旅費だけになります。仕事・常傭などの種別は出勤扱いのため、旅費にはなりません（旅費は日報で数えます）。'));
+            const outPrefWrap = el('div', 'ac-field');
+            outPrefWrap.append(el('div', 'ac-label', '県外の都道府県'));
+            const outPref = el('select', 'ac-input');
+            const prefs = ['北海道','青森県','岩手県','宮城県','秋田県','山形県','福島県','茨城県','栃木県','群馬県','埼玉県','千葉県','東京都','神奈川県','新潟県','富山県','石川県','福井県','山梨県','長野県','岐阜県','静岡県','愛知県','三重県','滋賀県','京都府','大阪府','兵庫県','奈良県','和歌山県','鳥取県','島根県','岡山県','広島県','山口県','香川県','愛媛県','高知県','福岡県','佐賀県','長崎県','熊本県','大分県','宮崎県','鹿児島県','沖縄県'];
+            outPref.append(...prefs.map((n) => { const o = el('option', null, n); o.value = n; return o; }));
+            outPref.value = draft.out_pref || '大阪府';
+            const prior = el('label', 'ac-checkrow');
+            const priorChk = el('input'); priorChk.type = 'checkbox'; priorChk.checked = /^前のり/.test(draft.title || '');
+            prior.append(priorChk, el('span', null, ' 前のり（予定の名前の先頭に「前のり」を付けます）'));
+            outPrefWrap.append(outPref, prior);
+            outField.append(outRow, outPrefWrap);
+            function syncOut() {
+                outField.style.display = draft.site_id ? 'none' : '';
+                outChk.checked = !!draft.out_flag;
+                if (draft.out_pref) outPref.value = draft.out_pref;
+                outPrefWrap.style.display = outChk.checked ? '' : 'none';
+            }
+            outChk.addEventListener('change', () => { draft.out_flag = outChk.checked; if (outChk.checked) draft.out_pref = outPref.value; syncOut(); });
+            outPref.addEventListener('change', () => { draft.out_pref = outPref.value; });
+            priorChk.addEventListener('change', () => {
+                const bare = (draft.title || '').replace(/^前のり[\s　]*/, '');
+                draft.title = priorChk.checked ? ('前のり ' + bare).trim() : bare;
+                titleInput.value = draft.title;
+            });
+            titleInput.addEventListener('input', () => { priorChk.checked = /^前のり/.test(draft.title || ''); });
+            if (draft.out_flag && !draft.out_pref) draft.out_pref = outPref.value;
+            syncOut();
 
             // 2) 種別
             const catField = el('div', 'ac-field');
@@ -4489,7 +4535,7 @@
             // 並び順は実際の操作順に合わせる。管理者が毎回触るのは「現場」と「社員」の2つで、
             // 種別は既定の「仕事」のままがほとんどのため、色選択を先頭に置くと
             // 社員の選択が画面の下へ押し出されてスクロールが1回増える。
-            box.append(siteField, memField, subField, catField, titleField, timeField, noteField, impField,
+            box.append(siteField, memField, subField, catField, titleField, outField, timeField, noteField, impField,
                        detailField, haulField);
             renderSitePick();
         }
@@ -4519,7 +4565,7 @@
         }
         async function saveDraftNow(draft) {
             try {
-                await rpc('assignment_save_schedule', {
+                const saved = await rpc('assignment_save_schedule', {
                     p_employee_code: me,
                     p_schedule_id: draft.schedule_id,
                     // シートを開いた時点の日付で保存する。裏で画面が動いて state.selected が
@@ -4553,6 +4599,13 @@
                     }))),
                     p_status: 'draft',
                 });
+                // 県外の印(旅費)。現場がない予定だけ。失敗しても配置の登録は済んでいるので、知らせるだけにする。
+                try {
+                    const sid = saved && (Array.isArray(saved) ? saved[0] : saved).schedule_id;
+                    if (sid && !draft.site_id && (draft.out_flag || draft.out_had)) {
+                        await rpc('assignment_set_out_info', { p_employee_code: me, p_schedule_id: sid, p_is_out: !!draft.out_flag, p_prefecture: draft.out_flag ? (draft.out_pref || '大阪府') : null });
+                    }
+                } catch (eOut) { toast('配置は登録しました。県外の印(旅費)は保存できませんでした: ' + (eOut.message || '')); }
                 toast('登録しました');
                 const savedDate = draft.date || state.selected;
                 await Promise.all([
@@ -4560,6 +4613,7 @@
                     ...(savedDate !== state.selected ? [loadDayData(savedDate, true)] : []),
                 ]);
                 render();
+                refreshMonthGrid(); renderWeekStrip();   // 別の日へ登録した分も、月グリッド・週ストリップに出す
                 return true;
             } catch (e) { fail(e); return false; }
         }
@@ -4738,6 +4792,7 @@
                             : 'コピーできる配置がありませんでした');
                         await Promise.all([loadMonth(), loadDay()]);
                         render();
+                        refreshMonthGrid(); renderWeekStrip();
                     } catch (e) { fail(e); }
                 }
                 copySelected.addEventListener('click', () => {
@@ -4808,6 +4863,8 @@
                 else toast(`${labelDate(toDate)} には既に同じ現場があります`);
                 await loadMonth();
                 render();
+                // コピー先(別の日)の月グリッドと週ストリップも描き直す(2026-10-30: 翌日へコピーしても、コピー先の日に出なかった)
+                refreshMonthGrid(); renderWeekStrip();
             } catch (e) { fail(e); }
         }
 

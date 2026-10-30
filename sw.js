@@ -17,7 +17,7 @@
 // キャッシュまで消してしまい、両者が起動のたびに互いのキャッシュを潰し合う。
 // 自分の接頭辞の古い版だけを消すようにする。
 const CACHE_PREFIX = 'jinshou-employee-app';
-const CACHE_NAME = 'jinshou-employee-app-v290-staging';
+const CACHE_NAME = 'jinshou-employee-app-v295-staging';
 const SHELL_FILES = [
   './ky-daily-report-handoff.js', './portal-handoff-adapters.js',
   './', './index.html', './style.css', './app.js', './qr.js', './icons.js', './manifest.json',

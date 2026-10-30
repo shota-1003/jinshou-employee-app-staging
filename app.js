@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v290-staging';
-const BUILD_DEPLOYED_AT = '2026-10-30T06:10:28.553Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v295-staging';
+const BUILD_DEPLOYED_AT = '2026-10-30T18:22:34.967Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -8615,9 +8615,10 @@ async function loadEmployeeDirectory() {
 }
 
 function resetEmployeeCreateForm() {
-  ['ec-code', 'ec-name', 'ec-furigana', 'ec-department', 'ec-hire-date', 'ec-phone', 'ec-address',
+  ['ec-code', 'ec-name', 'ec-furigana', 'ec-hire-date', 'ec-phone', 'ec-address',
     'ec-emergency-name', 'ec-emergency-relation', 'ec-emergency-phone'].forEach((id) => { document.getElementById(id).value = ''; });
   document.getElementById('ec-gender').value = '';
+  document.getElementById('ec-department').value = '';
   document.getElementById('ec-foreign-worker').checked = false;
   document.getElementById('ec-grant-nippo-admin').checked = false;
   hideError('ec-error');
@@ -8632,6 +8633,8 @@ async function doCreateEmployee() {
   if (!code) { showError('ec-error', '社員番号を入力してください。'); return; }
   if (!/^[0-9]{1,10}$/.test(code)) { showError('ec-error', '社員番号は数字で入力してください(例: 0044)。'); return; }
   if (!name) { showError('ec-error', '氏名を入力してください。'); return; }
+  // 役職区分は旅費の区分を決める。空だと旅費精算書が自動で作られないため、登録の時点で必須にする(2026-10-31 Shota指示)。
+  if (!document.getElementById('ec-department').value) { showError('ec-error', '役職区分を選んでください(旅費の単価がこの区分で決まります)。'); return; }
   const btn = document.getElementById('ec-submit');
   btn.disabled = true;
   try {
@@ -10234,6 +10237,7 @@ async function openAttendanceDetail(groupId, groupLabel) {
         let bookHtml = '';
         try {
           const bookRows = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: groupId, p_period_start: start, p_period_end: end });
+          await attachOffsiteNotes(bookRows, 'admin', groupId, start, end);
           bookHtml = `<div style="margin-bottom:16px;"><div class="form-title" style="font-size:15px;">出勤簿プレビュー(スプレッドシートと同じ形式)</div>${attendanceBookHtml(bookRows, null, { title: `${ym.year}年${ym.month}月度`, name: groupLabel, periodLabel: `${start}〜${end}` })}</div>`;
         } catch (e) { bookHtml = ''; }
         listEl.innerHTML = bookHtml + ledgerHtml + `<div class="attendance-summary-row">
@@ -10296,11 +10300,27 @@ function wireAttendanceDetailAdminEditing(root, session, ctx) {
       panel.scrollIntoView({ block: 'nearest' });
       try {
         const rows = await rpc('admin_list_reports_for_day', { p_admin_employee_code: session.employeeCode, p_employee_code: ctx.employeeCode, p_work_date: date });
-        if (!rows || rows.length === 0) { panel.innerHTML = '<div class="hint">この日の日報はありません(画面を開き直してください)。</div>'; return; }
         const n = attendanceBookNum;
-        const statusLabel = { submitted: '提出済み(承認待ち)', confirmed: '確定済み', rejected: '差戻し中' };
+        const statusLabel = { submitted: '提出済み(承認待ち)', confirmed: '確定済み', rejected: '差戻し中', cancelled: '取り消し済み', removed_by_self: '本人が削除' };
+        const isRemoved = (r) => r.report_status === 'cancelled' || r.report_status === 'removed_by_self';
+        // 日報が1件も無い日・取り消し/削除だけの日も、管理者が正しい日報をここから入力できる
+        const proxyHtml = '<div style="margin:8px 0;"><button type="button" class="ad-proxy-enter">この日の日報を、管理者が正しく入力する</button>'
+          + '<div class="hint-inline">本人が間違えて出した・消した日でも、ここから正しい内容を入れ直せます(入力した記録は残ります)。</div></div>';
+        if (!rows || rows.length === 0) {
+          panel.innerHTML = '<div class="hint-inline">この日の日報はありません。</div>' + proxyHtml;
+          panel.querySelector('.ad-proxy-enter').addEventListener('click', () => openProxyDailyReportForEmployee(ctx.employeeCode, ctx.employeeName, date));
+          return;
+        }
         panel.innerHTML = '<div class="hint-inline">' + exdEsc(ctx.employeeName) + 'さんの ' + exdEsc(date) + ' の日報です。直す所だけ変えて、理由を書いて「この内容に直す」を押してください(変えない所は触らなくて大丈夫です)。直した記録は残ります。</div>'
-          + rows.map((r) => '<div class="ad-rpt" data-id="' + r.id + '" style="padding:8px;border:1px solid var(--border,#555);border-radius:8px;margin:8px 0;">'
+          + proxyHtml
+          + rows.map((r) => isRemoved(r)
+            ? '<div class="ad-rpt" data-id="' + r.id + '" style="padding:8px;border:1px dashed var(--border,#555);border-radius:8px;margin:8px 0;opacity:.9;">'
+              + '<div><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span> <span class="hint-inline">' + exdEsc(r.work_type) + '・' + n(r.headcount) + '人工</span></div>'
+              + '<div class="hint-inline">この日報は今、出勤簿・給与に数えていません' + (r.rejected_reason ? '(' + exdEsc(r.rejected_reason) + ')' : '') + '。正しい内容なら、元に戻せます。</div>'
+              + '<input type="text" class="ad-reason" placeholder="戻す理由(必須。例: 実際に出勤していたため)" style="width:100%;margin-top:6px;">'
+              + '<div style="margin-top:6px;"><button type="button" class="ad-restore">この日報を元に戻す</button></div>'
+              + '<div class="ad-msg error" style="display:none;white-space:pre-wrap;"></div></div>'
+            : '<div class="ad-rpt" data-id="' + r.id + '" style="padding:8px;border:1px solid var(--border,#555);border-radius:8px;margin:8px 0;">'
             + '<div><strong>' + exdEsc(r.site_name || '-') + '</strong> <span class="hint-inline">[' + exdEsc(statusLabel[r.report_status] || r.report_status) + ']</span> <span class="hint-inline">' + exdEsc(r.work_type) + '・' + n(r.headcount) + '人工</span></div>'
             + '<div class="hint-inline">現場を変えるときだけ、現場名を入れて探して選んでください。</div>'
             + '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:4px;"><input type="text" class="ad-site-q" placeholder="現場名(例: ファスプレ)" style="flex:1;min-width:150px;"><button type="button" class="secondary ad-site-find">探す</button></div>'
@@ -10313,12 +10333,26 @@ function wireAttendanceDetailAdminEditing(root, session, ctx) {
             + '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;"><button type="button" class="ad-save">この内容に直す</button><button type="button" class="secondary ad-cancel-rpt">この日報を取り消す</button></div>'
             + '<div class="ad-msg error" style="display:none;white-space:pre-wrap;"></div>'
             + '</div>').join('');
+        panel.querySelector('.ad-proxy-enter').addEventListener('click', () => openProxyDailyReportForEmployee(ctx.employeeCode, ctx.employeeName, date));
         panel.querySelectorAll('.ad-rpt').forEach((box, idx) => {
           const r = rows[idx];
           const id = Number(box.dataset.id);
           const msgEl = box.querySelector('.ad-msg');
           const showMsg = (t) => { msgEl.textContent = t; msgEl.style.display = t ? 'block' : 'none'; msgEl.classList.toggle('show', !!t); };
           const lock = (v) => box.querySelectorAll('button').forEach((x) => { x.disabled = v; });
+          if (isRemoved(r)) {
+            box.querySelector('.ad-restore').addEventListener('click', async () => {
+              const reason = box.querySelector('.ad-reason').value.trim();
+              if (!reason) { showMsg('戻す理由を入力してください。'); return; }
+              if (!window.confirm(ctx.employeeName + 'さんの ' + date + ' の「' + (r.site_name || '-') + '」の日報を元に戻します(出勤簿・給与に数えます)。\n理由: ' + reason + '\nよろしいですか?')) return;
+              lock(true); showMsg('');
+              try {
+                await rpc('admin_restore_daily_report', { p_admin_employee_code: session.employeeCode, p_report_id: id, p_reason: reason });
+                keepReload();
+              } catch (e) { showMsg(e.message || '戻せませんでした。'); lock(false); }
+            });
+            return;
+          }
           const sel = box.querySelector('.ad-site-sel');
           box.querySelector('.ad-site-find').addEventListener('click', async () => {
             const q = box.querySelector('.ad-site-q').value.trim();
@@ -14414,9 +14448,16 @@ function addDailyReportEntry(prefill, canAppend, siteQuery) {
   // 出張チェックは県外の現場でだけ付けられる(2026-10-03 Shota指示)。県内の現場は出張にならないため
   // チェックを外して選べなくする。新しい現場・未選択・判定が取れない時は従来どおり選べる状態にする。
   const tripHintEl = clone.querySelector('.dr-trip-hint');
+  // 現場外の用件(用件・相手先・県外)。現場に「現場外」を選んだときだけ出す。入れた内容は、日報の提出のあと個人カレンダーの予定として保存する(旅費に反映)。
+  const offsiteWrapEl = clone.querySelector('.dr-offsite-wrap');
+  if (offsiteWrapEl) {
+    const prefSel = offsiteWrapEl.querySelector('.dr-offsite-pref');
+    prefSel.innerHTML = JAPAN_PREFECTURES.filter((pf) => pf !== '徳島県').map((pf) => `<option value="${pf}">${pf}</option>`).join('');
+    offsiteWrapEl.querySelector('.dr-offsite-out').addEventListener('change', (ev) => { offsiteWrapEl.querySelector('.dr-offsite-pref-wrap').style.display = ev.target.checked ? 'block' : 'none'; });
+  }
   const applyTripAvailability = async () => {
     const setHint = (text) => { tripHintEl.textContent = text; tripHintEl.style.display = text ? 'block' : 'none'; };
-    if (!siteSelect.value || siteSelect.value === '__new__') { isBusinessTripEl0.disabled = false; setHint(''); return null; }
+    if (!siteSelect.value || siteSelect.value === '__new__') { isBusinessTripEl0.disabled = false; setHint(''); if (offsiteWrapEl) offsiteWrapEl.style.display = 'none'; return null; }
     try {
       const session = getSession();
       const rows = await rpc('get_site_trip_info', { p_employee_code: session.employeeCode, p_site_id: Number(siteSelect.value) });
@@ -14424,6 +14465,7 @@ function addDailyReportEntry(prefill, canAppend, siteQuery) {
       if (!info) { isBusinessTripEl0.disabled = false; setHint(''); return null; }
       if (info.is_out_of_prefecture) { isBusinessTripEl0.disabled = false; setHint(`県外の現場${info.prefecture ? '(' + info.prefecture + ')' : ''}です。出張の場合はチェックしてください。`); return true; }
       // 「現場外」は県内か県外か分からない(県外へ行った日もある)ため、出張チェックは選べるままにする(2026-10-03 Shota指摘)。
+      if (offsiteWrapEl) offsiteWrapEl.style.display = info.is_unknown_location ? 'block' : 'none';
       if (info.is_unknown_location) { isBusinessTripEl0.disabled = false; setHint('現場外です。県外へ出張した場合は出張にチェックしてください(行き先は管理者が確認します)。'); return null; }
       isBusinessTripEl0.checked = false; isBusinessTripEl0.disabled = true; setHint('県内の現場は出張になりません。');
       return false;
@@ -15056,6 +15098,22 @@ async function doSubmitDailyReport(isDraft) {
 
     if (isDraft) { showDone(`日報を下書き保存しました(${dateStr})。提出は完了していません。`, 'menu-apply'); return; }
 
+    // 現場外の用件(用件・相手先・県外)を、旅費用の個人カレンダーの予定として保存する。日報の提出は済んでいるため、失敗しても提出は止めない(メッセージで知らせるだけ)。
+    let offsiteWarning = '';
+    try {
+      const own = dailyReportTarget.type === 'self' || (dailyReportTarget.type === 'employee' && dailyReportTarget.employeeCode === session.employeeCode); // 自分の日報だけ(代理入力・外注は対象外)
+      const offEl = own ? Array.from(document.querySelectorAll('.daily-report-entry .dr-offsite-wrap')).find((w) => w.style.display === 'block') : null;
+      if (offEl) {
+        const purpose = offEl.querySelector('.dr-offsite-purpose').value;
+        const counterpart = offEl.querySelector('.dr-offsite-counterpart').value.trim();
+        const isOut = offEl.querySelector('.dr-offsite-out').checked;
+        if (purpose || counterpart || isOut) {
+          await rpc('set_my_offsite_trip', { p_employee_code: session.employeeCode, p_date: dateStr, p_purpose: purpose || null, p_counterpart: counterpart || null,
+            p_is_out: isOut, p_prefecture: isOut ? offEl.querySelector('.dr-offsite-pref').value : null });
+        }
+      }
+    } catch (eOff) { offsiteWarning = ' ※現場外の用件(旅費)の保存に失敗しました。カレンダーから予定として入れてください。'; }
+
     if (editRequiresApproval) {
       showDone(`この日はすでに確認・反映済みのため、修正内容を管理者確認待ちとして登録しました(${dateStr})。管理者が承認すると反映されます。` + qualWarning, 'menu-apply');
       return;
@@ -15072,7 +15130,7 @@ async function doSubmitDailyReport(isDraft) {
 
     const msg = (r && r.is_special
       ? `日報を受け付けました(${dateStr}、${r.entry_count}現場)。3現場以上のため特殊日報として管理者が確認します。`
-      : `日報を受け付けました(${dateStr}、合計${r ? Number(r.total_headcount).toFixed(1) : ''}人工)。`) + qualWarning + consistencyWarning;
+      : `日報を受け付けました(${dateStr}、合計${r ? Number(r.total_headcount).toFixed(1) : ''}人工)。`) + qualWarning + consistencyWarning + offsiteWarning;
     showDone(msg, 'menu-apply');
   } catch (e) {
     showError('daily-report-error', friendlyDailyReportError(e));
@@ -15150,6 +15208,29 @@ function attendanceBookNum(n) {
   return Number.isInteger(x) ? String(x) : String(Math.round(x * 100) / 100);
 }
 
+// 出勤簿の備考に、現場外の用件(県外の予定・日報の現場外の用件)を出す。出勤簿の本体の数え方には関わらない(備考の文だけ)。
+// 取れなくても出勤簿は出す。kind='self'(自分)/'admin'(管理者が他の社員を見る)。
+async function attachOffsiteNotes(rows, kind, code, start, end) {
+  try {
+    const session = getSession();
+    const notes = kind === 'admin'
+      ? await rpc('admin_get_attendance_book_offsite', { p_admin_employee_code: session.employeeCode, p_employee_code: code, p_period_start: start, p_period_end: end })
+      : await rpc('get_my_attendance_book_offsite', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end });
+    const m = new Map((notes || []).map((n) => [String(n.work_date).slice(0, 10), n.note]));
+    (rows || []).forEach((r) => {
+      const n = m.get(String(r.work_date).slice(0, 10));
+      if (!n) return;
+      r.offsite_note = n;
+      // 現場外の県外の日は現場に都道府県が無いため、予定に登録した都道府県(備考の「(大阪府)」)を『出張』列にも出す
+      if (r.is_trip_by_site && !r.trip_prefectures) {
+        const pref = [...n.matchAll(/\((北海道|[^()/\s]{2,3}[都道府県])\)/g)].map((x) => x[1]);
+        if (pref.length) r.trip_prefectures = [...new Set(pref)].join('・');
+      }
+    });
+  } catch (e) { /* 備考が取れなくても出勤簿は出す */ }
+  return rows;
+}
+
 function attendanceBookHtml(rows, summary, opts) {
   const o = opts || {};
   const esc = (v) => exdEsc(String(v == null ? '' : v));
@@ -15185,6 +15266,7 @@ function attendanceBookHtml(rows, summary, opts) {
     if (r.has_conflict) p.push('人工と勤務区分が食い違っています(管理者の確認が必要・集計に未算入)');
     if (r.has_pending) p.push('管理者の確認待ち(確定するまで集計に未算入)');
     if (isWorked(r) && r.is_unreflected) p.push('シート未反映');
+    if (r.offsite_note) p.push(r.offsite_note);
     return p;
   };
   const pendingLabel = (r) => (r.has_conflict && r.has_pending ? '確認待ち・食い違い' : (r.has_conflict ? '人工と区分が食い違い' : '確認待ち'));
@@ -15252,6 +15334,7 @@ async function loadPeriodConfirmChangesAdmin() {
         btn.disabled = true; box.style.display = 'block'; card.style.gridColumn = '1 / -1'; box.innerHTML = '<div class="hint">読み込み中...</div>';
         try {
           const book = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: r.employee_code, p_period_start: r.period_start, p_period_end: r.period_end });
+          await attachOffsiteNotes(book, 'admin', r.employee_code, r.period_start, r.period_end);
           const endMonth = Number(String(r.period_end).slice(5, 7)); const endYear = Number(String(r.period_end).slice(0, 4));
           box.innerHTML = attendanceBookHtml(book, null, { title: `${endYear}年${endMonth}月度`, name: r.employee_name, periodLabel: `${r.period_start}〜${r.period_end}` });
           box.dataset.loaded = '1'; btn.textContent = '出勤簿を閉じる';
@@ -15291,6 +15374,7 @@ async function loadAttendanceFixNeededAdmin(opts) {
       // 「管理者の確認待ち」の日は、その場で中身を確認して承認・差し戻しできる(2026-10-03 Shota指摘「これ承認できんやん」)。
       const lines = items.map((r) => '<div class="hint-inline afn-line"><strong>' + exdEsc(md(r.work_date)) + '</strong> ' + exdEsc(r.reason_text) + (r.detail ? '(' + exdEsc(r.detail) + ')' : '')
         + ' <button type="button" class="secondary afn-open" style="margin-left:6px;padding:2px 10px;" data-emp="' + exdEsc(r.employee_code) + '" data-date="' + exdEsc(String(r.work_date).slice(0, 10)) + '" data-reason="' + exdEsc(r.reason) + '">' + (r.reason === 'submitted' ? '中身を確認して承認' : '中身を確認する') + '</button>'
+        + (r.reason === 'trip_unchecked' ? ' <button type="button" class="secondary trip-dismiss-btn" style="margin-left:6px;padding:2px 10px;" data-emp="' + exdEsc(r.employee_code) + '" data-date="' + exdEsc(String(r.work_date).slice(0, 10)) + '" title="県外の現場だが日帰りで、出張ではない日。押すとこの表示が消えます(給与・旅費は変わりません)">出張ではない(日帰り)</button>' : '')
         + '<div class="afn-panel" style="display:none;margin-top:6px;"></div></div>').join('');
       const periodHead = h.period_start !== lastPeriod ? '<div class="afn-period" style="font-weight:800;margin:14px 0 6px;">給与期間 ' + exdEsc(h.period_start) + '〜' + exdEsc(h.period_end) + '</div>' : '';
       lastPeriod = h.period_start;
@@ -15310,6 +15394,30 @@ async function loadAttendanceFixNeededAdmin(opts) {
     if (!silent) list.innerHTML = '<div class="empty-state">読み込みに失敗しました</div>';
   }
 }
+
+// 「県外の現場だが日帰りで出張ではない」の日を、チェック漏れの表示から外す(2026-10-31 Shota指摘「正しいことをしているのに表示が消えない」)。
+// 印は表示を消すだけで、給与・旅費は変わらない。本人は自分の日(dismiss_my_trip_unchecked)、日報担当・社長は全員の日(admin_dismiss_trip_unchecked)に付けられる。
+document.addEventListener('click', async (ev) => {
+  const b = ev.target && ev.target.closest ? ev.target.closest('.trip-dismiss-btn') : null;
+  if (!b || b.disabled) return;
+  const session = getSession();
+  if (!session) return;
+  b.disabled = true;
+  try {
+    if (b.dataset.self === '1') await rpc('dismiss_my_trip_unchecked', { p_employee_code: session.employeeCode, p_work_date: b.dataset.date });
+    else await rpc('admin_dismiss_trip_unchecked', { p_admin_employee_code: session.employeeCode, p_employee_code: b.dataset.emp, p_work_date: b.dataset.date });
+    if (b.closest('.afn-line')) afnRemoveLine(b);
+    else {
+      const li = b.closest('li');
+      const ul = li && li.parentElement;
+      if (li) li.remove();
+      if (ul && ul.children.length === 0) { const card = ul.closest('.card'); if (card) card.remove(); }
+    }
+  } catch (e) {
+    b.disabled = false;
+    alert((e && e.message) || '印を付けられませんでした。もう一度お試しください。');
+  }
+});
 
 // 一覧の各行から、その日の日報の中身を表示し、種類に応じて承認・差し戻し・修正をする
 // (承認はadmin_confirm_daily_reports、人工と勤務区分の修正はadmin_fix_daily_report_work_typeを使う)。
@@ -15527,6 +15635,7 @@ async function loadAllAttendanceBooks(statusEl) {
     statusEl.textContent = `読み込み中… ${Math.min(i + 4, emps.length)}/${emps.length}人`;
     const part = await Promise.all(emps.slice(i, i + 4).map(async (e) => {
       const rows = await rpc('admin_get_employee_attendance_book', { p_admin_employee_code: session.employeeCode, p_employee_code: e.employee_code, p_period_start: per.start, p_period_end: per.end });
+      await attachOffsiteNotes(rows, 'admin', e.employee_code, per.start, per.end);
       return { emp: e, rows: rows || [] };
     }));
     out.push(...part);
@@ -15564,13 +15673,13 @@ async function downloadAllAttendanceBooksCsv() {
       return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
     };
     const mark = (b) => (b ? '〇' : '');
-    const header = ['社員番号', '氏名', '期間', '日付', '曜日', '現場', '人工', '残業', '通勤早出', '通勤残業', '100㎞', '出張先', '出張日数', '深夜', '日曜', '有給'];
+    const header = ['社員番号', '氏名', '期間', '日付', '曜日', '現場', '人工', '残業', '通勤早出', '通勤残業', '100㎞', '出張先', '出張日数', '深夜', '日曜', '有給', '備考(現場外の用件)'];
     const lines = [header.map(esc).join(',')];
     for (const b of books) {
       for (const r of b.rows) {
         lines.push([b.emp.employee_code, b.emp.employee_name, `${per.start}〜${per.end}`, r.work_date, r.weekday_jp, r.site_names || '', r.headcount,
           r.overtime_hours, r.early_commute_hours, r.commute_overtime_hours, mark(r.is_over_100km), r.is_trip_by_site ? (r.trip_prefectures || '') : '',
-          mark(r.is_trip_by_site), mark(r.is_night), mark(r.is_sunday_work), mark(r.is_paid_leave)].map(esc).join(','));
+          mark(r.is_trip_by_site), mark(r.is_night), mark(r.is_sunday_work), mark(r.is_paid_leave), r.offsite_note || ''].map(esc).join(','));
       }
     }
     const blob = new Blob([`﻿${lines.join('\r\n')}\r\n`], { type: 'text/csv;charset=utf-8;' });
@@ -15601,6 +15710,7 @@ async function loadDailyReportLedger() {
       rpc('get_my_attendance_book', { p_employee_code: session.employeeCode, p_period_start: start, p_period_end: end }),
       rpc('get_my_daily_report_month_summary', { p_employee_code: session.employeeCode, p_year: dailyReportPeriodYear, p_month: dailyReportPeriodMonth, p_period_type: dailyReportSummaryPeriodType }).catch(() => null),
     ]);
+    await attachOffsiteNotes(rows, 'self', null, start, end);
     const confirmHtml = await renderDailyReportLedgerConfirmBlock(session, start, end);
     if (!rows || rows.length === 0) { el.innerHTML = confirmHtml + '<div class="empty-state">この期間の日報はありません</div>'; return; }
     el.innerHTML = confirmHtml + attendanceBookHtml(rows, sumRows && sumRows[0], {
@@ -15641,11 +15751,12 @@ function attendanceFixBannerHtml(allItems) {
   const items = allItems.filter((x) => x.blocks_confirm !== false);
   let noticeHtml = '';
   if (notices.length > 0) {
-    const nlines = notices.map((x) => '<li><strong>' + exdEsc(md(x.work_date)) + '</strong> ' + exdEsc(x.reason_text) + (x.detail ? '<span class="hint-inline">(現場: ' + exdEsc(x.detail) + ')</span>' : '') + '</li>').join('');
+    const nlines = notices.map((x) => '<li><strong>' + exdEsc(md(x.work_date)) + '</strong> ' + exdEsc(x.reason_text) + (x.detail ? '<span class="hint-inline">(現場: ' + exdEsc(x.detail) + ')</span>' : '')
+      + (x.reason === 'trip_unchecked' ? ' <button type="button" class="secondary trip-dismiss-btn" data-self="1" data-date="' + exdEsc(String(x.work_date).slice(0, 10)) + '" style="margin-left:6px;padding:2px 10px;">出張ではない(日帰り)</button>' : '') + '</li>').join('');
     noticeHtml = '<div class="card" id="dr-ledger-trip-notice" style="margin-bottom:10px;border:2px solid var(--gold,#c9a227);">'
       + '<div style="font-weight:800;">ℹ 確認してください(' + new Set(notices.map((x) => x.work_date)).size + '日)</div>'
       + '<ul style="margin:6px 0 6px 18px;padding:0;">' + nlines + '</ul>'
-      + '<div class="hint">この日は出張手当に数えられません。現場が正しければそのままで構いません(確認は止まりません)。</div>'
+      + '<div class="hint">この日は出張手当に数えられません。現場が正しければそのままで構いません(確認は止まりません)。日帰りで出張ではない日は「出張ではない(日帰り)」を押すと、この表示が消えます(給与・旅費は変わりません)。</div>'
       + '</div>';
   }
   if (items.length === 0) return noticeHtml;
@@ -15951,6 +16062,10 @@ function openPersonalEventForm(eventId, dateStr) {
         <label for="pev-out">県外(この日を旅費の対象にする。現場の登録は要りません)</label>
       </div>
       <div id="pev-out-pref-wrap" style="${existing && existing.is_out_of_prefecture ? '' : 'display:none;'}">
+        <div class="checkbox-row">
+          <input type="checkbox" id="pev-maenori" ${existing && /^前のり/.test(existing.title || '') ? 'checked' : ''}>
+          <label for="pev-maenori">前のり(予定名の先頭に「前のり」を付けます)</label>
+        </div>
         <label>県外の都道府県</label>
         <select id="pev-out-pref">${JAPAN_PREFECTURES.filter((pf) => pf !== '徳島県').map((pf) => `<option value="${pf}" ${existing && existing.out_prefecture === pf ? 'selected' : ''}>${pf}</option>`).join('')}</select>
       </div>
@@ -15975,8 +16090,15 @@ async function savePersonalEvent(originalDateStr) {
   const session = getSession();
   const errEl = document.getElementById('pev-error');
   errEl.style.display = 'none';
-  const title = document.getElementById('pev-title').value.trim();
+  let title = document.getElementById('pev-title').value.trim();
   if (!title) { errEl.textContent = '予定名を入力してください。'; errEl.style.display = 'block'; return; }
+  // 前のり(予定名の先頭に付ける。旅費の場所にもそのまま出る)。外したときは先頭の「前のり」を取る。
+  const maenoriEl = document.getElementById('pev-maenori');
+  if (maenoriEl && document.getElementById('pev-out').checked) {
+    const bare = title.replace(/^前のり[\s　]*/, '');
+    title = maenoriEl.checked ? `前のり ${bare}`.trim() : bare;
+    if (!title) title = '前のり';
+  }
   const btn = document.getElementById('pev-save');
   btn.disabled = true;
   try {
@@ -17584,6 +17706,23 @@ async function openSubcontractorSupportForCompany(companyId, companyName, dateSt
   await new Promise((r) => setTimeout(r, 900));
   const co = document.querySelector('#dr-sc-list .dr-sc-entry .dr-sc-company');
   if (co) { co.value = String(companyId); co.dispatchEvent(new Event('change', { bubbles: true })); }
+}
+
+// 出勤簿の「直す」から、管理者が本人の代わりに正しい日報を入力する(2026-10-31 LEVIさんの10/2:
+// 本人が誤って出した・消した日を、管理者が正しく入れ直せるようにする)。既存の代理入力(対象=社員)をそのまま使う。
+async function openProxyDailyReportForEmployee(employeeCode, employeeName, dateStr) {
+  dailyReportPrefillDate = dateStr;
+  showScreen('daily-report');
+  await new Promise((r) => setTimeout(r, 450));
+  const typeSelect = document.getElementById('daily-report-target-type');
+  typeSelect.value = 'employee';
+  typeSelect.dispatchEvent(new Event('change'));
+  const dateInput = document.getElementById('daily-report-date');
+  if (dateInput) dateInput.value = dateStr;
+  dailyReportTarget = { type: 'employee', employeeCode, employeeName, subcontractorWorkerId: null, workerName: null };
+  const label = document.getElementById('daily-report-target-employee-label');
+  if (label) { label.style.display = 'block'; label.textContent = `選択中: ${employeeName}(${employeeCode})`; }
+  loadDailyReportForDate(dateStr);
 }
 
 let drmRows = [];
