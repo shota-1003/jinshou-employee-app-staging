@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v306-staging';
-const BUILD_DEPLOYED_AT = '2026-11-16T06:12:54.124Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v307-staging';
+const BUILD_DEPLOYED_AT = '2026-11-16T06:34:44.566Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2522,22 +2522,33 @@ async function searchAndShowPreapprovals(card, itemId) {
   area.innerHTML = '<div class="hint">承認済みの事前申請を確認しています...</div>';
   let candidates = [];
   try {
+    // 日付を渡すと、サーバーは前後21日以内の事前申請しか返さない。領収書の日付と事前申請の日付がずれていても
+    // 選べるよう(2026-11-16 Shota指示「ずれてた場合も候補に出るように」)、日付は渡さずに自分の承認済みを全部取り、
+    // 近い日付の順に並べ替えて、ずれている日数を示す。紐づけ自体はサーバーが日付を見ないので、そのまま通る。
     candidates = await rpc('search_my_entertainment_preapprovals', {
-      p_employee_code: session.employeeCode, p_near_date: date, p_near_store: store, p_near_amount: amount ? Number(amount) : null,
+      p_employee_code: session.employeeCode, p_near_date: null, p_near_store: store, p_near_amount: amount ? Number(amount) : null,
     });
   } catch (e) { /* 検索できなくても手動での判断に委ねる */ }
+  const jstDay = (v) => new Date(v).toLocaleDateString('sv-SE', { timeZone: 'Asia/Tokyo' });
+  const dayGap = (c) => (date ? Math.round((Date.parse(jstDay(c.planned_datetime)) - Date.parse(date)) / 86400000) : 0);
+  if (date) candidates = candidates.slice().sort((a, b) => Math.abs(dayGap(a)) - Math.abs(dayGap(b)));
 
   if (candidates.length > 0) {
     area.innerHTML = '<div class="item-suggest-label">この接待の事前申請を選んでタップしてください</div>' + candidates.map((c, i) => `
       <div class="preapproval-candidate" data-idx="${i}">
         <div class="row1"><span>${c.planned_store || '(店舗未記入)'}</span><span>${c.planned_amount != null ? Number(c.planned_amount).toLocaleString() + '円' : ''}</span></div>
         <div class="row2">${new Date(c.planned_datetime).toLocaleString('ja-JP')}・${c.partner_name_snapshot || ''}</div>
+        ${dayGap(c) !== 0 ? `<div class="row2" style="color:var(--danger);">領収書の日付より${Math.abs(dayGap(c))}日${dayGap(c) > 0 ? '後' : '前'}の予定です(合っていれば選んでください)</div>` : ''}
+        <div class="preapproval-pick">タップして選ぶ</div>
       </div>
     `).join('');
     area.querySelectorAll('.preapproval-candidate').forEach((el, i) => {
       el.addEventListener('click', () => {
-        area.querySelectorAll('.preapproval-candidate').forEach((x) => x.classList.remove('linked'));
+        // 選ぶと申請と紐づく。見た目だけでは選んだかどうか分かりにくかった(2026-11-16 社員の申請が通らず発覚)ので、文字でも示す。
+        area.querySelectorAll('.preapproval-candidate').forEach((x) => { x.classList.remove('linked'); const pk = x.querySelector('.preapproval-pick'); if (pk) pk.textContent = 'タップして選ぶ'; });
         el.classList.add('linked');
+        const pick = el.querySelector('.preapproval-pick');
+        if (pick) pick.textContent = '✓ 選びました';
         state.entertainmentPreapprovalId = candidates[i].id;
 
         // 事前申請で入力済みの情報を自動反映する(同じ内容を二度入力させない)。
@@ -3240,6 +3251,14 @@ async function doSubmitExpense() {
           overrideReason = reasonEl ? reasonEl.value.trim() : '';
           if (!overrideReason) { showError('expense-error', `${label}: 事前申請が確認できないため、この接待交際費は通常の経費として申請できません。管理者の場合は例外理由を入力してください。`); return; }
         } else {
+          // 事前申請は見つかっているのにタップして選んでいない場合は、「確認できない」ではなく選ぶよう案内する。
+          const pickArea = card.querySelector('.preapproval-search-area');
+          const found = pickArea && pickArea.querySelector('.preapproval-candidate');
+          if (found) {
+            showError('expense-error', `${label}: 事前申請は見つかっています。「この接待の事前申請を選んでタップしてください」の下のカードをタップして選んでから、もう一度申請してください。`);
+            found.scrollIntoView({ block: 'center', behavior: 'smooth' });
+            return;
+          }
           showError('expense-error', `${label}: 事前申請が確認できないため、この接待交際費は通常の経費として申請できません。「接待・会食」から先に事前申請してください。`); return;
         }
       }

@@ -1125,6 +1125,8 @@ button.link {
 .preapproval-candidate.linked { border-color: var(--success); background: var(--success-bg); }
 .preapproval-candidate .row1 { display: flex; justify-content: space-between; font-weight: 700; font-size: 13.5px; }
 .preapproval-candidate .row2 { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+.preapproval-candidate .preapproval-pick { margin-top: 8px; font-size: 13px; font-weight: 700; text-align: center; padding: 6px; border-radius: var(--radius-sm); border: 1px dashed var(--border-strong); color: var(--primary); }
+.preapproval-candidate.linked .preapproval-pick { border-style: solid; border-color: var(--success); color: var(--success); }
 .preapproval-warning {
   background: var(--danger-bg); color: var(--danger); border-radius: var(--radius-sm); padding: 12px 14px;
   font-size: 13px; font-weight: 700; margin-top: 8px; line-height: 1.6;
