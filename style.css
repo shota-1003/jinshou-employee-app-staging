@@ -1870,7 +1870,7 @@ body.assignment-calendar-open .app-header { display: none; }
   padding: 8px 12px; background: #f4f6f9; color: #1b2230; font-weight: 700; font-size: 13px;
   border-bottom: 1px solid var(--line, #d8dce3);
 }
-.settlement-sheet-head button { padding: 4px 10px; font-size: 12px; }
+.settlement-sheet-head button { padding: 4px 10px; font-size: 12px; width: auto; flex: 0 0 auto; white-space: nowrap; }
 .settlement-sheet-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 12px; }
 /* 貸付金台帳のページ送り(2026-09-11、下に追記され続けるとスクロールが増える指摘への対応)。
    ノートのページ送りと同じ感覚で、常に最新ページを既定表示にする。 */
@@ -1928,3 +1928,60 @@ body.assignment-calendar-open .app-header { display: none; }
   body.printing-ab #ab-print-root .ab-bulk-page { break-after: page; page-break-after: always; }
   body.printing-ab #ab-print-root .ab-bulk-page:last-child { break-after: auto; page-break-after: auto; }
 }
+
+/* 用紙の「PDFで印刷」(2026-11-02)。用紙だけを白地・A4縦で出す。貸付金台帳は1ページずつ改ページ。 */
+.ss-print-btn { width: auto; flex: 0 0 auto; white-space: nowrap; margin-left: auto; margin-right: 8px; }
+#ss-print-root { display: none; }
+@media print {
+  body.printing-ss > *:not(#ss-print-root) { display: none !important; }
+  body.printing-ss { display: block !important; min-height: 0 !important; height: auto !important; padding: 0 !important; margin: 0 !important; overflow: visible !important; background: #fff !important; }
+  html:has(body.printing-ss) { height: auto !important; min-height: 0 !important; overflow: visible !important; }
+  body.printing-ss #ss-print-root { display: block !important; width: 100% !important; }
+  body.printing-ss #ss-print-root, body.printing-ss #ss-print-root * { visibility: visible !important; }
+  body.printing-ss #ss-print-root .settlement-sheet { transform: none !important; margin: 0 auto !important; }
+  body.printing-ss #ss-print-root .settlement-sheet.ll-sheet { width: 100% !important; }
+  body.printing-ss #ss-print-root .ss-print-page { break-after: page; page-break-after: always; }
+  body.printing-ss #ss-print-root .ss-print-page:last-child { break-after: auto; page-break-after: auto; }
+  body.printing-ss #ss-print-root tr { page-break-inside: avoid; }
+}
+/* 経費の履歴台帳(管理者): 月・社員・状態の選択は、スクロールしても上に残す。人ごとに見出しを付ける。 */
+#ela-filter-bar { position: sticky; top: var(--ela-sticky-top, 56px); z-index: 20; background: var(--card-bg-solid, #101b36); padding: 8px 0 6px; border-bottom: 1px solid rgba(255, 255, 255, .12); }
+#ela-filter-bar .filter-row { margin-top: 6px; }
+/* 画面幅が広いと、末尾が -list のid全部が2〜3列(column-count)になり、人の見出しが横に並んでしまう。この一覧は縦1列にする。 */
+#ela-list { display: block; column-count: 1 !important; }
+.ela-person { margin-top: 10px; grid-column: 1 / -1; }
+.ela-person:not(.open) .ela-person-head { cursor: pointer; }
+.ela-person:not(.open) .ela-person-head:hover { background: rgba(255, 255, 255, .14); }
+.ela-person-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; margin-top: 8px; }
+.ela-person-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 8px 12px; border-radius: 8px; background: rgba(255, 255, 255, .08); font-size: 15px; }
+.ela-person-head b { font-size: 17px; }
+.ela-person-head .ela-person-only { width: auto; margin-left: auto; padding: 4px 12px; font-size: 13px; white-space: nowrap; }
+.ela-person-pay { padding: 6px 12px 4px; font-size: 13px; opacity: .92; }
+.ela-unpaid { color: #ffb347; font-weight: 700; }
+/* 支払った日ごとの合計(通帳照合用)。台帳の一覧の先頭と、月ごとの紙の画面の上に出す。 */
+.ela-paysum { margin: 14px 0 6px; padding: 10px 12px; border-radius: 8px; background: rgba(255, 255, 255, .07); }
+.ela-paysum-title { font-weight: 700; font-size: 15px; margin-bottom: 6px; }
+.ela-paysum-title span { font-weight: 400; font-size: 12px; opacity: .8; margin-left: 8px; }
+.ela-paysum table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ela-paysum th, .ela-paysum td { padding: 4px 8px; text-align: left; border-bottom: 1px solid rgba(255, 255, 255, .12); vertical-align: top; }
+.ela-paysum td.num { text-align: right; white-space: nowrap; }
+.ela-paysum-sum td { border-top: 2px solid rgba(255, 255, 255, .3); }
+.ssm-paysum { max-height: 30%; overflow-y: auto; background: #eef1f7; color: #1b2230; border-bottom: 1px solid #d8dce3; }
+.ssm-paysum:empty { display: none; }
+.ssm-paysum .ela-paysum { margin: 0; border-radius: 0; background: transparent; }
+.ssm-paysum .ela-paysum th, .ssm-paysum .ela-paysum td { border-bottom-color: #cfd6e3; }
+/* 月ごとにまとめた紙: 画面いっぱいのオーバーレイ。帯(月・社員・印刷・閉じる)は常に上に固定。 */
+#ssm-overlay { position: fixed; inset: 0; z-index: 9000; background: rgba(8, 14, 30, 0.82); display: flex; padding: 12px; }
+#ssm-overlay .ssm-wrap { margin: 0; flex: 1 1 auto; display: flex; flex-direction: column; max-width: 1100px; margin-left: auto; margin-right: auto; width: 100%; }
+.ssm-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; padding: 10px 12px; background: #f4f6f9; color: #1b2230; font-weight: 700; font-size: 14px; border-bottom: 1px solid #d8dce3; }
+.ssm-bar label { display: flex; align-items: center; gap: 6px; color: #1b2230; }
+.ssm-bar select { width: auto; min-width: 120px; padding: 6px 8px; font-size: 14px; color: #1b2230 !important; background: #fff !important; border: 1px solid #9aa5ba; border-radius: 6px; }
+.ssm-count { font-size: 13px; color: #55607a; }
+.ssm-bar button { width: auto; flex: 0 0 auto; white-space: nowrap; padding: 8px 16px; font-size: 14px; }
+.ssm-bar .ss-print-btn { margin-left: auto; margin-right: 0; }
+.ssm-bar .ssm-close { background: #c0392b; color: #fff; border: 0; border-radius: 6px; font-weight: 700; }
+#ssm-overlay .ssm-scroll { flex: 1 1 auto; overflow-y: auto; min-height: 0; }
+body.ssm-open { overflow: hidden; }
+@media print { #ssm-overlay { display: none !important; } }
+/* 月ごとにまとめた紙: 画面では、紙と紙の間に区切りを入れる(印刷は1枚ずつ別ページ) */
+.settlement-sheet-scroll > .settlement-sheet + .settlement-sheet { margin-top: 28px; padding-top: 20px; border-top: 2px dashed #999; }

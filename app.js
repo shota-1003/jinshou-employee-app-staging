@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v295-staging';
-const BUILD_DEPLOYED_AT = '2026-10-30T18:27:27.359Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v306-staging';
+const BUILD_DEPLOYED_AT = '2026-11-16T06:12:54.124Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -55,7 +55,7 @@ window.ClientErrorReporter.init({
 // ブラウザ用コードのためscripts/lib/optional-degrade-rpcs.js(QA側の正本)をrequireできず値を
 // 複製している。このSetを変更する際は必ずscripts/lib/optional-degrade-rpcs.jsも同時に更新すること
 // (2026-09-04: 更新漏れでQAが想定内の404を障害として誤検知した教訓、errors.id=1300)。
-const OPTIONAL_MISSING_RPCS = new Set(['get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule', 'admin_list_lucky_draws', 'admin_run_lucky_draw', 'admin_set_lucky_payout']);
+const OPTIONAL_MISSING_RPCS = new Set(['get_my_self_approval_exempt', 'get_my_lucky_status', 'mark_lucky_animation_seen', 'get_lucky_prize_month', 'assignment_get_my_schedule', 'admin_list_lucky_draws', 'admin_run_lucky_draw', 'admin_set_lucky_payout']);
 // 2026-09-05(初回登録・ログイン担当): 第3引数optsを追加した。既存の呼び出しは
 // すべて2引数のままで挙動が変わらない。opts.noSessionReset=true のときだけ、
 // 「セッション失効エラーを受け取ったらその場でログイン画面へ強制的に戻す」処理を
@@ -161,6 +161,31 @@ async function rpc(name, params, opts) {
 // new Date().toISOString()はUTC日付になるため、深夜0時〜9時JSTの間は「今日」が
 // 前日にずれてしまう(日報の未提出判定・自動確認・通知は日本時間の暦日で行う必要がある)。
 // 日報関連の「今日の日付」は必ずこの関数で取得する。
+// 領収書の読み取りの補正(2026-11-06 Shota指示。2026年9月から使っているのに2014年・2022年などの年、
+// 2,800円が28,002,800円になる読み違いが、本人の確認をすり抜けて申請まで通っていた)。
+// どちらも「直したことを画面に出し、必ず要確認にする」。黙って値を確定しない。
+function fixReceiptYear(dateStr) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateStr || ''));
+  if (!m) return { date: dateStr, fixed: false };
+  const today = todayJST();
+  const days = (Date.parse(today + 'T00:00:00Z') - Date.parse(m[0] + 'T00:00:00Z')) / 86400000;
+  if (!(days > 366)) return { date: dateStr, fixed: false };
+  let y = Number(today.slice(0, 4));
+  let cand = `${y}-${m[2]}-${m[3]}`;
+  if (cand > today) { y -= 1; cand = `${y}-${m[2]}-${m[3]}`; }
+  const d = new Date(Date.parse(cand + 'T00:00:00Z'));
+  if (Number.isNaN(d.getTime()) || d.getUTCMonth() + 1 !== Number(m[2])) return { date: dateStr, fixed: false };
+  return { date: cand, fixed: true, from: m[1] };
+}
+function collapseRepeatedAmount(n) {
+  const num = Number(n);
+  if (!Number.isInteger(num) || num < 100000) return { amount: n, fixed: false };
+  const s = String(num);
+  if (s.length % 2 !== 0) return { amount: n, fixed: false };
+  const half = s.slice(0, s.length / 2);
+  if (half !== s.slice(s.length / 2) || Number(half) <= 0) return { amount: n, fixed: false };
+  return { amount: Number(half), fixed: true };
+}
 function todayJST() {
   const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Tokyo' }));
   const y = now.getFullYear();
@@ -1648,9 +1673,27 @@ function consumeHomeFocus() {
   setTimeout(go, 300);
 }
 
+// 自分の申請を自分で承認できる人か(DBの属性 self_approval_exempt、社長だけ。2026-11-06 Shota指示)。
+// 氏名・社員番号では判定せず、DBに聞く。取れなければ「できない」として扱う(従来どおりの安全側)。
+let selfApprovalExemptCache = { code: null, value: false };
+async function refreshSelfApprovalExempt() {
+  const session = getSession();
+  if (!session || !session.employeeCode) return false;
+  if (selfApprovalExemptCache.code === session.employeeCode) return selfApprovalExemptCache.value;
+  try {
+    const v = await rpc('get_my_self_approval_exempt', { p_employee_code: session.employeeCode });
+    selfApprovalExemptCache = { code: session.employeeCode, value: v === true };
+  } catch (e) { selfApprovalExemptCache = { code: session.employeeCode, value: false }; }
+  return selfApprovalExemptCache.value;
+}
+function canSelfApprove() {
+  const session = getSession();
+  return !!(session && selfApprovalExemptCache.code === session.employeeCode && selfApprovalExemptCache.value);
+}
 function enterMenu(replace) {
   if (consumeLoginRedirect()) return;
   const session = getSession();
+  refreshSelfApprovalExempt();
   // セッションが失効/未確立のまま呼ばれた場合、社員名の参照で
   // "null is not an object" 例外(finding#14/#10)になりホームが描画されない。
   // 2026-09-05: 単に'login'を出すと、端末トークンは有効なのに社員番号の入力から
@@ -2666,9 +2709,13 @@ function fillCardFromReceipt(card, receipt) {
   // 金額: 高=確定入力 / 中=入れて要確認(黄) / 低=候補値を入れて要確認(黄)。
   // 【不変条件】内部(detail)に値または候補があるなら UI にも必ず表示する。低confidenceでも空欄にしない
   //  (「内部=300, UI=空欄」を禁止)。値も候補も無いときだけ空欄+警告。要確認はupdateExpenseTotalで明示。
-  const amtConf = ocrFieldStatus(receipt.amount_confidence || receipt.confidence);
+  let amtConf = ocrFieldStatus(receipt.amount_confidence || receipt.confidence);
   const amtCands = (receipt.amount_candidates || receipt.total_amount_candidates || []).filter((c) => c && c.amount != null);
-  const amtValue = receipt.total_amount != null ? receipt.total_amount : (amtCands[0] ? amtCands[0].amount : null);
+  let amtValue = receipt.total_amount != null ? receipt.total_amount : (amtCands[0] ? amtCands[0].amount : null);
+  // 同じ金額を2回続けて読んだ形(2,800 → 28,002,800)は半分にして、必ず要確認にする(2026-11-06)。
+  const amtFix = collapseRepeatedAmount(amtValue);
+  const amountAutoFixedFrom = amtFix.fixed ? amtValue : null;
+  if (amtFix.fixed) { amtValue = amtFix.amount; amtConf = 'review'; }
   amountInput.value = amtValue != null ? amtValue : '';
   amountInput.dataset.ocrConfidence = amtConf; // 整合性チェック用(high=ok/medium=review/low)
   amountInput.dataset.ocrInternal = amtValue != null ? String(amtValue) : ''; // detail内部値(UIとの一致検証用)
@@ -2676,9 +2723,13 @@ function fillCardFromReceipt(card, receipt) {
   renderOcrFieldCandidates(card, 'amount', amountInput, amtCands.map((c) => ({ v: c.amount, label: c.label })), amtConf, amtConf === 'low' ? '金額の確信度が低いです。金額をご確認ください' : '金額を確認してください', (v) => { amountInput.value = Number(v); amountInput.dataset.ocrConfidence = 'ok'; updateExpenseTotal(); });
 
   // 利用日: 内部に候補があるなら UI へ表示する(低confidenceでも空欄にしない)。他の領収書の日付はコピーしない。
-  const dateConf = ocrFieldStatus(receipt.date_confidence || (receipt.document_date ? receipt.confidence : 'low'));
+  let dateConf = ocrFieldStatus(receipt.date_confidence || (receipt.document_date ? receipt.confidence : 'low'));
   const dateCands = (receipt.date_candidates || []).filter((c) => c && c.date);
-  const dateValue = receipt.document_date || (dateCands[0] ? dateCands[0].date : null);
+  let dateValue = receipt.document_date || (dateCands[0] ? dateCands[0].date : null);
+  // 年の読み間違い(2026年が2014年・2023年になる等)は、今年に直して要確認にする(2026-11-06)。
+  const yearFix = fixReceiptYear(dateValue);
+  const yearAutoFixedFrom = yearFix.fixed ? yearFix.from : null;
+  if (yearFix.fixed) { dateValue = yearFix.date; dateConf = 'review'; }
   dateInput.value = dateValue || '';
   dateInput.dataset.ocrConfidence = dateConf;
   dateInput.dataset.ocrInternal = dateValue || '';
@@ -2690,6 +2741,11 @@ function fillCardFromReceipt(card, receipt) {
   if (dateConf !== 'ok') needs.push('利用日');
   if (needs.length === 0) { ocrStatus.textContent = '読み取り完了(内容をご確認ください)。'; ocrStatus.style.color = ''; }
   else { ocrStatus.textContent = `⚠️ ${needs.join('・')}を確認してください。`; ocrStatus.style.color = '#8a5300'; }
+  if (yearAutoFixedFrom || amountAutoFixedFrom) {
+    ocrStatus.textContent += (yearAutoFixedFrom ? `領収書の年が${yearAutoFixedFrom}年と読み取られたため、今年に直しました(違う年なら直してください)。` : '')
+      + (amountAutoFixedFrom ? `金額が${Number(amountAutoFixedFrom).toLocaleString('ja-JP')}円と読み取られましたが、同じ数字が2回続いているため${Number(amtValue).toLocaleString('ja-JP')}円にしました(確認してください)。` : '');
+    ocrStatus.style.color = '#8a5300';
+  }
 
   if (receipt.counterparty_raw && amtConf === 'ok') showExpenseSuggestion(card, receipt.counterparty_raw);
 }
@@ -3208,6 +3264,7 @@ async function doSubmitExpense() {
     showError('expense-error', '受取方法(現金・銀行振込)を選択してください。'); return;
   }
 
+  if (!confirmUnusualExpenseItems(items)) return;
   const btn = document.getElementById('expense-submit');
   btn.disabled = true;
   try {
@@ -3444,11 +3501,15 @@ function addBulkItemsFromPhoto(entry, uploadResult, receipts, fileHash) {
   } else {
     receipts.forEach((r, ri) => {
       bulkItemSeq += 1;
-      const label = receipts.length > 1 ? `${entry.photoLabel}の${ri + 1}件目(全${receipts.length}件中)` : entry.photoLabel;
+      const label0 = receipts.length > 1 ? `${entry.photoLabel}の${ri + 1}件目(全${receipts.length}件中)` : entry.photoLabel;
+      // 年・金額の読み違いの補正(1枚ずつの画面と同じ。直したときは名前の横に出して要確認にする 2026-11-06)
+      const yFix = fixReceiptYear(r.document_date || null);
+      const aFix = collapseRepeatedAmount(r.total_amount != null ? Number(r.total_amount) : null);
+      const label = label0 + (yFix.fixed ? `【年を${yFix.from}→${yFix.date.slice(0, 4)}に直しました・要確認】` : '') + (aFix.fixed ? '【金額の桁を直しました・要確認】' : '');
       const item = {
-        id: 'bulk-item-' + bulkItemSeq, date: r.document_date || null, store: r.counterparty_raw || null,
-        amount: r.total_amount != null ? Number(r.total_amount) : null, tax: r.tax_amount != null ? Number(r.tax_amount) : null,
-        confidence: r.confidence || 'low',
+        id: 'bulk-item-' + bulkItemSeq, date: yFix.fixed ? yFix.date : (r.document_date || null), store: r.counterparty_raw || null,
+        amount: aFix.amount != null ? Number(aFix.amount) : null, tax: r.tax_amount != null ? Number(r.tax_amount) : null,
+        confidence: (yFix.fixed || aFix.fixed) ? 'low' : (r.confidence || 'low'),
         driveFileId: uploadResult.driveFileId, driveFileUrl: uploadResult.driveFileUrl, fileHash,
         siteId: null, siteName: null, purposeCategory: null, note: r.content_description || null, photoLabel: label,
         photoQueueId: entry.id, _file: entry.file, _bbox: (r.bbox && r.bbox.length === 4) ? r.bbox : null,
@@ -3632,6 +3693,7 @@ async function doSubmitExpenseBulk() {
     showError('expense-bulk-error', '受取方法(現金・銀行振込)を選択してください。'); return;
   }
 
+  if (!confirmUnusualExpenseItems(items)) return;
   const btn = document.getElementById('expense-bulk-submit');
   btn.disabled = true;
   try {
@@ -6436,6 +6498,15 @@ function dateTimeText(v) { return v ? new Date(v).toLocaleString('ja-JP') : '-';
 // 並べるようにして。クリックするとこの紙の領収書が出て来るようにして」)。
 // 申請(employee_request_id)単位へ集約し、1申請=1カードにする(クリック先の詳細画面は
 // 既存のexdSettlementSheetHtml/renderSettlementSheetがそのまま「この紙+領収書」を表示する)。
+// 領収書の日付が、申請した日から1年以上ずれている明細は、年の読み間違いの疑いがある(2026-11-02、2014年・2022年などの日付で申請が通っていた)。
+function expenseLedgerDateLooksOff(r) {
+  if (!r.document_date || !r.requested_at) return false;
+  const d = new Date(String(r.document_date).slice(0, 10) + 'T00:00:00');
+  const q = new Date(r.requested_at);
+  if (Number.isNaN(d.getTime()) || Number.isNaN(q.getTime())) return false;
+  const days = (q - d) / 86400000;
+  return days > 366 || days < -3;
+}
 function groupExpenseLedgerRows(rows) {
   const map = new Map();
   for (const r of rows || []) {
@@ -6446,12 +6517,14 @@ function groupExpenseLedgerRows(rows) {
         expense_category: r.expense_category, requested_at: r.requested_at,
         item_count: 0, amount: 0, has_pending: false, has_rejected: false, has_approved: false,
         scheduled_payment_date: null, paid_at: null, payment_status: r.payment_status,
-        original_uncollected_count: 0,
+        original_uncollected_count: 0, max_amount: 0, odd_date: false,
       });
     }
     const g = map.get(key);
     g.item_count += 1;
     g.amount += Number(r.amount || 0);
+    if (Number(r.amount || 0) > g.max_amount) g.max_amount = Number(r.amount || 0);
+    if (expenseLedgerDateLooksOff(r)) g.odd_date = true;
     if (r.item_approval_status === 'rejected') g.has_rejected = true;
     else if (r.item_approval_status === 'approved') g.has_approved = true;
     else g.has_pending = true;
@@ -6476,6 +6549,8 @@ function expenseRequestLedgerCardHtml(g, opts) {
       <div class="row2">支払予定日: ${dateText(g.scheduled_payment_date)}　支払完了日: ${dateText(g.paid_at)}　${EXPENSE_PAYMENT_STATUS_LABEL[g.payment_status] || g.payment_status || '-'}</div>
       <span class="status-badge ${statusClass}">${statusLabel}</span>
       ${g.original_uncollected_count > 0 ? `<span class="status-badge warn">原本未提出 ${g.original_uncollected_count}件</span>` : ''}
+      ${g.max_amount >= 1000000 ? `<span class="status-badge rejected">金額が大きすぎます(${yenText(g.max_amount)})・要確認</span>` : ''}
+      ${g.odd_date ? '<span class="status-badge warn">領収書の日付の年が合っていない可能性・要確認</span>' : ''}
       <button type="button" class="secondary expense-ledger-detail-btn" style="margin-top:6px;">経費精算書を開く</button>
     </div>
   `;
@@ -6483,6 +6558,7 @@ function expenseRequestLedgerCardHtml(g, opts) {
 
 // --- 社員本人 ---
 let myExpenseLedgerMonth = '';
+let myExpenseLedgerRows = [];
 
 async function loadMyExpenseLedger() {
   const session = getSession();
@@ -6499,6 +6575,7 @@ async function loadMyExpenseLedger() {
       listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
       return;
     }
+    myExpenseLedgerRows = rows;
     const grouped = groupExpenseLedgerRows(rows);
     if (countEl) countEl.textContent = `${grouped.length}件(明細${rows.length}件)`;
     listEl.innerHTML = grouped.map((g) => expenseRequestLedgerCardHtml(g, { showName: false })).join('');
@@ -6514,6 +6591,203 @@ async function loadMyExpenseLedger() {
   }
 }
 
+// ---------- 月ごとにまとめた経費精算書(2026-11-02 Shota指示) ----------
+// 同じ人が1件ずつ細かく申請していると、紙も1枚ずつになり、PDFも1枚ずつ印刷するしかなかった。
+// 表示中の台帳の行を「月(帰属月)× 社員」でまとめ、1人1か月を1枚の紙(12行を超えたら複数ページ)にする。
+// 1件ずつの紙は今までどおり各カードから開ける。却下された明細は、1件ずつの紙と同じく載せない。
+// 支払った日ごとの合計(通帳の振込と照合するため、2026-11-06 Shota指示)。却下は除く。
+// 戻り値: { days: [{ key:'2026-10-26', md:'10/26', total, people:[{name, amount}] }], unpaid }
+function expensePaymentDaySummary(rows) {
+  const days = new Map(); let unpaid = 0;
+  (rows || []).filter((r) => r.item_approval_status !== 'rejected').forEach((r) => {
+    const amt = Number(r.amount || 0);
+    const d = r.paid_at ? new Date(r.paid_at) : null;
+    if (!d || Number.isNaN(d.getTime())) { if (r.payment_status !== 'not_applicable') unpaid += amt; return; }
+    const j = new Date(d.getTime() + 9 * 3600000);
+    const key = j.toISOString().slice(0, 10);
+    if (!days.has(key)) days.set(key, { key, md: (j.getUTCMonth() + 1) + '/' + j.getUTCDate(), total: 0, byPerson: new Map() });
+    const g = days.get(key); g.total += amt;
+    g.byPerson.set(r.employee_name, (g.byPerson.get(r.employee_name) || 0) + amt);
+  });
+  return { days: [...days.values()].sort((a, b) => (a.key < b.key ? -1 : 1)).map((g) => ({ key: g.key, md: g.md, total: g.total, people: [...g.byPerson].map(([name, amount]) => ({ name, amount })) })), unpaid };
+}
+function expensePaymentDaySummaryHtml(rows, title) {
+  const s = expensePaymentDaySummary(rows);
+  if (!s.days.length && !s.unpaid) return '';
+  const yen = (n) => Number(n).toLocaleString('ja-JP') + '円';
+  const grand = s.days.reduce((a, d) => a + d.total, 0);
+  return '<div class="ela-paysum"><div class="ela-paysum-title">' + exdEsc(title || '支払った日ごとの合計') + '<span>(その日に払った金額の合計。通帳の振込と見比べます)</span></div>'
+    + '<table><tr><th>支払った日</th><th>その日の合計</th><th>内訳(人ごと)</th></tr>'
+    + s.days.map((d) => '<tr><td>' + exdEsc(d.md) + '</td><td class="num"><b>' + yen(d.total) + '</b></td><td>' + d.people.map((p) => exdEsc(p.name) + ' ' + yen(p.amount)).join('、') + '</td></tr>').join('')
+    + '<tr class="ela-paysum-sum"><td>支払い済みの合計</td><td class="num"><b>' + yen(grand) + '</b></td><td>' + (s.unpaid ? '<span class="ela-unpaid">まだ払っていない分 ' + yen(s.unpaid) + '</span>' : '') + '</td></tr></table></div>';
+}
+// 月は「お金を支払った月」で決める。領収書の日付の読み違いに左右されないため(2026-11-06 Shota指示)。
+// まだ払っていないものは月に入れず、別の区分 'unpaid' にする(「未払いは足してはいけない」同日指示)。
+// 会社払い(精算不要)は払う相手がいないので、申請した月に入れる。
+function expenseMonthlyKey(r) {
+  const jst = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? '' : new Date(d.getTime() + 9 * 3600000).toISOString().slice(0, 7);
+  };
+  if (jst(r.paid_at)) return jst(r.paid_at);
+  if (r.payment_status === 'not_applicable') return jst(r.requested_at) || (r.document_date ? String(r.document_date).slice(0, 7) : '');
+  return 'unpaid';
+}
+function expenseMonthlySheetsHtml(rows) {
+  const ymOf = expenseMonthlyKey;
+  const groups = new Map();
+  (rows || []).filter((r) => r.item_approval_status !== 'rejected').forEach((r) => {
+    const ym = ymOf(r);
+    const key = ym + '|' + r.employee_code;
+    if (!groups.has(key)) groups.set(key, { ym, name: r.employee_name, code: r.employee_code, items: [], reqPay: new Map(), pending: 0 });
+    const g = groups.get(key);
+    g.items.push(r);
+    g.reqPay.set(r.employee_request_id, r.payment_status);
+    if (r.item_approval_status !== 'approved') g.pending += 1;
+  });
+  const list = [...groups.values()].sort((a, b) => (a.ym < b.ym ? -1 : a.ym > b.ym ? 1 : String(a.code).localeCompare(String(b.code))));
+  if (!list.length) return '';
+  const yen = (n) => (n == null || n === '' ? '' : Number(n).toLocaleString('ja-JP') + '円');
+  const md = (v) => {
+    if (!v) return '';
+    const d = /^\d{4}-\d{2}-\d{2}/.test(String(v)) ? new Date(String(v).slice(0, 10) + 'T00:00:00') : new Date(v);
+    return Number.isNaN(d.getTime()) ? '' : (d.getMonth() + 1) + '/' + d.getDate();
+  };
+  const ymLabel = (ym) => (/^\d{4}-\d{2}$/.test(ym) ? ym.slice(0, 4) + '年' + Number(ym.slice(5, 7)) + '月に支払った分' : ym === 'unpaid' ? '未払い(まだ払っていない分)' : '月が確定していない分');
+  // どの領収書をいつ支払ったかが紙の上で分かるよう、備考欄に「10/26支払」(未払いは「未払い」)を出す。
+  const paidMd = (v) => {
+    if (!v) return '';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return '';
+    const j = new Date(d.getTime() + 9 * 3600000);
+    return (j.getUTCMonth() + 1) + '/' + j.getUTCDate();
+  };
+  const PER = 12;
+  const out = [];
+  list.forEach((g) => {
+    const items = g.items.slice().sort((x, y) => String(x.document_date || '9999').localeCompare(String(y.document_date || '9999')));
+    const monthTotal = items.reduce((a, it) => a + Number(it.amount || 0), 0);
+    const pages = Math.max(1, Math.ceil(items.length / PER));
+    const reqCount = g.reqPay.size;
+    const unpaid = [...g.reqPay.values()].filter((st) => st !== 'paid' && st !== 'not_applicable').length;
+    const payText = unpaid === 0 ? '精算済み' : '未精算 ' + unpaid + '件(申請' + reqCount + '件中)';
+    const apprText = g.pending === 0 ? '承認済み' : '未承認 ' + g.pending + '件を含む';
+    // 通帳の振込と見比べるため、紙の管理欄にも「支払った日ごとの合計」を出す(月の合計とは別)。
+    const paySum = expensePaymentDaySummary(items);
+    const paidByDay = paySum.days.map((d) => d.md + ' ' + yen(d.total)).join(' / ') + (paySum.unpaid ? (paySum.days.length ? ' / ' : '') + '未払い ' + yen(paySum.unpaid) : '');
+    for (let p = 0; p < pages; p += 1) {
+      const slice = items.slice(p * PER, (p + 1) * PER);
+      const pageTotal = slice.reduce((a, it) => a + Number(it.amount || 0), 0);
+      const last = p === pages - 1;
+      const blanks = Math.max(0, PER - slice.length);
+      out.push('<div class="settlement-sheet">'
+        + '<div class="ss-title">経 費 精 算 書</div>'
+        + '<div class="ss-meta">対象月：<b>' + exdEsc(ymLabel(g.ym)) + '</b><br>氏　名：<b>' + exdEsc(g.name || '') + '</b>'
+        + (pages > 1 ? '<br>' + (p + 1) + ' / ' + pages + ' ページ' : '') + '</div>'
+        + '<table><tr><th style="width:56px;">日 付</th><th style="width:150px;">現 場</th><th style="width:150px;">支 払 先</th><th style="width:110px;">内 容</th><th style="width:80px;">備 考</th><th>金 額</th></tr>'
+        + slice.map((it) => '<tr><td>' + exdEsc(md(it.document_date)) + '</td><td class="small">' + exdEsc(it.site_name || '') + '</td><td class="small">'
+          + exdEsc(it.store_name || '') + '</td><td class="small">' + exdEsc(it.account_category || it.purpose_category || '') + '</td><td class="small">'
+          + exdEsc([it.purpose || '', paidMd(it.paid_at) ? paidMd(it.paid_at) + '支払' : (it.payment_status === 'not_applicable' ? '' : '未払い')].filter(Boolean).join(' ')) + '</td><td class="num">' + yen(it.amount) + '</td></tr>').join('')
+        + Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>').join('')
+        + '</table>'
+        + '<div class="ss-bottom"><div class="ss-admin"><div style="font-size:10.5px;margin-bottom:2px;">［管理欄］</div><table>'
+        + '<tr><th>申請件数</th><td>' + reqCount + '件(明細' + items.length + '件)</td></tr>'
+        + '<tr><th>承認状況</th><td style="font-size:10.5px;">' + exdEsc(apprText) + '</td></tr>'
+        + '<tr><th>精算状況</th><td style="font-size:10.5px;">' + exdEsc(payText) + '</td></tr>'
+        + (paidByDay ? '<tr><th>支払日別</th><td style="font-size:10.5px;">' + exdEsc(paidByDay) + '</td></tr>' : '')
+        + '</table></div><div class="ss-total"><table>'
+        + (last
+          ? (pages > 1 ? '<tr><th style="width:96px;">このページ</th><td class="num">' + yen(pageTotal) + '</td></tr>' : '')
+            + '<tr><th style="width:96px;">' + (pages > 1 ? '月の合計' : '合　　計') + '</th><td class="num" style="font-size:14px;">' + yen(monthTotal) + '</td></tr>'
+          : '<tr><th style="width:96px;">小　　計</th><td class="num" style="font-size:14px;">' + yen(pageTotal) + '</td></tr>')
+        + '</table>' + (last ? '' : '<div class="ss-note">次のページに続きます</div>') + '<div class="ss-note">※　振込み手数料、申請者負担</div></div></div>'
+        + '<div class="ss-company">株式会社　迅翔興業</div></div>');
+    }
+  });
+  return out.join('');
+}
+// 画面いっぱいに開く。上の帯に「月」「社員」の選択・PDF印刷・閉じるを固定し、紙は選んだ分だけ出す。
+// (以前は全員・全月の紙が縦に並び、閉じるボタンもスクロールで見えなくなった)
+function closeExpenseMonthlyOverlay() {
+  const o = document.getElementById('ssm-overlay');
+  if (o) o.remove();
+  document.body.classList.remove('ssm-open');
+}
+function renderExpenseMonthlyPanel(box, rows, opts) {
+  const all = (rows || []).filter((r) => r.item_approval_status !== 'rejected');
+  if (!all.length) { alert('まとめる経費がありません(却下だけの場合も出ません)。'); return; }
+  const showEmp = !(opts && opts.hideEmployee);
+  const keys = all.map(expenseMonthlyKey).filter(Boolean);
+  const months = [...new Set(keys.filter((k) => k !== 'unpaid'))].sort().reverse();
+  const hasUnpaid = keys.includes('unpaid');
+  const emps = new Map();
+  all.forEach((r) => { if (!emps.has(r.employee_code)) emps.set(r.employee_code, r.employee_name || r.employee_code); });
+  const ymText = (ym) => (/^\d{4}-\d{2}$/.test(ym) ? ym.slice(0, 4) + '年' + Number(ym.slice(5, 7)) + '月' : ym);
+  closeExpenseMonthlyOverlay();
+  const o = document.createElement('div');
+  o.id = 'ssm-overlay';
+  o.innerHTML = '<div class="settlement-sheet-wrap ssm-wrap" data-print-title="経費精算書_月別まとめ">'
+    + '<div class="ssm-bar">'
+    + '<label>支払った月 <select id="ssm-ym">' + months.map((m) => '<option value="' + m + '">' + exdEsc(ymText(m)) + '</option>').join('') + '<option value="">すべての月(支払い済みだけ)</option>' + (hasUnpaid ? '<option value="unpaid">未払い(まだ払っていない分)</option>' : '') + '</select></label>'
+    + (showEmp ? '<label>社員 <select id="ssm-emp"><option value="">全員</option>' + [...emps].sort((a, b) => String(a[0]).localeCompare(String(b[0]))).map(([c, n]) => '<option value="' + exdEsc(c) + '">' + exdEsc(n) + '</option>').join('') + '</select></label>' : '')
+    + '<span id="ssm-count" class="ssm-count"></span>'
+    + '<button type="button" class="secondary ss-print-btn">PDFで印刷</button>'
+    + '<button type="button" class="ssm-close">閉じる</button></div>'
+    + '<div id="ssm-paysum" class="ssm-paysum"></div>'
+    + '<div class="settlement-sheet-scroll ssm-scroll" id="ssm-scroll"></div></div>';
+  document.body.appendChild(o);
+  document.body.classList.add('ssm-open');
+  const render = () => {
+    const ym = o.querySelector('#ssm-ym').value;
+    const empSel = o.querySelector('#ssm-emp');
+    const code = empSel ? empSel.value : '';
+    // 月を選んだら、その月に払った分だけ。「すべての月」でも未払いは入れない(未払いは専用の選択で別に見る)。
+    const pick = all.filter((r) => (ym ? expenseMonthlyKey(r) === ym : expenseMonthlyKey(r) !== 'unpaid') && (!code || r.employee_code === code));
+    const html = expenseMonthlySheetsHtml(pick);
+    const sc = o.querySelector('#ssm-scroll');
+    sc.innerHTML = html || '<div class="hint" style="padding:24px;">この条件に当てはまる経費はありません。</div>';
+    sc.scrollTop = 0;
+    o.querySelector('#ssm-paysum').innerHTML = expensePaymentDaySummaryHtml(pick, '選んだ分の、支払った日ごとの合計');
+    o.querySelector('#ssm-count').textContent = html ? (sc.querySelectorAll('.settlement-sheet').length + '枚') : '0枚';
+    const nm = code ? (emps.get(code) || '').replace(/\s+/g, '') : '全員';
+    o.querySelector('.ssm-wrap').dataset.printTitle = '経費精算書_月別まとめ_' + (ym || '全期間') + '_' + nm;
+  };
+  o.querySelector('#ssm-ym').addEventListener('change', render);
+  if (o.querySelector('#ssm-emp')) o.querySelector('#ssm-emp').addEventListener('change', render);
+  o.querySelector('.ssm-close').addEventListener('click', closeExpenseMonthlyOverlay);
+  const onKey = (ev) => { if (ev.key === 'Escape') { closeExpenseMonthlyOverlay(); document.removeEventListener('keydown', onKey); } };
+  document.addEventListener('keydown', onKey);
+  render();
+}
+document.addEventListener('click', (e) => {
+  const t = e.target && e.target.closest ? e.target.closest('#mel-monthly-sheet, #ela-monthly-sheet') : null;
+  if (!t) return;
+  if (t.id === 'mel-monthly-sheet') renderExpenseMonthlyPanel(null, myExpenseLedgerRows, { hideEmployee: true });
+  else renderExpenseMonthlyPanel(null, expenseLedgerAdminRows, {});
+});
+
+// 申請を送る前に、金額や日付がふつうでない明細を本人に確認する(2026-11-02)。
+// 領収書の読み取りで「2,800円」が「28,002,800円」になったまま、本人が確認済みにして申請が通っていた。
+// 年の読み違い(2014年・2022年など)も同じ。ここで止めて、直せるようにする。
+function confirmUnusualExpenseItems(items) {
+  const today = new Date();
+  const warns = [];
+  (items || []).forEach((it, i) => {
+    const amt = Number(it.amount || 0);
+    if (amt >= 100000) warns.push((i + 1) + '件目: 金額が ' + amt.toLocaleString('ja-JP') + '円 になっています(桁の入力間違いはありませんか)');
+    const d = it.document_date ? new Date(String(it.document_date).slice(0, 10) + 'T00:00:00') : null;
+    if (d && !Number.isNaN(d.getTime())) {
+      const days = (today - d) / 86400000;
+      const label = d.getFullYear() + '年' + (d.getMonth() + 1) + '月' + d.getDate() + '日';
+      if (days > 120) warns.push((i + 1) + '件目: 利用日が ' + label + ' で、4か月以上前です(年の読み間違いはありませんか)');
+      else if (days < -1) warns.push((i + 1) + '件目: 利用日が ' + label + ' で、まだ来ていない日です');
+    }
+  });
+  if (!warns.length) return true;
+  return window.confirm('次の点を確認してください。\n\n' + warns.join('\n') + '\n\nこのまま申請しますか?(「キャンセル」で戻って直せます)');
+}
+
 // --- 管理者 ---
 let expenseLedgerAdminFilters = { yearMonth: '', employeeCode: '', statusGroup: '' };
 let expenseLedgerAdminRows = [];
@@ -6526,15 +6800,22 @@ async function loadExpenseLedgerAdmin() {
   listEl.innerHTML = '<div class="hint">読み込み中...</div>';
   hideError('ela-error');
   try {
-    expenseLedgerAdminRows = await rpc('admin_get_expense_ledger', {
+    // 月は「支払った月(未払いは申請した月)」で絞る。領収書の日付(読み違いがありうる)には頼らないため、
+    // サーバーには月を渡さず全期間を取り、ここで絞る(2026-11-06 Shota指示)。
+    expenseLedgerAdminRows = (await rpc('admin_get_expense_ledger', {
       p_admin_employee_code: session.employeeCode,
-      p_year_month: expenseLedgerAdminFilters.yearMonth || null,
+      p_year_month: null,
       p_target_employee_code: expenseLedgerAdminFilters.employeeCode || null,
       p_status_group: expenseLedgerAdminFilters.statusGroup || null,
-    }) || [];
-    const total = expenseLedgerAdminRows.reduce((s, r) => s + Number(r.amount || 0), 0);
+    }) || []).filter((r) => !expenseLedgerAdminFilters.yearMonth || expenseMonthlyKey(r) === expenseLedgerAdminFilters.yearMonth);
+    // 却下された明細は、税理士へ出す紙にも載せないので、合計にも入れない(2026-11-02)。
+    // 合計は「支払い済み」だけ。まだ払っていない分は足さず、別に出す(2026-11-06 Shota指示)。
+    const liveRows = expenseLedgerAdminRows.filter((r) => r.item_approval_status !== 'rejected');
+    const total = liveRows.filter((r) => r.paid_at).reduce((s, r) => s + Number(r.amount || 0), 0);
+    const unpaidTotal = liveRows.filter((r) => !r.paid_at && r.payment_status !== 'not_applicable').reduce((s, r) => s + Number(r.amount || 0), 0);
     const groupedAdmin = groupExpenseLedgerRows(expenseLedgerAdminRows);
-    if (countEl) countEl.textContent = `${groupedAdmin.length}件(明細${expenseLedgerAdminRows.length}件)・合計${yenText(total)}`;
+    const flaggedCount = groupedAdmin.filter((g) => g.max_amount >= 1000000 || g.odd_date).length;
+    if (countEl) countEl.textContent = `${groupedAdmin.length}件(明細${expenseLedgerAdminRows.length}件)・支払い済み${yenText(total)}${unpaidTotal ? `・未払い${yenText(unpaidTotal)}(未払いは合計に入れていません)` : ''}(却下を除く)${flaggedCount ? `・要確認${flaggedCount}件(金額や日付がおかしい申請)` : ''}`;
     if (expenseLedgerAdminRows.length === 0) {
       listEl.innerHTML = '<div class="hint">この条件の経費履歴はありません。</div>';
       bodyEl.innerHTML = '<tr><td colspan="17"><div class="hint">この条件の経費履歴はありません。</div></td></tr>';
@@ -6542,11 +6823,58 @@ async function loadExpenseLedgerAdmin() {
     }
     // 台帳は「領収書1件=1行」ではなく「申請(経費精算書)1件=1カード」で並べ、カードを
     // クリックするとその申請の紙+領収書がまとめて開く(2026-09-12ユーザー指摘)。
-    listEl.innerHTML = groupedAdmin.map((g) => expenseRequestLedgerCardHtml(g)).join('');
+    // 人ごとにまとめ、見出しに「いつ・いくら支払ったか」を出す(バラバラに並んで見えない、の指摘 2026-11-06)。
+    const payMd = (v) => { const d = new Date(v); if (Number.isNaN(d.getTime())) return ''; const j = new Date(d.getTime() + 9 * 3600000); return (j.getUTCMonth() + 1) + '/' + j.getUTCDate(); };
+    const showCards = !!expenseLedgerAdminFilters.employeeCode;
+    const people = new Map();
+    groupedAdmin.forEach((g) => {
+      if (!people.has(g.employee_code)) people.set(g.employee_code, { name: g.employee_name, code: g.employee_code, cards: [] });
+      people.get(g.employee_code).cards.push(g);
+    });
+    const personHtml = [...people.values()].sort((a, b) => String(a.code).localeCompare(String(b.code))).map((p) => {
+      const rowsOf = expenseLedgerAdminRows.filter((r) => r.employee_code === p.code && r.item_approval_status !== 'rejected');
+      const total = rowsOf.reduce((s, r) => s + Number(r.amount || 0), 0);
+      const byDate = new Map(); let unpaid = 0;
+      rowsOf.forEach((r) => {
+        const k = r.paid_at ? payMd(r.paid_at) : '';
+        if (k) byDate.set(k, (byDate.get(k) || 0) + Number(r.amount || 0)); else if (r.payment_status !== 'not_applicable') unpaid += Number(r.amount || 0);
+      });
+      const paidList = [...byDate.entries()].sort((a, b) => { const [am, ad] = a[0].split('/').map(Number); const [bm, bd] = b[0].split('/').map(Number); return am - bm || ad - bd; })
+        .map(([k, v]) => `${k} ${yenText(v)}`).join(' / ');
+      const cards = p.cards.slice().sort((a, b) => new Date(b.paid_at || b.requested_at) - new Date(a.paid_at || a.requested_at));
+      // 1件ずつのカードは、その人を選んだときだけ出す。全員の一覧では名前の見出しだけを縦に並べる
+      // (件数が多いと、スクロールして他の人の名前がどこか分からなくなる、の指摘 2026-11-06)。
+      return `<div class="ela-person${showCards ? ' open' : ''}">
+        <div class="ela-person-head" data-emp="${exdEsc(p.code)}"><b>${exdEsc(p.name)}</b><span>申請${p.cards.length}件・支払い済み${yenText([...byDate.values()].reduce((a, v) => a + v, 0))}${unpaid ? `・未払い${yenText(unpaid)}` : ''}</span>
+          ${showCards
+    ? '<button type="button" class="secondary ela-person-back">全員の一覧に戻る</button>'
+    : `<button type="button" class="secondary ela-person-only" data-emp="${exdEsc(p.code)}">この人だけ見る</button>`}</div>
+        <div class="ela-person-pay">支払い: ${paidList ? exdEsc(paidList) : 'まだありません'}${unpaid ? ` ／ <span class="ela-unpaid">未払い ${yenText(unpaid)}</span>` : ''}</div>
+        ${showCards ? `<div class="ela-person-cards">${cards.map((g) => expenseRequestLedgerCardHtml(g)).join('')}</div>` : ''}
+      </div>`;
+    }).join('');
+    listEl.innerHTML = expensePaymentDaySummaryHtml(expenseLedgerAdminRows, '支払った日ごとの合計(全員)') + personHtml;
     hydrateIcons(listEl);
     listEl.querySelectorAll('.expense-ledger-request-card').forEach((card) => {
       card.addEventListener('click', () => openRequestDetail('expense_reimbursement', card.dataset.requestId));
     });
+    // 名前の見出しを押しても、「この人だけ見る」を押しても、その人だけの1件ずつの一覧に切り替わる。
+    const pickPerson = (code) => {
+      expenseLedgerAdminFilters.employeeCode = code || '';
+      const sel = document.getElementById('ela-employee');
+      if (sel) sel.value = code || '';
+      loadExpenseLedgerAdmin();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    };
+    listEl.querySelectorAll('.ela-person:not(.open) .ela-person-head').forEach((h) => {
+      h.addEventListener('click', () => pickPerson(h.dataset.emp));
+    });
+    listEl.querySelectorAll('.ela-person-back').forEach((b) => {
+      b.addEventListener('click', (ev) => { ev.stopPropagation(); pickPerson(''); });
+    });
+    // PCの全明細の表も、人を選んだときだけ出す(全員の1件ずつが縦に並ぶのを避ける)。
+    const tableWrap = document.getElementById('ela-table-wrap');
+    if (tableWrap) tableWrap.style.display = showCards ? '' : 'none';
     bodyEl.innerHTML = expenseLedgerAdminRows.map((r) => `
       <tr>
         <td>${r.belonging_year_month || '-'}</td>
@@ -6603,12 +6931,29 @@ async function loadEntertainmentMonthlyReport() {
     });
     const items = (r && r.items) || [];
     const byCat = (r && r.by_category) || [];
+    // 申請が出ているのに領収書がまだ無いものも別に出す(上の表は領収書が出て承認された明細だけのため、申請より少なく見える)。
+    // 取得できなくても上の表は出す(新しい関数がまだ無い環境でも壊さない)。
+    let pre = null;
+    try {
+      pre = await rpc('admin_get_entertainment_preapproval_monthly', { p_admin_employee_code: session.employeeCode, p_year: year, p_month: month });
+    } catch (e) { pre = null; }
+    const preItems = ((pre && pre.items) || []).filter((p) => !p.receipt_count);
+    const preHtml = !pre ? '' : `
+      <div class="form-title" style="font-size:15px; margin-top:22px;">接待の事前申請(領収書がまだ出ていないもの)${preItems.length}件・予定金額の合計${yenText(pre.no_receipt_planned_total)}</div>
+      <div class="hint" style="margin:4px 0 8px;">この月の接待の申請は全部で${pre.item_count}件(予定${yenText(pre.planned_total)})です。上の表には領収書が出て承認された分だけが入ります。下は、申請はあるのに領収書がまだ出ていない分です(領収書が出ると上の表に入ります)。</div>
+      ${preItems.length ? `<div class="areq-table-wrap" style="overflow-x:auto;"><table class="areq-table">
+        <thead><tr><th>予定日</th><th>申請者</th><th>店名</th><th>予定金額</th><th>取引先</th><th>取引先の参加者</th><th>自社の参加者</th><th>申請の種類</th><th>状態</th></tr></thead>
+        <tbody>${preItems.map((p) => `<tr>
+          <td>${dateText(p.planned_date)}</td><td>${exdEsc(p.applicant || '-')}</td><td>${exdEsc(p.planned_store || '(未入力)')}</td><td>${yenText(p.planned_amount)}</td>
+          <td>${exdEsc(p.partner_name || '-')}</td><td>${exdEsc(p.partner_participants || '-')}${p.partner_participant_count ? `(${p.partner_participant_count}名)` : ''}</td>
+          <td>${exdEsc((p.our_participant_names || []).join('、') || '-')}</td><td>${exdEsc(p.submission_timing || '-')}</td>
+          <td><span class="mini-tag warn">領収書まだ</span> ${p.status === 'approved' ? '申請は承認済み' : '申請の承認待ち'}</td></tr>`).join('')}</tbody></table></div>` : '<div class="hint">領収書が出ていない申請はありません。</div>'}`;
     if (summaryEl) {
       summaryEl.textContent = items.length
-        ? `${year}年${month}月・${items.length}件・合計${yenText(r.total)}(${byCat.map((c) => `${c.account_category} ${c.count}件 ${yenText(c.total)}`).join('・')})`
-        : `${year}年${month}月は対象の明細がありません。`;
+        ? `${year}年${month}月・${items.length}件・合計${yenText(r.total)}(${byCat.map((c) => `${c.account_category} ${c.count}件 ${yenText(c.total)}`).join('・')})${pre ? `・事前申請は全${pre.item_count}件(領収書まだ ${preItems.length}件)` : ''}`
+        : `${year}年${month}月は領収書つきの明細がありません。${pre ? `接待の事前申請は全${pre.item_count}件(領収書まだ ${preItems.length}件)です。` : ''}`;
     }
-    if (!items.length) { contentEl.innerHTML = '<div class="hint">この月は接待交際費・会議費・福利厚生費に確定した明細がありません。</div>'; return; }
+    if (!items.length) { contentEl.innerHTML = '<div class="hint">この月は接待交際費・会議費・福利厚生費に確定した明細がありません。</div>' + preHtml; return; }
     contentEl.innerHTML = `
       <div class="form-title" style="font-size:15px;">${exdEsc(String(year))}年${exdEsc(String(month))}月 接待交際費・会議費・福利厚生費</div>
       <div class="areq-table-wrap" style="overflow-x:auto;">
@@ -6637,7 +6982,7 @@ async function loadEntertainmentMonthlyReport() {
             <tr><td colspan="3" style="text-align:right; font-weight:700;">合計</td><td style="font-weight:700;">${yenText(r.total)}</td><td colspan="6"></td></tr>
           </tbody>
         </table>
-      </div>`;
+      </div>${preHtml}`;
   } catch (e) {
     contentEl.innerHTML = '';
     if (summaryEl) summaryEl.textContent = '';
@@ -7042,7 +7387,14 @@ function exdSettlementSheetHtml(full) {
   const blanks = Math.max(0, 12 - rows.length);
   // 実際に支払済みならその方法をそのまま表示。まだ支払前でも、申請者が希望した受取方法が
   // あればそれを「(希望)」付きで表示する(2026-09-12ユーザー指摘: 申請時に選べないのはおかしい)。
-  const payLabel = pay.method === 'transfer' ? '振込み' : pay.method === 'cash' ? '現金'
+  // 会社が払い済みの経費(法人カード・会社現金・会社口座)は、社員への支払が無い。
+  // 「現金・振込み」のままだと、これから払うものに見えて紛らわしい(2026-11-12ユーザー指摘)ので、
+  // 紙にも「会社払い(法人カード)」「社員への支払なし」と明記する。
+  const isCompanyPaid = h.expense_category === 'company_expense';
+  const companyWays = Array.from(new Set(rows.map((it) => it.payment_method).filter(Boolean)));
+  const noPayText = '社員への支払なし';
+  const payLabel = isCompanyPaid ? `会社払い${companyWays.length ? `(${companyWays.map(exdEsc).join('・')})` : ''}`
+    : pay.method === 'transfer' ? '振込み' : pay.method === 'cash' ? '現金'
     : pay.preferred_receipt_method === 'bank_transfer' ? '銀行振込(希望)'
     : pay.preferred_receipt_method === 'cash' ? '現金(希望)'
     : '現金　・　振込み';
@@ -7055,6 +7407,7 @@ function exdSettlementSheetHtml(full) {
   return `<div class="settlement-sheet-wrap">
     <div class="settlement-sheet-head">
       <span>経費精算書（税理士へ提出する用紙）</span>
+      <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
       <button type="button" class="secondary exd-sheet-toggle">閉じる</button>
     </div>
     <div class="settlement-sheet-scroll exd-sheet-body">
@@ -7087,7 +7440,7 @@ function exdSettlementSheetHtml(full) {
           <div class="ss-admin">
             <div style="font-size:10.5px;margin-bottom:2px;">［管理欄］</div>
             <table>
-              <tr><th>支 払 日</th><td>${exdEsc(d.paid_at ? ymd(d.paid_at) : '　年　　月　　日')}</td></tr>
+              <tr><th>支 払 日</th><td>${exdEsc(isCompanyPaid ? noPayText : d.paid_at ? ymd(d.paid_at) : '　年　　月　　日')}</td></tr>
               <tr><th>支払方法</th><td>${payLabel}</td></tr>
               <tr><th>承認状況</th><td colspan="4" style="font-size:10.5px;">${approved ? '承認済み' : '未承認（承認するとここに承認者名が入ります）'}</td></tr>
               <tr>
@@ -7099,9 +7452,9 @@ function exdSettlementSheetHtml(full) {
           <div class="ss-total">
             <table>
               <tr><th style="width:96px;">合　　計</th><td class="num" style="font-size:14px;">${yen(total)}</td></tr>
-              <tr><th>受 取 方 法</th><td style="text-align:center;">${payLabel}</td></tr>
+              <tr><th>受 取 方 法</th><td style="text-align:center;">${isCompanyPaid ? noPayText : payLabel}</td></tr>
             </table>
-            <div class="ss-note">※　振込み手数料、申請者負担</div>
+            <div class="ss-note">${isCompanyPaid ? '※　会社が支払い済みの経費です' : '※　振込み手数料、申請者負担'}</div>
           </div>
         </div>
         <div class="ss-company">株式会社　迅翔興業</div>
@@ -9169,6 +9522,7 @@ async function loadEmployeeDetailBasic() {
     try { dependents = await rpc('admin_get_employee_dependents', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code }); } catch (e) { /* 扶養人数だけ読めなくても基本情報は表示する */ }
     renderAvatar('employee-detail-avatar', p.employee_name, p.profile_photo_url);
     document.getElementById('employee-detail-name').textContent = p.employee_name;
+    document.getElementById('employee-detail-name').dataset.hireDate = p.hire_date ? String(p.hire_date).slice(0, 10) : ''; // 有給管理簿の紙に入社日を載せる
     document.getElementById('employee-detail-code').textContent = `社員番号: ${p.employee_code}・${p.status === 'active' ? '在籍中' : (p.status === 'retired' ? '退職' : '在籍外')}`;
     document.getElementById('employee-detail-basic-fields').innerHTML =
       fieldRow('フリガナ', p.furigana) + fieldRow('生年月日', p.birth_date ? new Date(p.birth_date).toLocaleDateString('ja-JP') : null) +
@@ -9227,6 +9581,73 @@ async function doSaveEmployeePaymentMethod() {
 
 const LEAVE_TX_LABEL = { initial_grant: '付与(初回)', accrual: '付与', usage: '使用', adjustment: '調整/取消', carryover_expiry: '失効' };
 
+// 有給管理簿(印刷用の紙)。2026-11-12 Shota指摘「有給管理の所で紙に印刷できるようになってない」。
+// 画面の「付与・使用履歴(元帳)」と同じデータから作るので、画面と紙の数字がずれない。
+// 経費精算書・貸付金台帳と同じ「PDFで印刷」(ss-print-btn → printSettlementSheet)で白地・A4縦に出す。
+// 残日数は、古い順に付与・使用を足し引きした累計(同じ日は付与を先に数える)。
+function leaveSheetHtml(name, hireDate, summary, ledger) {
+  const ymd = (v) => {
+    if (!v) return '';
+    const dt = new Date(v);
+    return Number.isNaN(dt.getTime()) ? '' : `${dt.getFullYear()}年${dt.getMonth() + 1}月${dt.getDate()}日`;
+  };
+  const days = (n) => `${Number.isInteger(Number(n)) ? Number(n) : Number(n).toFixed(1)}日`;
+  const order = (t) => (t.amount > 0 ? 0 : 1);
+  const sorted = ledger.map((tx, i) => ({ tx, i }))
+    .sort((a, b) => new Date(a.tx.effective_date) - new Date(b.tx.effective_date) || order(a.tx) - order(b.tx) || b.i - a.i)
+    .map((x) => x.tx);
+  let bal = 0;
+  const rows = sorted.map((tx) => {
+    bal += Number(tx.amount || 0);
+    return `<tr>
+        <td>${exdEsc(ymd(tx.effective_date))}</td>
+        <td>${exdEsc(LEAVE_TX_LABEL[tx.transaction_type] || tx.transaction_type)}</td>
+        <td class="num">${tx.amount > 0 ? '+' : ''}${exdEsc(days(tx.amount))}</td>
+        <td class="num">${exdEsc(days(bal))}</td>
+        <td class="small">${exdEsc(tx.note || '')}</td>
+      </tr>`;
+  });
+  const blanks = Math.max(0, 14 - rows.length);
+  const s = summary || {};
+  const period = s.period_start ? `${ymd(s.period_start)}〜${ymd(s.period_end)}` : '';
+  const sumCell = (label, v) => `<tr><th style="width:130px;">${label}</th><td class="num">${v != null ? exdEsc(days(v)) : '未設定'}</td></tr>`;
+  return `<div class="settlement-sheet-wrap" data-print-title="${exdEsc(`有給管理簿_${name}`)}">
+    <div class="settlement-sheet-head">
+      <span>有給管理簿(印刷用)</span>
+      <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
+    </div>
+    <div class="settlement-sheet-scroll">
+      <div class="settlement-sheet">
+        <div class="ss-title">有 給 休 暇 管 理 簿</div>
+        <div class="ss-meta">
+          入社日：<b>${exdEsc(ymd(hireDate))}</b><br>
+          氏　名：<b>${exdEsc(name)}</b>
+        </div>
+        <table>
+          <tr>
+            <th style="width:120px;">日 付</th><th style="width:100px;">区 分</th>
+            <th style="width:80px;">日 数</th><th style="width:90px;">残 日 数</th><th>備 考</th>
+          </tr>
+          ${rows.join('')}
+          ${Array.from({ length: blanks }).map(() => '<tr><td></td><td></td><td></td><td></td><td></td></tr>').join('')}
+        </table>
+        <div class="ss-bottom">
+          <div class="ss-admin">
+            <table>
+              <tr><th style="width:130px;">今年度の期間</th><td>${exdEsc(period || '未登録')}</td></tr>
+              ${sumCell('今年度付与', s.granted_this_period)}
+              ${sumCell('今年度使用', s.used_this_period)}
+              ${sumCell('今年度の残り', s.remaining_this_period)}
+            </table>
+          </div>
+        </div>
+        <div class="ss-note">※　残日数は、付与と使用を古い順に足し引きした累計です</div>
+        <div class="ss-company">株式会社　迅翔興業</div>
+      </div>
+    </div>
+  </div>`;
+}
+
 async function loadEmployeeDetailLeave() {
   const session = getSession();
   const code = currentEmployeeDetailCode;
@@ -9259,6 +9680,11 @@ async function loadEmployeeDetailLeave() {
     }
 
     const ledger = await rpc('admin_get_employee_leave_ledger', { p_admin_employee_code: session.employeeCode, p_target_employee_code: code });
+    const sheetEl = document.getElementById('employee-detail-leave-sheet');
+    if (sheetEl) {
+      const nameEl = document.getElementById('employee-detail-name');
+      sheetEl.innerHTML = ledger && ledger.length ? leaveSheetHtml(nameEl.textContent.trim(), nameEl.dataset.hireDate || '', b, ledger) : '';
+    }
     if (!ledger || ledger.length === 0) { listEl.innerHTML = '<div class="hint">付与・使用履歴はまだありません。</div>'; return; }
     listEl.innerHTML = ledger.map((tx) => `
       <div class="history-item">
@@ -9512,9 +9938,13 @@ function renderAdminLeaveHistory() {
   document.getElementById('alh-count').textContent = `${alhRows.length}件`;
   if (alhRows.length === 0) {
     listEl.innerHTML = '<div class="hint">該当する休暇はありません。</div>';
-    tbodyEl.innerHTML = '<tr><td colspan="11"><div class="hint">該当する休暇はありません。</div></td></tr>';
+    tbodyEl.innerHTML = '<tr><td colspan="12"><div class="hint">該当する休暇はありません。</div></td></tr>';
     return;
   }
+  // 承認済みの休暇だけ「出勤に変更(休暇を取り消す)」を出す。押すと取消パネルが開く(alhOpenCancelPanel)。
+  const changeBtn = (r, small) => (r.status_group === 'approved'
+    ? `<button type="button" class="secondary alh-change-btn" data-request-id="${r.request_id}" style="${small ? 'padding:4px 8px;font-size:12px;' : 'margin-top:8px;'}">出勤に変更(休暇を取り消す)</button>`
+    : '');
   const statusBadge = (r) => {
     const cls = r.status_group === 'approved' ? 'done' : (['rejected', 'cancelled'].includes(r.status_group) ? 'rejected' : '');
     return `<span class="status-badge ${cls}">${LEAVE_STATUS_GROUP_LABEL[r.status_group] || r.status}</span>`;
@@ -9527,6 +9957,7 @@ function renderAdminLeaveHistory() {
       ${r.approver_name ? `<div class="row2">承認者: ${r.approver_name}${r.decided_at ? `・${new Date(r.decided_at).toLocaleString('ja-JP')}` : ''}</div>` : ''}
       ${r.status_group === 'approved' && !r.reflected_in_calendar ? '<div class="row2"><span class="mini-tag danger">配置カレンダー未反映</span></div>' : ''}
       ${statusBadge(r)}
+      ${changeBtn(r, false)}
     </div>
   `).join('');
   tbodyEl.innerHTML = alhRows.map((r) => `
@@ -9540,8 +9971,89 @@ function renderAdminLeaveHistory() {
       <td>${r.approver_name || '-'}</td>
       <td>${r.decided_at ? new Date(r.decided_at).toLocaleString('ja-JP') : '-'}</td>
       <td>${r.status_group === 'approved' ? (r.reflected_in_calendar ? '反映済み' : '<span class="mini-tag danger">未反映</span>') : '-'}</td>
+      <td>${changeBtn(r, true) || '-'}</td>
     </tr>
   `).join('');
+}
+
+// ---------- 休暇が出勤に変わったとき: 承認済みの休暇を取り消す(管理者の役割を持つ人なら誰でも) ----------
+// 2026-11-09 Shota指示。全部の日を外す=休暇を丸ごと取消。最初の日または最後の日から続けて外す=休暇の期間を短くする。
+// 取消理由は必須(監査ログへ残る)。native の prompt/confirm は使わず、画面内のパネルで入力する
+// (ネイティブダイアログが抑制・無反応な環境で、押しても何も起きない状態を作らないため)。
+const ALH_WEEKDAY = ['日', '月', '火', '水', '木', '金', '土'];
+function alhYmdRange(a, b) {
+  const out = [];
+  const end = new Date(`${b}T00:00:00Z`);
+  for (let d = new Date(`${a}T00:00:00Z`); d <= end; d = new Date(d.getTime() + 86400000)) out.push(d.toISOString().slice(0, 10));
+  return out;
+}
+function alhDayLabel(ymd) {
+  const d = new Date(`${ymd}T00:00:00Z`);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}(${ALH_WEEKDAY[d.getUTCDay()]})`;
+}
+function alhOpenCancelPanel(requestId) {
+  const row = alhRows.find((r) => String(r.request_id) === String(requestId));
+  const panel = document.getElementById('alh-cancel-panel');
+  if (!row || !panel) return;
+  const days = alhYmdRange(row.start_date, row.end_date);
+  const multi = days.length > 1;
+  const opts = (sel) => days.map((d) => `<option value="${d}"${d === sel ? ' selected' : ''}>${alhDayLabel(d)}</option>`).join('');
+  panel.innerHTML = `
+    <div class="row1"><span>${exdEsc(row.employee_name)}さんの${exdEsc(row.leave_category_label)}を、出勤に変更します</span></div>
+    <div class="row2">${leavePeriodText(row)}・${row.requested_days}日${row.reason ? `・${exdEsc(row.reason)}` : ''}</div>
+    ${multi ? `
+      <div class="hint" style="margin:8px 0 4px;">休暇から外す日(最初の日、または最後の日から続けて選べます。全部の日を選ぶと、休暇を丸ごと取り消します)</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+        <select id="alh-cancel-from" aria-label="外す日(開始)">${opts(days[0])}</select>
+        <span>〜</span>
+        <select id="alh-cancel-to" aria-label="外す日(終了)">${opts(days[days.length - 1])}</select>
+      </div>` : `<div class="hint" style="margin:8px 0 4px;">この休暇(${alhDayLabel(days[0])})を取り消します。</div>`}
+    <label for="alh-cancel-reason" style="margin-top:8px;">取消理由<span class="required-mark">(必須)</span></label>
+    <input type="text" id="alh-cancel-reason" value="休暇の予定が出勤に変わったため">
+    <div class="hint" style="margin-top:6px;">${row.leave_category === 'paid_leave' ? '外した日数ぶん、有給の残日数は元に戻ります。' : '有給ではない休暇のため、有給の残日数は変わりません。'}配置カレンダーの休みも外れます。</div>
+    <div id="alh-cancel-error" class="error-text" style="display:none;"></div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button type="button" class="secondary" id="alh-cancel-confirm" data-request-id="${row.request_id}" style="color:var(--danger);border-color:var(--danger);font-weight:700;">休暇から外す</button>
+      <button type="button" class="secondary" id="alh-cancel-close">やめる</button>
+    </div>`;
+  panel.style.display = '';
+  panel.scrollIntoView({ block: 'nearest' });
+  document.getElementById('alh-cancel-close').addEventListener('click', () => { panel.style.display = 'none'; });
+  document.getElementById('alh-cancel-confirm').addEventListener('click', () => alhSubmitCancel(row, days));
+}
+async function alhSubmitCancel(row, days) {
+  const errEl = document.getElementById('alh-cancel-error');
+  const btn = document.getElementById('alh-cancel-confirm');
+  const fromEl = document.getElementById('alh-cancel-from');
+  const toEl = document.getElementById('alh-cancel-to');
+  const from = fromEl ? fromEl.value : days[0];
+  const to = toEl ? toEl.value : days[days.length - 1];
+  const reason = (document.getElementById('alh-cancel-reason').value || '').trim();
+  const fail = (m) => { errEl.textContent = m; errEl.style.display = ''; };
+  errEl.style.display = 'none';
+  if (!reason) { fail('取消理由を入力してください。'); return; }
+  if (from > to) { fail('外す日の開始が終了より後になっています。'); return; }
+  if (from !== days[0] && to !== days[days.length - 1]) {
+    fail('休暇の途中の日だけを外すことはできません。最初の日、または最後の日から続けて選んでください。'); return;
+  }
+  btn.disabled = true;
+  try {
+    const session = getSession();
+    const res = await rpc('admin_cancel_paid_leave_days', {
+      p_admin_employee_code: session.employeeCode, p_employee_request_id: Number(row.request_id),
+      p_from_date: from, p_to_date: to, p_reason: reason,
+    });
+    document.getElementById('alh-cancel-panel').style.display = 'none';
+    const notice = document.getElementById('alh-notice');
+    notice.textContent = res && res.mode === 'partial'
+      ? `${row.employee_name}さんの休暇から ${alhDayLabel(from)}${from !== to ? `〜${alhDayLabel(to)}` : ''} を外しました(残りの休暇: ${res.new_days}日)。`
+      : `${row.employee_name}さんの休暇を取り消しました。`;
+    notice.style.display = '';
+    await loadAdminLeaveHistory();
+  } catch (e) {
+    fail(e.message || '取消に失敗しました。');
+    btn.disabled = false;
+  }
 }
 
 async function loadAdminLeaveHistory() {
@@ -12268,6 +12780,7 @@ async function loadSiteAdminList() {
     const details = await rpc('admin_list_sites', {
       p_admin_employee_code: session.employeeCode, p_include_inactive: true, p_query: null,
     }).catch(() => null);
+    const pendingContracts = await rpc('admin_site_contract_list', { p_admin_employee_code: session.employeeCode, p_site_ids: rows.slice(0, 500).map((r) => Number(r.id)) }).catch(() => null);
     listEl.innerHTML = rows.map((s, i) => {
       const candidates = candidateLists[i] || [];
       const detail = Array.isArray(details) ? details.find((row) => Number(row.id) === Number(s.id)) : null;
@@ -12284,8 +12797,9 @@ async function loadSiteAdminList() {
         <div class="row1"><input type="text" class="site-rename-input" value="${s.site_name}"></div>
         <div class="row2">申請者: ${siteProposerText(s)}</div>
         <div class="row2">申請日時: ${new Date(s.created_at).toLocaleString('ja-JP')}</div>
-        <label>元請け会社（承認前に確認）</label>
+        <label>現場全体の元請け（承認前に確認）</label>
         <input type="text" class="site-pending-prime" maxlength="200" value="${exdEsc(detail?.prime_contractor || '')}" placeholder="例: 〇〇建設株式会社">
+        <div class="site-pending-contract"></div>
         <label><input type="checkbox" class="site-pending-internal">元請けなし（社内業務）</label>
         <input type="text" class="site-pending-internal-reason" maxlength="500" placeholder="社内業務で元請けがない理由">
         <div class="error site-pending-prime-error">${details === null ? '元請けの登録済み情報を取得できませんでした。承認前に確認してください。' : ''}</div>
@@ -12296,6 +12810,13 @@ async function loadSiteAdminList() {
         </div>
       </div>`;
     }).join('');
+    listEl.querySelectorAll('.qual-item').forEach((item) => {
+      const c = Array.isArray(pendingContracts) ? pendingContracts.find((x) => Number(x.siteId) === Number(item.dataset.id)) : null;
+      const box = item.querySelector('.site-pending-contract');
+      scMount(box, c || null);
+      const chk = item.querySelector('.site-pending-internal');
+      chk.addEventListener('change', () => { box.style.display = chk.checked ? 'none' : ''; });
+    });
     listEl.querySelectorAll('.approve-btn').forEach((btn) => {
       btn.addEventListener('click', (e) => doDecideSite(e.target.closest('.qual-item'), 'active'));
     });
@@ -12330,7 +12851,13 @@ async function doDecideSite(itemEl, action) {
   const errorEl = itemEl.querySelector('.site-pending-prime-error');
   if (errorEl) errorEl.textContent = '';
   if (action === 'active' && (internal ? !!prime || !reason : !prime)) {
-    if (errorEl) errorEl.textContent = internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '承認前に元請け会社を入力してください。';
+    if (errorEl) errorEl.textContent = internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '承認前に現場全体の元請けを入力してください。';
+    return;
+  }
+  const contractRoot = itemEl.querySelector('.site-pending-contract .sc-editor');
+  const contract = action === 'active' && !internal && contractRoot ? scEditorValue(contractRoot, true) : null;
+  if (action === 'active' && !internal && (!contract || contract.error)) {
+    if (errorEl) errorEl.textContent = contract ? contract.error : '直接の受注先を取引先から選んでください。';
     return;
   }
   try {
@@ -12339,9 +12866,15 @@ async function doDecideSite(itemEl, action) {
     }
     if (action === 'active') {
       await rpc('site_prime_exception_set', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_reason: internal ? reason : null });
-      if (!internal) await rpc('admin_update_site_details', {
-        p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_prime_contractor: prime,
-      });
+      if (!internal) {
+        await rpc('admin_update_site_details', {
+          p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_prime_contractor: prime,
+        });
+        await rpc('admin_site_contract_set', {
+          p_admin_employee_code: session.employeeCode, p_site_id: Number(id),
+          p_direct_client_partner_id: contract.partnerId, p_prime_contractor: null, p_tiers: contract.tiers,
+        });
+      }
     }
     await rpc('admin_decide_pending_site', { p_admin_employee_code: session.employeeCode, p_site_id: Number(id), p_action: action });
     await loadSiteAdminList();
@@ -12368,10 +12901,13 @@ function populateSitePrefectureSelect(selectId) {
 // ---------- 現場を登録申請(2026-08-28第4弾、一般社員向け) ----------
 
 function resetProposeSiteForm() {
+  scMount(document.getElementById('propose-site-contract'), null);
+  scBindInternalToggle('propose-site-internal', 'propose-site-contract');
   document.getElementById('propose-site-name').value = '';
   document.getElementById('propose-site-address').value = '';
   document.getElementById('propose-site-prime-contractor').value = '';
   document.getElementById('propose-site-internal').checked = false;
+  document.getElementById('propose-site-contract').style.display = '';
   document.getElementById('propose-site-internal-reason').value = '';
   document.getElementById('propose-site-notes').value = '';
   document.getElementById('propose-site-out-of-prefecture').checked = false;
@@ -12557,6 +13093,7 @@ async function loadMyLoanBalance() {
       <div class="settlement-sheet-wrap" style="margin-top:14px;">
         <div class="settlement-sheet-head">
           <span>貸付金台帳</span>
+          <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
           <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
         </div>
         <div class="settlement-sheet-scroll loan-sheet-box"></div>
@@ -12697,6 +13234,7 @@ async function loadLoanAdminDetail() {
       <div class="settlement-sheet-wrap">
         <div class="settlement-sheet-head">
           <span>借入申請書（税理士提出用）</span>
+          <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
           <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
         </div>
         <div class="settlement-sheet-scroll loan-sheet-box">${loanRenderRequestSheetHtml(r)}</div>
@@ -13152,6 +13690,7 @@ function loanLedgerRenderSheetHtml(employeeName, entries, page) {
 function renderLoanLedgerPagedSheet(wrapEl, employeeName, entries) {
   const boxEl = wrapEl.querySelector('.loan-sheet-box');
   if (!boxEl) return;
+  wrapEl._llPrint = { employeeName, entries };
   const totalPages = loanLedgerTotalPages(entries);
   let page = Number(wrapEl.dataset.llPage || totalPages) || totalPages;
   if (page < 1) page = 1;
@@ -13281,6 +13820,7 @@ async function loadLoanLedgerDetail() {
           <div class="settlement-sheet-wrap">
             <div class="settlement-sheet-head">
               <span>貸付金台帳</span>
+              <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
               <button type="button" class="secondary loan-sheet-toggle">閉じる</button>
             </div>
             <div class="settlement-sheet-scroll loan-sheet-box"></div>
@@ -13863,6 +14403,189 @@ function wireLucky() {
   }));
 }
 
+
+// ---------- 直接の受注先・施工体制(現場の登録・編集・承認で共通の入力部品) ----------
+// 2026-11-09 Shota指示。現場に3つを別々に持たせる: 直接の受注先(必須・取引先から選ぶ)/現場全体の元請け(従来の元請け欄)/施工体制(一次→二次…、迅翔興業の位置)。
+// 保存は DB の admin_site_contract_set / admin_register_site_contract / propose_new_site_contract。取引先は business_partners の ID で持つ(同じ会社を重複登録しない)。
+const SC_TIER_LABELS = ['', '一次', '二次', '三次', '四次', '五次', '六次', '七次', '八次', '九次'];
+// 並び: 元請け(rows[0]。会社名は「現場全体の元請け」欄が持つ) → 一次 → 二次 …。direct=その段が「直接の受注先」(迅翔興業へ直接仕事を出す会社)。
+// 迅翔興業はその次の段に自動で入る(DBでは is_self の段)。DBの形: 直接の受注先=取引先ID、施工体制=一次以降の段(迅翔興業の段を含む)。
+function scBuildContract(rows, requireDirect) {
+  const directIdx = rows.findIndex((r) => r.direct);
+  const tiers = [];
+  if (directIdx < 0) {
+    if (requireDirect) return { partnerId: null, tiers: [], error: '直接の受注先にする会社を選んでください(「直接の受注先」の○を押します)。' };
+    rows.slice(1).forEach((r) => { if (r.name) tiers.push({ name: r.name, partnerId: r.partnerId || null, isSelf: false }); });
+    return { partnerId: null, tiers, error: '' };
+  }
+  const direct = rows[directIdx];
+  if (!direct.partnerId) return { partnerId: null, tiers: [], error: '直接の受注先は、取引先の一覧から選んでください(入力した文字だけでは保存できません)。' };
+  for (let i = 1; i <= directIdx; i++) {
+    const r = rows[i];
+    if (!r.name) return { partnerId: null, tiers: [], error: `${SC_TIER_LABELS[i]}請けの会社名を入力してください(使わない段は「この段を削除」を押します)。` };
+    tiers.push({ name: r.name, partnerId: r.partnerId || null, isSelf: false });
+  }
+  if (rows.slice(directIdx + 1).some((r) => r.name)) return { partnerId: null, tiers: [], error: '直接の受注先より後ろには会社を入れられません(迅翔興業がその次に入ります)。' };
+  tiers.push({ name: '', partnerId: null, isSelf: true });
+  if (tiers.length > 9) return { partnerId: null, tiers: [], error: '施工体制は迅翔興業を入れて9段までです。' };
+  return { partnerId: Number(direct.partnerId), tiers, error: '' };
+}
+// 保存済みの内容(admin_site_contract_list の1件)を、入力欄の並びに戻す。
+function scRowsFromContract(c) {
+  const rows = [{ name: '', partnerId: null, direct: false }];
+  if (!c) { rows.push({ name: '', partnerId: null, direct: false }); return rows; }
+  const dPid = c.directClientPartnerId ? Number(c.directClientPartnerId) : null;
+  const tiers = Array.isArray(c.tiers) ? c.tiers : [];
+  const self = tiers.find((t) => t.isSelf);
+  const selfNo = self ? Number(self.tier) : 0;
+  tiers.filter((t) => !t.isSelf && (!selfNo || Number(t.tier) < selfNo)).sort((a, b) => Number(a.tier) - Number(b.tier))
+    .forEach((t) => rows.push({ name: t.name || '', partnerId: t.partnerId ? Number(t.partnerId) : null, direct: false }));
+  let idx = -1;
+  if (dPid) {
+    idx = selfNo ? selfNo - 1 : rows.findIndex((r, i) => i > 0 && r.partnerId === dPid);
+    if (idx < 0 || idx > rows.length - 1) { rows.push({ name: c.directClientName || '', partnerId: dPid, direct: false }); idx = rows.length - 1; }
+    rows[idx].direct = true;
+    rows[idx].partnerId = dPid;
+    if (!rows[idx].name) rows[idx].name = c.directClientName || '';
+  }
+  if (rows.length === 1 && idx !== 0) rows.push({ name: '', partnerId: null, direct: false });
+  return rows;
+}
+let scEditorSeq = 0;
+function scEditorHtml() {
+  return `
+  <div class="sc-editor">
+    <label>施工体制と直接の受注先<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">元請けから順に、一次・二次…の会社を入れます。迅翔興業へ直接仕事を出している会社の「直接の受注先」の○を押して、取引先の一覧から選びます。迅翔興業は、その次に自動で入ります。</div>
+    <div class="sc-prime-row" style="margin-top:8px;padding:8px;border:1px solid var(--border,#334);border-radius:8px;">
+      <div class="row2" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+        <strong>元請け</strong><span class="hint-inline" style="margin:0;">上の「現場全体の元請け」の会社</span>
+        <label style="font-weight:normal;display:flex;gap:6px;align-items:center;margin:0 0 0 auto;"><input type="radio" class="sc-direct" style="width:auto;margin:0;"> 直接の受注先</label>
+      </div>
+      <div class="sc-prime-pick" style="display:none;">
+        <input type="text" class="sc-tier-name" maxlength="200" autocomplete="off" placeholder="直接の受注先を取引先から選ぶ(例: おおたに)">
+        <div class="sc-suggest"></div>
+      </div>
+    </div>
+    <div class="sc-tiers"></div>
+    <button type="button" class="secondary sc-add-tier">一次・二次…の会社を追加</button>
+    <div class="hint-inline sc-self-line"></div>
+    <div class="hint-inline sc-direct-state"></div>
+  </div>`;
+}
+// 入れ物に入力部品を取り付けて空の状態にする。root を返す。
+function scMount(container, initial) {
+  if (!container) return null;
+  if (!container.querySelector('.sc-editor')) container.innerHTML = scEditorHtml();
+  const root = container.querySelector('.sc-editor');
+  scEditorInit(root, initial || null);
+  return root;
+}
+// 「元請けなし(社内業務)」のときは、直接の受注先・施工体制は不要なので隠す。
+function scBindInternalToggle(checkId, containerId) {
+  const chk = document.getElementById(checkId);
+  const box = document.getElementById(containerId);
+  if (!chk || !box || chk._scBound) return;
+  chk._scBound = true;
+  const apply = () => { box.style.display = chk.checked ? 'none' : ''; };
+  chk.addEventListener('change', apply);
+  apply();
+}
+function scBindPicker(input, suggestEl, onPick, onClear) {
+  let timer = null;
+  input.addEventListener('input', () => {
+    onClear();
+    clearTimeout(timer);
+    const q = input.value.replace(/株式会社|\(株\)|（株）|有限会社|\(有\)|（有）|合同会社/g, '').trim();
+    if (!q) { suggestEl.innerHTML = ''; return; }
+    timer = setTimeout(async () => {
+      try {
+        const rows = await rpc('search_business_partners', { p_query: q });
+        suggestEl.innerHTML = (rows || []).map((r) => `<button type="button" class="secondary sc-opt" data-id="${r.id}" data-name="${exdEsc(r.partner_name)}" style="display:block;width:100%;text-align:left;margin-top:4px;">${exdEsc(r.partner_name)}</button>`).join('')
+          || '<div class="hint-inline">該当する取引先がありません。取引先は経営管理アプリで登録します。</div>';
+      } catch (e) { suggestEl.innerHTML = '<div class="hint-inline">検索に失敗しました。もう一度入力してください。</div>'; }
+    }, 250);
+  });
+  suggestEl.addEventListener('click', (ev) => {
+    const b = ev.target.closest('.sc-opt');
+    if (!b) return;
+    input.value = b.dataset.name;
+    suggestEl.innerHTML = '';
+    onPick(Number(b.dataset.id), b.dataset.name);
+  });
+}
+// 段の番号の表示・迅翔興業の位置・選択状況をまとめて更新する。
+function scRefresh(root) {
+  const radios = [...root.querySelectorAll('.sc-direct')];
+  const tierRows = [...root.querySelectorAll('.sc-tier-row')];
+  tierRows.forEach((row, i) => { row.querySelector('.sc-tier-label').textContent = `${SC_TIER_LABELS[i + 1]}請け`; });
+  const directIdx = radios.findIndex((r) => r.checked);
+  const primeRow = root.querySelector('.sc-prime-row');
+  root.querySelector('.sc-prime-pick').style.display = directIdx === 0 ? '' : 'none';
+  const dRow = directIdx === 0 ? primeRow : (directIdx > 0 ? tierRows[directIdx - 1] : null);
+  tierRows.forEach((row, i) => { row.style.opacity = directIdx >= 0 && i + 1 > directIdx ? '0.55' : ''; });
+  root.querySelector('.sc-self-line').textContent = directIdx >= 0 ? `→ 迅翔興業は ${SC_TIER_LABELS[directIdx + 1]}請け になります。` : '';
+  const state = root.querySelector('.sc-direct-state');
+  if (directIdx < 0) { state.textContent = '直接の受注先にする会社の○を押してください。'; state.style.color = 'var(--danger)'; return; }
+  const nameEl = dRow.querySelector('.sc-tier-name');
+  state.textContent = dRow._partnerId ? `直接の受注先: ${nameEl.value}(取引先ID ${dRow._partnerId})` : '直接の受注先は、取引先の一覧から選んでください(入力した文字だけでは保存できません)。';
+  state.style.color = dRow._partnerId ? '' : 'var(--danger)';
+}
+function scAddTierRow(root, tier) {
+  const wrap = root.querySelector('.sc-tiers');
+  if (wrap.children.length >= 8) return;
+  const row = document.createElement('div');
+  row.className = 'sc-tier-row';
+  row.style.cssText = 'margin-top:8px;padding:8px;border:1px solid var(--border,#334);border-radius:8px;';
+  row.innerHTML = `
+    <div class="row2" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <strong class="sc-tier-label"></strong>
+      <label style="font-weight:normal;display:flex;gap:6px;align-items:center;margin:0;"><input type="radio" class="sc-direct" style="width:auto;margin:0;"> 直接の受注先</label>
+      <button type="button" class="link sc-tier-del" style="margin-left:auto;width:auto;min-height:0;padding:4px 8px;font-size:12px;">この段を削除</button>
+    </div>
+    <input type="text" class="sc-tier-name" maxlength="200" autocomplete="off" placeholder="会社名(取引先から選ぶか、そのまま入力)">
+    <div class="sc-suggest"></div>`;
+  wrap.appendChild(row);
+  const nameEl = row.querySelector('.sc-tier-name');
+  const radio = row.querySelector('.sc-direct');
+  radio.name = root._sc.radioName;
+  row._partnerId = null;
+  if (tier) { nameEl.value = tier.name || ''; row._partnerId = tier.partnerId ? Number(tier.partnerId) : null; radio.checked = !!tier.direct; }
+  scBindPicker(nameEl, row.querySelector('.sc-suggest'), (id) => { row._partnerId = id; scRefresh(root); }, () => { row._partnerId = null; scRefresh(root); });
+  radio.addEventListener('change', () => scRefresh(root));
+  row.querySelector('.sc-tier-del').addEventListener('click', () => { row.remove(); scRefresh(root); });
+  scRefresh(root);
+}
+function scEditorInit(root, initial) {
+  const primeRow = root.querySelector('.sc-prime-row');
+  if (!root._scBound) {
+    root._scBound = true;
+    root._sc = { radioName: `sc-direct-${++scEditorSeq}` };
+    primeRow._partnerId = null;
+    primeRow.querySelector('.sc-direct').name = root._sc.radioName;
+    scBindPicker(primeRow.querySelector('.sc-tier-name'), primeRow.querySelector('.sc-suggest'),
+      (id) => { primeRow._partnerId = id; scRefresh(root); }, () => { primeRow._partnerId = null; scRefresh(root); });
+    primeRow.querySelector('.sc-direct').addEventListener('change', () => scRefresh(root));
+    root.querySelector('.sc-add-tier').addEventListener('click', () => scAddTierRow(root, null));
+  }
+  const rows = scRowsFromContract(initial);
+  primeRow._partnerId = rows[0].partnerId;
+  primeRow.querySelector('.sc-tier-name').value = rows[0].name || '';
+  primeRow.querySelector('.sc-direct').checked = !!rows[0].direct;
+  root.querySelector('.sc-tiers').innerHTML = '';
+  rows.slice(1).forEach((r) => scAddTierRow(root, r));
+  scRefresh(root);
+}
+// { partnerId, tiers, error } を返す。requireDirect のとき、直接の受注先が選ばれていなければ error。
+function scEditorValue(root, requireDirect) {
+  const primeRow = root.querySelector('.sc-prime-row');
+  const rows = [{ name: primeRow.querySelector('.sc-tier-name').value.trim(), partnerId: primeRow._partnerId || null, direct: primeRow.querySelector('.sc-direct').checked }];
+  root.querySelectorAll('.sc-tier-row').forEach((row) => {
+    rows.push({ name: row.querySelector('.sc-tier-name').value.trim(), partnerId: row._partnerId || null, direct: row.querySelector('.sc-direct').checked });
+  });
+  return scBuildContract(rows, requireDirect);
+}
+
 async function doProposeSite(forceCreate) {
   const session = getSession();
   const name = document.getElementById('propose-site-name').value.trim();
@@ -13878,18 +14601,24 @@ async function doProposeSite(forceCreate) {
   candidatesEl.style.display = 'none';
   if (!name) { showError('propose-site-error', '現場名を入力してください。'); return; }
   if (internal ? !!primeContractor || !internalReason : !primeContractor) {
-    showError('propose-site-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '元請け会社を入力してください。'); return;
+    showError('propose-site-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '現場全体の元請けを入力してください。'); return;
   }
+  const contractRoot = document.querySelector('#propose-site-contract .sc-editor');
+  const contract = internal || !contractRoot ? null : scEditorValue(contractRoot, true);
+  if (contract && contract.error) { showError('propose-site-error', contract.error); return; }
 
   const btn = document.getElementById('propose-site-submit');
   btn.disabled = true;
   try {
-    const result = await rpc('propose_new_site_details', {
+    const baseArgs = {
       p_employee_code: session.employeeCode, p_site_name: name, p_prefecture: prefecture,
       p_is_out_of_prefecture: isOutOfPrefecture,
       p_notes: internal ? ['元請けなし（社内業務）申請理由: ' + internalReason, notes].filter(Boolean).join('\n') : notes,
       p_force_create: !!forceCreate, p_address: address, p_prime_contractor: primeContractor || null,
-    });
+    };
+    const result = contract
+      ? await rpc('propose_new_site_contract', { ...baseArgs, p_direct_client_partner_id: contract.partnerId, p_tiers: contract.tiers })
+      : await rpc('propose_new_site_details', baseArgs);
     const r = result[0];
     if (r.created) {
       showDone('現場を登録申請しました。管理者の確認後、正式な現場になります。', 'menu-apply');
@@ -13927,10 +14656,13 @@ async function doCreateSite(forceCreate) {
   candidatesEl.style.display = 'none';
   if (!name) { showError('site-create-error', '現場名を入力してください。'); return; }
   if (internal ? !!primeContractor || !internalReason : !primeContractor) {
-    showError('site-create-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '元請け会社を入力してください。'); return;
+    showError('site-create-error', internal ? '社内業務は元請けを空欄にし、理由を入力してください。' : '現場全体の元請けを入力してください。'); return;
   }
+  const contractRoot = document.querySelector('#site-create-contract .sc-editor');
+  const contract = internal || !contractRoot ? null : scEditorValue(contractRoot, true);
+  if (contract && contract.error) { showError('site-create-error', contract.error); return; }
   try {
-    const result = await rpc(internal ? 'admin_register_internal_site' : 'admin_register_site', {
+    const siteArgs = {
       p_admin_employee_code: session.employeeCode, p_site_name: name,
       p_prefecture: document.getElementById('site-create-prefecture').value || null,
       p_address: document.getElementById('site-create-address').value.trim() || null,
@@ -13938,7 +14670,10 @@ async function doCreateSite(forceCreate) {
       p_planned_start_date: document.getElementById('site-create-start-date').value || null,
       p_planned_end_date: document.getElementById('site-create-end-date').value || null,
       p_force_create: !!forceCreate,
-    });
+    };
+    const result = internal
+      ? await rpc('admin_register_internal_site', siteArgs)
+      : await rpc('admin_register_site_contract', { ...siteArgs, p_direct_client_partner_id: contract.partnerId, p_tiers: contract.tiers });
     const r = result && result[0];
     if (r && r.similar_candidates && r.similar_candidates.length > 0) {
       candidatesEl.style.display = 'block';
@@ -13954,7 +14689,9 @@ async function doCreateSite(forceCreate) {
     document.getElementById('site-create-prefecture').value = '';
     document.getElementById('site-create-address').value = '';
     document.getElementById('site-create-prime-contractor').value = '';
+    const scRoot = document.querySelector('#site-create-contract .sc-editor'); if (scRoot) scEditorInit(scRoot, null);
     document.getElementById('site-create-internal').checked = false;
+    document.getElementById('site-create-contract').style.display = '';
     document.getElementById('site-create-internal-reason').value = '';
     document.getElementById('site-create-start-date').value = '';
     document.getElementById('site-create-end-date').value = '';
@@ -13973,6 +14710,9 @@ async function loadAllSitesList() {
   try {
     const rows = await rpc('admin_list_sites', { p_admin_employee_code: session.employeeCode, p_include_inactive: true, p_query: siteListQuery || null });
     if (!rows || rows.length === 0) { listEl.innerHTML = '<div class="hint">該当する現場はありません。</div>'; return; }
+    // 直接の受注先・施工体制(sites.direct_client_partner_id / site_contract_tiers)。取得できなくても一覧は出す。
+    const contractList = await rpc('admin_site_contract_list', { p_admin_employee_code: session.employeeCode, p_site_ids: rows.slice(0, 500).map((r) => Number(r.id)) }).catch(() => null);
+    const contractOf = (id) => (Array.isArray(contractList) ? contractList.find((c) => Number(c.siteId) === Number(id)) : null);
     const statusLabel = { active: '有効', pending: '承認待ち', inactive: '無効', merged: '統合済み' };
     // 2026-09-24 Shota指摘「現場の編集ができないから変えれない」対応。都道府県が県内/県外の
     // 自動判定(derive_is_out_of_prefecture)の元になっており、ここが空欄・誤りだと日報シート側の
@@ -13987,6 +14727,7 @@ async function loadAllSitesList() {
       <div class="qual-item" data-id="${s.id}">
         <div class="row1"><input type="text" class="site-rename-input" value="${exdEsc(s.site_name)}"><span class="mini-tag ${s.status === 'active' ? 'info' : (s.status === 'pending' ? 'danger' : '')}">${statusLabel[s.status] || s.status}</span></div>
         <div class="row2">${s.prefecture ? exdEsc(s.prefecture) : '都道府県未設定'}・${s.is_out_of_prefecture ? '県外' : (s.is_out_of_prefecture === false ? '県内' : '県内/県外 未判定')}</div>
+        ${(() => { const c = contractOf(s.id); if (!c) return ''; return `<div class="row2">元請け: ${exdEsc(c.primeContractor || '-')}・直接の受注先: ${c.directClientName ? exdEsc(c.directClientName) : (c.primeKind === 'internal' ? '(社内業務)' : '<span class="mini-tag danger">未設定</span>')}${c.selfTier ? `・迅翔興業は${SC_TIER_LABELS[c.selfTier]}請け` : ''}</div>`; })()}
         <div class="qual-verify-btns">
           <button type="button" class="site-save-btn">名前を保存</button>
           <button type="button" class="secondary site-edit-toggle-btn">詳細を編集</button>
@@ -13998,8 +14739,9 @@ async function loadAllSitesList() {
           <div class="hint-inline">都道府県を選ぶと、県内(徳島県)/県外は自動で判定されます。</div>
           <label>住所</label>
           <input type="text" class="site-edit-address" value="${exdEsc(addrOf(s.notes))}" placeholder="例: 徳島市南昭和町1-23">
-          <label>元請</label>
+          <label>現場全体の元請け</label>
           <input type="text" class="site-edit-prime-contractor" value="${exdEsc(s.prime_contractor || '')}" placeholder="例: 〇〇建設株式会社">
+          <div class="site-edit-contract"></div>
           <button type="button" class="site-edit-save-btn">詳細を保存</button>
           <div class="error site-edit-error"></div>
         </div>
@@ -14032,6 +14774,10 @@ async function loadAllSitesList() {
           }
           const row = rows.find((x) => Number(x.id) === Number(item.dataset.id));
           if (row) sel.value = row.prefecture || '';
+          // 社内業務の現場には直接の受注先は不要。通常の現場だけ、いまの内容を入れて開く。
+          const c = contractOf(item.dataset.id);
+          const box = form.querySelector('.site-edit-contract');
+          if (!c || c.primeKind !== 'internal') scMount(box, c || null);
         }
         form.style.display = hidden ? '' : 'none';
         btn.textContent = hidden ? '詳細を閉じる' : '詳細を編集';
@@ -14046,12 +14792,21 @@ async function loadAllSitesList() {
         const prefecture = form.querySelector('.site-edit-prefecture').value || null;
         const address = form.querySelector('.site-edit-address').value.trim() || null;
         const primeContractor = form.querySelector('.site-edit-prime-contractor').value.trim() || null;
+        const contractRoot = form.querySelector('.site-edit-contract .sc-editor');
+        const contract = contractRoot ? scEditorValue(contractRoot, true) : null;
+        if (contract && contract.error) { if (errEl) errEl.textContent = contract.error; return; }
         btn.disabled = true;
         try {
           await rpc('admin_update_site_details', {
             p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id),
             p_prefecture: prefecture, p_address: address, p_prime_contractor: primeContractor,
           });
+          if (contract) {
+            await rpc('admin_site_contract_set', {
+              p_admin_employee_code: session.employeeCode, p_site_id: Number(item.dataset.id),
+              p_direct_client_partner_id: contract.partnerId, p_prime_contractor: null, p_tiers: contract.tiers,
+            });
+          }
           await loadAllSitesList();
         } catch (e2) {
           btn.disabled = false;
@@ -14452,7 +15207,7 @@ function addDailyReportEntry(prefill, canAppend, siteQuery) {
   const offsiteWrapEl = clone.querySelector('.dr-offsite-wrap');
   if (offsiteWrapEl) {
     const prefSel = offsiteWrapEl.querySelector('.dr-offsite-pref');
-    prefSel.innerHTML = JAPAN_PREFECTURES.filter((pf) => pf !== '徳島県').map((pf) => `<option value="${pf}">${pf}</option>`).join('');
+    prefSel.innerHTML = '<option value="">県を選んでください</option>' + JAPAN_PREFECTURES.filter((pf) => pf !== '徳島県').map((pf) => `<option value="${pf}">${pf}</option>`).join('');
     offsiteWrapEl.querySelector('.dr-offsite-out').addEventListener('change', (ev) => { offsiteWrapEl.querySelector('.dr-offsite-pref-wrap').style.display = ev.target.checked ? 'block' : 'none'; });
   }
   const applyTripAvailability = async () => {
@@ -14481,7 +15236,14 @@ function addDailyReportEntry(prefill, canAppend, siteQuery) {
       if (isBusinessTripEl0.dataset.userSet !== '1') isBusinessTripEl0.checked = !!def;
     } catch (e) { /* 既定値が取れなくても入力自体は続けられる */ }
   });
-  isBusinessTripEl0.addEventListener('change', () => { isBusinessTripEl0.dataset.userSet = '1'; });
+  isBusinessTripEl0.addEventListener('change', () => {
+    isBusinessTripEl0.dataset.userSet = '1';
+    // 現場外で出張にチェックしたら、行き先の県を入れる欄を開く(県が入らないと旅費が付かないため)。
+    if (isBusinessTripEl0.checked && offsiteWrapEl && offsiteWrapEl.style.display === 'block') {
+      const outEl = offsiteWrapEl.querySelector('.dr-offsite-out');
+      if (!outEl.checked) { outEl.checked = true; outEl.dispatchEvent(new Event('change')); }
+    }
+  });
   newSiteToggleBtn.addEventListener('click', () => {
     siteSelect.value = '__new__';
     newSiteWrap.style.display = 'block';
@@ -15005,6 +15767,14 @@ async function doSubmitDailyReport(isDraft) {
     const commuteOvertimeHoursVal = el.querySelector('.dr-commute-overtime-hours').value;
     if (earlyCommuteChecked && !earlyCommuteHoursVal) { showError('daily-report-error', '通勤早出の時間を入力してください。'); return; }
     if (commuteOvertimeChecked && !commuteOvertimeHoursVal) { showError('daily-report-error', '通勤残業の時間を入力してください。'); return; }
+    // 現場外の日は、県外に行った県を必ず入れる(出張にチェックだけして県が空だと、旅費が付かなかったため)。社員の日報(本人・管理者の代理入力)が対象。外注は対象外。
+    const offW = el.querySelector('.dr-offsite-wrap');
+    const employeeReport = dailyReportTarget.type !== 'subcontractor';
+    if (!isDraft && employeeReport && offW && offW.style.display === 'block') {
+      const offOut = offW.querySelector('.dr-offsite-out').checked;
+      if (el.querySelector('.dr-is-business-trip').checked && !offOut) { showError('daily-report-error', '現場外で出張にチェックした場合は、「県外」にチェックして行き先の県を選んでください。'); return; }
+      if (offOut && !offW.querySelector('.dr-offsite-pref').value) { showError('daily-report-error', '県外に行った場合は、行き先の県を選んでください。'); return; }
+    }
     const hcEl = el.querySelector('.dr-headcount');
     entries.push({
       site_id: siteId, new_site_name: newSiteName, work_type: el.querySelector('.dr-work-type').value,
@@ -15101,15 +15871,22 @@ async function doSubmitDailyReport(isDraft) {
     // 現場外の用件(用件・相手先・県外)を、旅費用の個人カレンダーの予定として保存する。日報の提出は済んでいるため、失敗しても提出は止めない(メッセージで知らせるだけ)。
     let offsiteWarning = '';
     try {
-      const own = dailyReportTarget.type === 'self' || (dailyReportTarget.type === 'employee' && dailyReportTarget.employeeCode === session.employeeCode); // 自分の日報だけ(代理入力・外注は対象外)
-      const offEl = own ? Array.from(document.querySelectorAll('.daily-report-entry .dr-offsite-wrap')).find((w) => w.style.display === 'block') : null;
+      const own = dailyReportTarget.type === 'self' || (dailyReportTarget.type === 'employee' && dailyReportTarget.employeeCode === session.employeeCode);
+      const proxyEmployee = dailyReportTarget.type === 'employee' && !own; // 管理者が社員の分を代理入力(外注は対象外)
+      const offEl = (own || proxyEmployee) ? Array.from(document.querySelectorAll('.daily-report-entry .dr-offsite-wrap')).find((w) => w.style.display === 'block') : null;
       if (offEl) {
         const purpose = offEl.querySelector('.dr-offsite-purpose').value;
         const counterpart = offEl.querySelector('.dr-offsite-counterpart').value.trim();
         const isOut = offEl.querySelector('.dr-offsite-out').checked;
         if (purpose || counterpart || isOut) {
-          await rpc('set_my_offsite_trip', { p_employee_code: session.employeeCode, p_date: dateStr, p_purpose: purpose || null, p_counterpart: counterpart || null,
-            p_is_out: isOut, p_prefecture: isOut ? offEl.querySelector('.dr-offsite-pref').value : null });
+          const offPref = isOut ? offEl.querySelector('.dr-offsite-pref').value : null;
+          if (proxyEmployee) {
+            await rpc('admin_set_offsite_trip', { p_admin_employee_code: session.employeeCode, p_target_employee_code: dailyReportTarget.employeeCode, p_date: dateStr,
+              p_purpose: purpose || null, p_counterpart: counterpart || null, p_is_out: isOut, p_prefecture: offPref });
+          } else {
+            await rpc('set_my_offsite_trip', { p_employee_code: session.employeeCode, p_date: dateStr, p_purpose: purpose || null, p_counterpart: counterpart || null,
+              p_is_out: isOut, p_prefecture: offPref });
+          }
         }
       }
     } catch (eOff) { offsiteWarning = ' ※現場外の用件(旅費)の保存に失敗しました。カレンダーから予定として入れてください。'; }
@@ -15613,6 +16390,50 @@ function printAttendanceBook(btn) {
 document.addEventListener('click', (e) => {
   const b = e.target && e.target.closest ? e.target.closest('.ab-print-btn') : null;
   if (b) printAttendanceBook(b);
+});
+
+// 用紙(経費精算書・借入申請書・貸付金台帳・月次一覧)の「PDFで印刷」(2026-11-02 Shota指示「この用紙をPDFで印刷できるようにしてほしい。貸付も」)。
+// 出勤簿の印刷と同じ方式: 用紙だけを白地・A4縦で印刷画面へ出す。印刷画面の送信先を「PDFに保存」にすればPDFになる。
+// 貸付金台帳はページ送りで1ページ分しか画面に出ていないため、印刷では全ページを1ページずつ出す。
+function printSettlementSheet(btn) {
+  const wrap = btn.closest('.settlement-sheet-wrap');
+  if (!wrap) return;
+  const root = document.createElement('div');
+  root.id = 'ss-print-root';
+  const ll = wrap._llPrint;
+  if (ll && Array.isArray(ll.entries)) {
+    const total = loanLedgerTotalPages(ll.entries);
+    let html = '';
+    for (let p = 1; p <= total; p += 1) html += '<div class="ss-print-page">' + loanLedgerRenderSheetHtml(ll.employeeName, ll.entries, p) + '</div>';
+    root.innerHTML = html;
+  } else {
+    const sheets = wrap.querySelectorAll('.settlement-sheet');
+    if (!sheets.length) { alert('印刷する用紙がまだ表示されていません。'); return; }
+    sheets.forEach((sh) => {
+      const page = document.createElement('div');
+      page.className = 'ss-print-page';
+      page.appendChild(sh.cloneNode(true));
+      root.appendChild(page);
+    });
+  }
+  // 画面用の拡縮・ズーム指定は印刷に持ち込まない
+  root.querySelectorAll('.settlement-sheet').forEach((sh) => { sh.style.transform = ''; sh.style.marginBottom = ''; sh.style.cursor = ''; });
+  // PDFの保存名の初期値になる(例: 経費精算書_関口湧也)
+  const titleEl = root.querySelector('.ss-title');
+  const nameEls = root.querySelectorAll('.ss-meta b');
+  const kind = titleEl ? titleEl.textContent.replace(/\s+/g, '') : '用紙';
+  const who = nameEls.length ? nameEls[nameEls.length - 1].textContent.replace(/\s+/g, '') : '';
+  const prevTitle = document.title;
+  document.title = wrap.dataset.printTitle || (who ? kind + '_' + who : kind);
+  document.body.appendChild(root);
+  document.body.classList.add('printing-ss');
+  const done = () => { document.body.classList.remove('printing-ss'); root.remove(); document.title = prevTitle; window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  window.print();
+}
+document.addEventListener('click', (e) => {
+  const b = e.target && e.target.closest ? e.target.closest('.ss-print-btn') : null;
+  if (b) printSettlementSheet(b);
 });
 
 // 出勤簿の一括印刷・一括CSV(2026-10-30 Shota指示「旅費表も出勤簿も一括で印刷・抜き出せるように」)。
@@ -16611,7 +17432,10 @@ function dailyReportEditDiffHtml(oldData, newData) {
   const blocks = [];
   for (let i = 0; i < n; i++) {
     const o = oldArr[i] || {};
-    const nw = newArr[i] || {};
+    const nw = Object.assign({}, newArr[i] || {});
+    // 人工が空のまま申請されたときは、反映時に「終日=1.0、午前・午後=0.5」が入る(submit_daily_reportと同じ)。
+    // 空欄のまま「1 → -」と出すと、人工を消す申請に見えてしまう。
+    if (newArr[i] && (nw.headcount === '' || nw.headcount == null)) nw.headcount = nw.work_type === '終日' ? 1 : (nw.work_type === '午前' || nw.work_type === '午後') ? 0.5 : nw.headcount;
     const diffs = DR_EDIT_DIFF_FIELDS.map(([key, label, fmt]) => {
       const ov = fmt(o[key]);
       const nv = fmt(nw[key]);
@@ -16697,27 +17521,40 @@ async function loadDailyReportEditRequestsAdmin() {
   const list = document.getElementById('daily-report-edit-requests-list');
   list.innerHTML = '<div class="hint">読み込み中...</div>';
   try {
+    await refreshSelfApprovalExempt();
     const rows = await rpc('admin_list_daily_report_edit_requests', { p_admin_employee_code: session.employeeCode, p_status: 'pending' });
     if (!rows || rows.length === 0) { list.innerHTML = '<div class="empty-state">修正申請はありません</div>'; return; }
-    list.innerHTML = rows.map((r) => `
+    // 自分自身の申請は自分では承認・却下できない(社員ポータルは役職に関わらず全員同じ。DBが拒否する)。
+    // 以前は押しても何も出ず、理由が分からなかった(2026-11-06 Shota「なんで関口承認できんの」)。
+    // 押す前に理由を出し、押せないようにする。
+    list.innerHTML = rows.map((r) => {
+      const mine = r.employee_code != null && String(r.employee_code) === String(session.employeeCode) && !canSelfApprove();
+      return `
       <div class="history-item">
         <div class="row1"><span>${r.employee_name}</span><span>${r.report_date}</span></div>
         <div class="row2">理由: ${r.reason}</div>
         ${dailyReportEditDiffHtml(r.old_data, r.new_data)}
         <div class="hint-inline" style="margin-top:4px;">申請日時: ${new Date(r.requested_at).toLocaleString('ja-JP')}</div>
+        ${mine ? '<div class="hint-inline" style="margin-top:6px;color:#ffb347;font-weight:700;">あなた自身の申請なので、自分では承認も却下もできません。別の管理者(徳永さん・坂本さんなど)に承認を依頼してください。</div>' : ''}
+        <div class="error dre-error" style="margin-top:6px;"></div>
         <div class="button-row" style="margin-top:8px;">
-          <button type="button" data-approve-id="${r.id}">承認して反映</button>
-          <button type="button" class="secondary" data-reject-id="${r.id}">却下</button>
+          <button type="button" data-approve-id="${r.id}"${mine ? ' disabled' : ''}>承認して反映</button>
+          <button type="button" class="secondary" data-reject-id="${r.id}"${mine ? ' disabled' : ''}>却下</button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
+    const showDreError = (btn, e) => {
+      const box = btn.closest('.history-item').querySelector('.dre-error');
+      if (box) { box.textContent = (e && e.message) || '処理できませんでした。'; box.style.display = 'block'; }
+    };
     list.querySelectorAll('[data-approve-id]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
           await rpc('admin_decide_daily_report_edit_request', { p_admin_employee_code: session.employeeCode, p_request_id: Number(btn.dataset.approveId), p_action: 'approved', p_reason: null });
           loadDailyReportEditRequestsAdmin();
-        } catch (e) { btn.disabled = false; }
+        } catch (e) { btn.disabled = false; showDreError(btn, e); }
       });
     });
     list.querySelectorAll('[data-reject-id]').forEach((btn) => {
@@ -16727,7 +17564,7 @@ async function loadDailyReportEditRequestsAdmin() {
         try {
           await rpc('admin_decide_daily_report_edit_request', { p_admin_employee_code: session.employeeCode, p_request_id: Number(btn.dataset.rejectId), p_action: 'rejected', p_reason: reason });
           loadDailyReportEditRequestsAdmin();
-        } catch (e) { btn.disabled = false; }
+        } catch (e) { btn.disabled = false; showDreError(btn, e); }
       });
     });
   } catch (e) {
@@ -17070,7 +17907,8 @@ async function loadRequestDetailContent() {
       if (histTitle) histTitle.style.display = 'none';
       document.getElementById('rdetail-history').style.display = 'none';
       document.getElementById('rdetail-receipt-title').style.display = 'none';
-      const canDecide = !(r.employee_code && session && r.employee_code === session.employeeCode);
+      await refreshSelfApprovalExempt();
+      const canDecide = !(r.employee_code && session && r.employee_code === session.employeeCode) || canSelfApprove();
       await renderExpenseRequestDetailInto('rdetail-receipts', sourceId, { mode: 'admin', canDecide });
       renderRequestDetailActions(sourceType, r);
       return;
@@ -17156,7 +17994,7 @@ function renderRequestDetailActions(sourceType, r) {
   const box = document.getElementById('rdetail-actions');
   // 自己承認防止(バックエンド側でも必ず拒否されるが、UI上でも操作できないことを明示する)。
   const session = getSession();
-  if (r.employee_code && session && r.employee_code === session.employeeCode) {
+  if (r.employee_code && session && r.employee_code === session.employeeCode && !canSelfApprove()) {
     box.innerHTML = '<div class="hint">自分自身の申請は承認できません。別の管理者による承認が必要です。</div>';
     return;
   }
@@ -20554,6 +21392,7 @@ function init() {
     // なるため、filter を持たない経路で入ったときは必ず「すべて」へ戻す。
     const navf = navCurrent() && navCurrent().screen === 'expense-ledger-admin' ? (navCurrent().filter || '') : '';
     expenseLedgerAdminFilters.statusGroup = navf === 'original_uncollected' ? 'original_uncollected' : '';
+    { const hdr = document.querySelector('.app-header'); const bar = document.getElementById('ela-filter-bar'); if (hdr && bar) bar.style.top = (hdr.offsetHeight || 56) + 'px'; }
     document.querySelectorAll('#ela-status-filter .filter-chip').forEach((c) => c.classList.toggle('active', (c.dataset.status || '') === expenseLedgerAdminFilters.statusGroup));
     // 台帳本体を先に読む(社員絞り込み用の名簿取得を待たせない。名簿が取れなくても
     // 「全員」のまま台帳は使えるようにする)。
@@ -20603,6 +21442,12 @@ function init() {
   const emrPrintEl = document.getElementById('emr-print-btn');
   if (emrPrintEl) emrPrintEl.addEventListener('click', () => window.print());
 
+  // 休暇履歴(管理者): 「出勤に変更(休暇を取り消す)」ボタン(一覧の再描画のたびに作り直されるため委譲で受ける)。
+  const alhScreenEl = document.getElementById('screen-admin-leave-history');
+  if (alhScreenEl) alhScreenEl.addEventListener('click', (ev) => {
+    const b = ev.target.closest('.alh-change-btn');
+    if (b) alhOpenCancelPanel(b.dataset.requestId);
+  });
   // 休暇履歴(管理者)の絞り込み: 月・社員・種別・状態。
   const alhMonthEl = document.getElementById('alh-month');
   if (alhMonthEl) alhMonthEl.addEventListener('change', () => { alhFilters.month = alhMonthEl.value || ''; loadAdminLeaveHistory(); });
@@ -20707,6 +21552,8 @@ function init() {
   };
   SCREEN_ENTER_HOOKS['site-admin'] = async () => {
     if (!(await isNippoAdmin())) { enterMenu(); return; }
+    scMount(document.getElementById('site-create-contract'), null);
+    scBindInternalToggle('site-create-internal', 'site-create-contract');
     populateSitePrefectureSelect();
     loadSiteAdminList();
     loadAllSitesList();
@@ -20733,6 +21580,7 @@ function init() {
   // 承認済みの休暇がどこにも見当たらない、という状態にしないため、絞り込みは既定でかけない。
   SCREEN_ENTER_HOOKS['admin-leave-history'] = async () => {
     if (!(await isAnyAdmin())) { enterMenu(); return; }
+    ['alh-cancel-panel', 'alh-notice'].forEach((id) => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
     loadAdminLeaveHistory();
   };
   SCREEN_ENTER_HOOKS['employee-summary'] = async () => {

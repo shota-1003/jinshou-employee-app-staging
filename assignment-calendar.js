@@ -3774,6 +3774,18 @@
             siteSearch.placeholder = '現場名で絞り込み';
             const siteList = el('div', 'ac-list');
 
+            // 現場ごとに決まっている種別(社長運転手の現場を選んだら、種別が自動で「運転手」になる)。登録済みの予定の種別は勝手に変えない。
+            const SITE_DEFAULT_CATEGORY_CODE = { '社長運転手': 'driver' };
+            function applySiteDefaultCategory(siteName) {
+                if (draft.schedule_id) return;
+                const code = SITE_DEFAULT_CATEGORY_CODE[siteName];
+                const idx = code ? state.categories.findIndex((c) => c.code === code) : -1;
+                if (idx < 0) return;
+                draft.category_id = state.categories[idx].id;
+                const tokens = cats.querySelectorAll('.ac-token');
+                tokens.forEach((x, i) => x.classList.toggle('ac-on', i === idx));
+                if (tokens[idx] && tokens[idx].scrollIntoView) tokens[idx].scrollIntoView({ block: 'nearest', inline: 'center' });
+            }
             function renderSitePick() {
                 picked.innerHTML = '';
                 if (typeof syncOut === 'function') syncOut();
@@ -3799,7 +3811,7 @@
                 for (const s of filtered) {
                     const it = el('div', 'ac-listitem', s.site_name);
                     if (s.recently_used) it.append(el('span', 'ac-sublabel', '最近'));
-                    it.addEventListener('click', () => { draft.site_id = s.id; draft.site_name = s.site_name; renderSitePick(); });
+                    it.addEventListener('click', () => { draft.site_id = s.id; draft.site_name = s.site_name; applySiteDefaultCategory(s.site_name); renderSitePick(); });
                     siteList.append(it);
                 }
                 if (!filtered.length) siteList.append(el('div', 'ac-empty', '該当する現場がありません（現場マスターへの追加が必要です）'));

@@ -652,8 +652,10 @@
     <div class="checkbox-row"><input type="checkbox" id="propose-site-out-of-prefecture"><label for="propose-site-out-of-prefecture">県外の現場</label></div>
     <label for="propose-site-address">住所</label>
     <input type="text" id="propose-site-address" placeholder="例: 徳島市南昭和町1-23" maxlength="500">
-    <label for="propose-site-prime-contractor">元請け<span class="required-mark">(必須)</span></label>
+    <label for="propose-site-prime-contractor">現場全体の元請け<span class="required-mark">(必須)</span></label>
+    <div class="hint-inline">ゼネコン・JVなど、現場全体の元請けです。迅翔興業へ直接仕事を頼む会社とは別に入れます。</div>
     <input type="text" id="propose-site-prime-contractor" placeholder="例: ○○建設株式会社" maxlength="200">
+    <div id="propose-site-contract"></div>
     <div class="checkbox-row"><input type="checkbox" id="propose-site-internal"><label for="propose-site-internal">元請けなし（社内業務として申請）</label></div>
     <label for="propose-site-internal-reason">社内業務で元請けがない理由</label>
     <input type="text" id="propose-site-internal-reason" maxlength="500" placeholder="例: 自社の資材置場">
@@ -2045,6 +2047,8 @@
     <input type="month" id="mel-month">
     <button type="button" class="secondary" id="mel-clear-month">すべての月を表示</button>
     <div class="hint" id="mel-count" style="margin:10px 0;"></div>
+    <button type="button" class="secondary" id="mel-monthly-sheet">月ごとにまとめた紙を見る(PDFで印刷できます)</button>
+    <div id="mel-monthly-box"></div>
     <div id="mel-list"></div>
   </section>
 
@@ -2570,6 +2574,7 @@
     <div class="settlement-sheet-wrap">
       <div class="settlement-sheet-head">
         <span>借入申請 月次一覧（税理士提出用）</span>
+      <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
       </div>
       <div id="lml-sheet" class="settlement-sheet-scroll"></div>
     </div>
@@ -2632,9 +2637,10 @@
     <button type="button" class="back-link" data-nav="admin-dashboard">ダッシュボードに戻る</button>
     <div class="form-title">経費の履歴台帳</div>
     <div class="hint" style="margin-bottom:10px;">申請者・勘定科目・領収書・申請日時・承認日時と承認方式・支払予定日・支払完了日・帰属月・税理士への送信状態を、領収書1枚ごとに1行で表示します。承認済み・却下・支払済みを含む全履歴が対象です。</div>
-    <label for="ela-month">帰属月</label>
+    <div id="ela-filter-bar">
+    <label for="ela-month">支払った月(月を選ぶと、その月に払った分だけ出ます)</label>
     <input type="month" id="ela-month">
-    <label for="ela-employee">社員(社員番号)</label>
+    <label for="ela-employee">社員(特定の人だけ見られます)</label>
     <select id="ela-employee"><option value="">全員</option></select>
     <div class="filter-row" id="ela-status-filter">
       <button type="button" class="filter-chip active" data-status="">すべて</button>
@@ -2645,8 +2651,11 @@
       <button type="button" class="filter-chip" data-status="paid">支払済み</button>
       <button type="button" class="filter-chip" data-status="original_uncollected">原本未回収(支払い済み)</button>
     </div>
+    </div>
     <div class="hint" id="ela-count" style="margin:10px 0;"></div>
     <button type="button" class="secondary" id="ela-export-csv">税理士向けCSVを書き出す</button>
+    <button type="button" class="secondary" id="ela-monthly-sheet" style="margin-top:8px;">月ごと・社員ごとにまとめた紙を見る(PDFで印刷できます)</button>
+    <div id="ela-monthly-box"></div>
     <div class="error" id="ela-error"></div>
     <div id="ela-list"></div>
     <div id="ela-table-wrap" class="areq-table-wrap" style="overflow-x:auto;">
@@ -2999,8 +3008,10 @@
       </select>
       <label>住所</label>
       <input type="text" id="site-create-address" placeholder="例: 徳島市南昭和町1-23">
-      <label>元請<span class="required-mark">(必須)</span></label>
+      <label>現場全体の元請け<span class="required-mark">(必須)</span></label>
+      <div class="hint-inline">ゼネコン・JVなど、現場全体の元請けです。迅翔興業へ直接仕事を頼む会社とは別に入れます。</div>
       <input type="text" id="site-create-prime-contractor" placeholder="例: 〇〇建設株式会社" maxlength="200">
+      <div id="site-create-contract"></div>
       <div class="checkbox-row"><input type="checkbox" id="site-create-internal"><label for="site-create-internal">元請けなし（社内業務）</label></div>
       <label for="site-create-internal-reason">社内業務で元請けがない理由</label>
       <input type="text" id="site-create-internal-reason" maxlength="500" placeholder="例: 自社の資材置場">
@@ -3287,13 +3298,17 @@
     </div>
     <div class="hint" id="alh-count" style="margin:10px 0;"></div>
     <div id="alh-error" class="error-text" style="display:none;"></div>
+    <div id="alh-notice" class="hint" style="display:none;margin-bottom:10px;color:var(--primary);font-weight:700;"></div>
+    <!-- 承認済みの休暇が出勤に変わったとき: 休暇を取り消す(全部の日、または最初/最後の日から続けた一部の日)。
+         管理者の役割を持つ人なら誰でも使える(RPC admin_cancel_paid_leave_days が check_any_admin_role で判定)。 -->
+    <div id="alh-cancel-panel" class="admin-result-item" style="display:none;margin-bottom:12px;"></div>
     <div id="alh-list"></div>
     <div id="alh-table-wrap" class="areq-table-wrap" style="overflow-x:auto;">
       <table class="areq-table">
         <thead>
           <tr>
             <th>開始日</th><th>終了日</th><th>社員番号</th><th>氏名</th><th>種別</th><th>日数</th>
-            <th>事由</th><th>状態</th><th>承認者</th><th>承認日時</th><th>配置</th>
+            <th>事由</th><th>状態</th><th>承認者</th><th>承認日時</th><th>配置</th><th>操作</th>
           </tr>
         </thead>
         <tbody id="alh-table-body"></tbody>
@@ -3480,6 +3495,7 @@
     <div class="settlement-sheet-wrap">
       <div class="settlement-sheet-head">
         <span>経費精算書（税理士提出用）</span>
+        <button type="button" class="secondary ss-print-btn">PDFで印刷</button>
         <button type="button" class="secondary" id="bed-sheet-toggle">閉じる</button>
       </div>
       <div id="bed-settlement-sheet" class="settlement-sheet-scroll"></div>
@@ -3767,6 +3783,9 @@
 
       <div class="section-title">付与記録(方式・理由の内訳)</div>
       <div id="employee-detail-leave-grants"></div>
+
+      <div class="section-title">有給管理簿(紙に印刷できます)</div>
+      <div id="employee-detail-leave-sheet"></div>
     </div>
     <div class="tab-panel" id="employee-detail-panel-qual">
       <div class="section-title">健康診断</div>
