@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v308-staging';
-const BUILD_DEPLOYED_AT = '2026-11-20T04:51:57.840Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v309-staging';
+const BUILD_DEPLOYED_AT = '2026-11-20T09:15:55.248Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7100,7 +7100,7 @@ function exdRow(label, valueHtml) {
 function exdRowText(label, value) { return exdRow(label, exdText(value)); }
 
 const EXD_CONFIDENCE_LABEL = { high: '高', medium: '中', low: '低' };
-const EXD_APPROVAL_STATUS_LABEL = { approved: '承認済み', rejected: '却下', pending: '承認待ち', on_hold: '保留(差戻し)' };
+const EXD_APPROVAL_STATUS_LABEL = { approved: '承認済み', rejected: '却下', pending: '承認待ち', on_hold: '保留(差戻し)', needs_review: '差し戻し中(申請者の修正待ち)' };
 const EXD_PAYMENT_STATUS_LABEL = {
   not_applicable: '会社払い(社員への支払はありません)', not_started: '未着手',
   payment_pending: '支払待ち(承認済み・未払い)', partially_paid: '一部支払済み', paid: '支払済み',
@@ -7775,7 +7775,11 @@ function renderExpenseRequestDetailHtml(full, opts) {
   // ボタンのid・配線(wireExpenseRequestDetail側)は既存のrdetail-*をそのまま再利用する
   // (renderRequestDetailActionsが#rdetail-actionsへ二重に描画しないよう、呼び出し側で調整済み)。
   const canDecide = isAdmin && (!opts || opts.canDecide !== false);
-  const showDecisionAtTop = canDecide && (ap.status === 'pending' || !ap.status);
+  // 2026-11-20 Shota指示: 差し戻し中(本人の修正待ち)の申請にも承認・却下を出す
+  // (放置された差し戻しを管理者が片付けられなかった。佐川さんの「差し戻しボタンない」)。
+  // 差し戻し中をもう一度差し戻す意味はないので、差し戻しボタンだけは出さない。
+  const isReturnedForFix = ap.status === 'needs_review';
+  const showDecisionAtTop = canDecide && (ap.status === 'pending' || !ap.status || isReturnedForFix);
 
   // 0. 税理士へ提出する用紙。承認する人はまずこれを見て、その下の領収書・申請内容で裏を取る。
   let html = payShowAtTop
@@ -7788,11 +7792,13 @@ function renderExpenseRequestDetailHtml(full, opts) {
     : '';
   if (showDecisionAtTop) {
     html += `<div class="card exd-card exd-decision-top-alert">
-      <div class="hint-inline" style="font-weight:800; margin-bottom:8px;">この申請はまだ承認されていません。下の経費精算書・明細で内容を確認してから決定してください。</div>
+      <div class="hint-inline" style="font-weight:800; margin-bottom:8px;">${isReturnedForFix
+        ? 'この申請は差し戻し中です(申請者の修正待ち)。修正を待たずに、ここで承認または却下もできます。'
+        : 'この申請はまだ承認されていません。下の経費精算書・明細で内容を確認してから決定してください。'}</div>
       ${exdPreappDecisionNoteHtml(full)}
       <div class="qual-verify-btns">
         <button type="button" class="approve-btn" id="rdetail-approve">承認する</button>
-        <button type="button" class="reject-btn" id="rdetail-needs-info">差し戻す(要修正)</button>
+        ${isReturnedForFix ? '' : '<button type="button" class="reject-btn" id="rdetail-needs-info">差し戻す(要修正)</button>'}
         <button type="button" class="reject-btn" id="rdetail-reject">却下する</button>
       </div>
       <div id="rdetail-reason-box" style="display:none;margin-top:10px;">
