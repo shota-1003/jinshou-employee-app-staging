@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v310-staging';
-const BUILD_DEPLOYED_AT = '2026-11-20T14:49:44.867Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v312-staging';
+const BUILD_DEPLOYED_AT = '2026-11-20T19:09:12.064Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7796,10 +7796,19 @@ function renderExpenseRequestDetailHtml(full, opts) {
         ? 'この申請は差し戻し中です(申請者の修正待ち)。修正を待たずに、ここで承認または却下もできます。'
         : 'この申請はまだ承認されていません。下の経費精算書・明細で内容を確認してから決定してください。'}</div>
       ${exdPreappDecisionNoteHtml(full)}
-      <div class="qual-verify-btns">
-        <button type="button" class="approve-btn" id="rdetail-approve">承認する</button>
-        ${isReturnedForFix ? '' : '<button type="button" class="reject-btn" id="rdetail-needs-info">差し戻す(要修正)</button>'}
-        <button type="button" class="reject-btn" id="rdetail-reject">却下する</button>
+      <div class="exd-choice-row" id="rdetail-choice-row">
+        <div class="exd-choice">
+          <button type="button" class="approve-btn" id="rdetail-approve">承認する</button>
+          <div class="exd-choice-note">この経費を認めます。支払いの手続きに進みます。</div>
+        </div>
+        ${isReturnedForFix ? '' : `<div class="exd-choice">
+          <button type="button" class="exd-return-btn" id="rdetail-needs-info">差し戻す(直してもらう)</button>
+          <div class="exd-choice-note">申請者に直してもらいます。理由が申請者の画面に出ます。</div>
+        </div>`}
+        <div class="exd-choice">
+          <button type="button" class="exd-reject-btn" id="rdetail-reject">却下する(認めない)</button>
+          <div class="exd-choice-note">この経費は認めません。申請は終了し、理由が申請者に届きます。</div>
+        </div>
       </div>
       <div id="rdetail-reason-box" style="display:none;margin-top:10px;">
         <label id="rdetail-reason-label">理由<span class="required-mark">(必須)</span></label>
@@ -8077,7 +8086,7 @@ function wireExpenseDecisionButtons(el) {
   const hideApproveOnlyReason = () => { const w = el.querySelector('#exd-major-reason-wrap'); if (w) w.style.display = 'none'; };
   // 差し戻すか却下するかを選んだら、3つのボタンを隠し、理由欄の見出しと確定ボタンに
   // 「どちらを選んだか」を出す(どちらの確定か分からない、と2026-11-20 Shota指摘)。「やめて選び直す」で元に戻る。
-  const btnRow = approveBtn.parentElement;
+  const btnRow = el.querySelector('#rdetail-choice-row') || approveBtn.parentElement;
   const chooseReasonAction = (action) => {
     const b = el.querySelector('#rdetail-reason-box');
     b.dataset.action = action;

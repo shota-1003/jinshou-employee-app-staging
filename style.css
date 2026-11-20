@@ -831,6 +831,15 @@ button.link {
 .qual-verify-btns button { width: auto; flex: 1; padding: 9px; font-size: 13px; margin-top: 0; }
 .qual-verify-btns .reject-btn { background: var(--danger-bg); color: var(--danger); }
 
+/* 経費の承認画面(2026-11-21 Shota指摘「ボタンがわかりにくい」): 各ボタンの下に「押すとどうなるか」を1行で書く */
+.exd-choice-row { display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap; }
+.exd-choice { flex: 1 1 200px; display: flex; flex-direction: column; gap: 6px; }
+.exd-choice button { width: 100%; margin-top: 0; padding: 14px 10px; font-size: 15px; font-weight: 800; font-family: inherit; box-shadow: none; }
+.exd-choice .approve-btn { background: #2f6fed; color: #fff; }
+.exd-choice .exd-return-btn { background: #f0b429; color: #1a1a1a; }
+.exd-choice .exd-reject-btn { background: #d64545; color: #fff; }
+.exd-choice-note { font-size: 12.5px; line-height: 1.5; color: var(--text-muted); }
+
 /* 勘定科目確認(管理者) */
 .category-review-item {
   padding: 15px 17px; border-radius: var(--radius-md); background: var(--card-bg); border: 1px solid var(--border);
