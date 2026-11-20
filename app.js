@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v309-staging';
-const BUILD_DEPLOYED_AT = '2026-11-20T09:15:55.248Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v310-staging';
+const BUILD_DEPLOYED_AT = '2026-11-20T14:49:44.867Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7802,9 +7802,10 @@ function renderExpenseRequestDetailHtml(full, opts) {
         <button type="button" class="reject-btn" id="rdetail-reject">却下する</button>
       </div>
       <div id="rdetail-reason-box" style="display:none;margin-top:10px;">
-        <label>理由<span class="required-mark">(必須)</span></label>
+        <label id="rdetail-reason-label">理由<span class="required-mark">(必須)</span></label>
         <textarea id="rdetail-reason"></textarea>
         <button type="button" id="rdetail-reason-confirm">確定する</button>
+        <button type="button" class="secondary" id="rdetail-reason-cancel" style="margin-top:8px;">やめて選び直す</button>
       </div>
     </div>`;
   }
@@ -8074,9 +8075,32 @@ function wireExpenseDecisionButtons(el) {
   // 「承認する理由(必須)」の欄は承認のときだけ要る。差し戻す・却下するを押したら隠し、下の「理由」だけに集中させる
   // (欄が出たままだと、差し戻しにも両方の理由が要るように見える。2026-11-20 Shota指摘)。
   const hideApproveOnlyReason = () => { const w = el.querySelector('#exd-major-reason-wrap'); if (w) w.style.display = 'none'; };
-  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_review'; hideApproveOnlyReason(); revealReasonBox(b); });
+  // 差し戻すか却下するかを選んだら、3つのボタンを隠し、理由欄の見出しと確定ボタンに
+  // 「どちらを選んだか」を出す(どちらの確定か分からない、と2026-11-20 Shota指摘)。「やめて選び直す」で元に戻る。
+  const btnRow = approveBtn.parentElement;
+  const chooseReasonAction = (action) => {
+    const b = el.querySelector('#rdetail-reason-box');
+    b.dataset.action = action;
+    const name = action === 'needs_review' ? '差し戻し' : '却下';
+    const label = el.querySelector('#rdetail-reason-label');
+    if (label) label.innerHTML = `${name}の理由<span class="required-mark">(必須)</span>`;
+    const confirmBtn = el.querySelector('#rdetail-reason-confirm');
+    if (confirmBtn) confirmBtn.textContent = `${name}を確定する`;
+    if (btnRow) btnRow.style.display = 'none';
+    hideApproveOnlyReason();
+    revealReasonBox(b);
+  };
+  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => chooseReasonAction('needs_review'));
   const rejectBtn = el.querySelector('#rdetail-reject');
-  if (rejectBtn) rejectBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'rejected'; hideApproveOnlyReason(); revealReasonBox(b); });
+  if (rejectBtn) rejectBtn.addEventListener('click', () => chooseReasonAction('rejected'));
+  const reasonCancelBtn = el.querySelector('#rdetail-reason-cancel');
+  if (reasonCancelBtn) reasonCancelBtn.addEventListener('click', () => {
+    const b = el.querySelector('#rdetail-reason-box');
+    b.style.display = 'none';
+    delete b.dataset.action;
+    if (btnRow) btnRow.style.display = '';
+    const w = el.querySelector('#exd-major-reason-wrap'); if (w) w.style.display = '';
+  });
   const reasonConfirmBtn = el.querySelector('#rdetail-reason-confirm');
   if (reasonConfirmBtn) reasonConfirmBtn.addEventListener('click', () => {
     const reason = el.querySelector('#rdetail-reason').value.trim();
