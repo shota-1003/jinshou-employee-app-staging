@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v307-staging';
-const BUILD_DEPLOYED_AT = '2026-11-16T06:34:44.566Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v308-staging';
+const BUILD_DEPLOYED_AT = '2026-11-20T04:51:57.840Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -7702,8 +7702,9 @@ function exdPreappDecisionNoteHtml(full) {
   return `<div class="exd-preapp exd-preapp-box-bad" style="margin-bottom:8px;">
     <div class="exd-preapp-title">⚠ 承認の前に確認してください</div>
     <ul style="margin:4px 0 4px 18px;padding:0;">${lines.map((l) => `<li>${exdEsc(l)}</li>`).join('')}</ul>
-    ${major.length ? `<label>予定金額と大きく違うのに承認する理由<span class="required-mark">(必須)</span></label>
-    <textarea id="exd-major-reason" placeholder="例: 事前申請の金額が誤りだった。宿泊も含む"></textarea>` : ''}
+    ${major.length ? `<div id="exd-major-reason-wrap"><label>予定金額と大きく違うのに承認する理由<span class="required-mark">(承認するときだけ必須)</span></label>
+    <div class="hint-inline">差し戻す・却下するときは、この欄は書かなくて構いません(下の「理由」だけ書いてください)。</div>
+    <textarea id="exd-major-reason" placeholder="例: 事前申請の金額が誤りだった。宿泊も含む"></textarea></div>` : ''}
   </div>`;
 }
 
@@ -8064,9 +8065,12 @@ function wireExpenseDecisionButtons(el) {
   // (「不正な操作です」で必ず失敗する不具合、Shota報告)。システム全体で「差し戻し(要修正)」を
   // 表す既存の正しい値は'needs_review'(list_pending_requests_admin・STATUS_GROUP_LABEL・
   // 申請管理画面の状態フィルタが既にこの値を前提にしている)。
-  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_review'; revealReasonBox(b); });
+  // 「承認する理由(必須)」の欄は承認のときだけ要る。差し戻す・却下するを押したら隠し、下の「理由」だけに集中させる
+  // (欄が出たままだと、差し戻しにも両方の理由が要るように見える。2026-11-20 Shota指摘)。
+  const hideApproveOnlyReason = () => { const w = el.querySelector('#exd-major-reason-wrap'); if (w) w.style.display = 'none'; };
+  if (needsInfoBtn) needsInfoBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'needs_review'; hideApproveOnlyReason(); revealReasonBox(b); });
   const rejectBtn = el.querySelector('#rdetail-reject');
-  if (rejectBtn) rejectBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'rejected'; revealReasonBox(b); });
+  if (rejectBtn) rejectBtn.addEventListener('click', () => { const b = el.querySelector('#rdetail-reason-box'); b.dataset.action = 'rejected'; hideApproveOnlyReason(); revealReasonBox(b); });
   const reasonConfirmBtn = el.querySelector('#rdetail-reason-confirm');
   if (reasonConfirmBtn) reasonConfirmBtn.addEventListener('click', () => {
     const reason = el.querySelector('#rdetail-reason').value.trim();
@@ -18183,7 +18187,7 @@ async function doRequestDetailDecide(action, reason) {
   }
   try {
     await rpc('admin_decide_request', { p_admin_employee_code: session.employeeCode, p_request_id: currentRequestDetail.sourceId, p_action: action, p_rejection_reason: reason });
-    if (isExpense && itemIds.length && (action === 'approved' || action === 'rejected')) {
+    if (isExpense && itemIds.length && (action === 'approved' || action === 'rejected')) { // 差し戻し(needs_review)は明細を動かさず、本人の修正を待つ
       await rpc('admin_decide_expense_items', {
         p_admin_employee_code: session.employeeCode, p_item_ids: itemIds,
         p_decision: action, p_reason: reason || approveReason || null,
@@ -18197,7 +18201,9 @@ async function doRequestDetailDecide(action, reason) {
       // 次にどこで続きを見るのかをその場で伝える
       // (2026-09-07ユーザー指摘「あっ消えた。支払日決めてないのに消えたよ、大丈夫？どこ行ったん」)。
       if (action === 'approved') showRequestDetailNotice('承認しました。この申請は「承認待ち」から外れて<strong>支払待ち</strong>になりました。下の「支払」の欄で支払予定日・支払日を記録できます。あとから探すときは<strong>管理メニュー →「経費の支払待ち」</strong>に集まっています。');
-      if (action === 'rejected') showRequestDetailNotice('差し戻しました。申請者に修正をお願いする状態になっています。');
+      // 以前は「却下」を押しても「差し戻しました」と出ていた(差し戻しのほうは何も出なかった)。押したものと同じ言葉で知らせる。
+      if (action === 'needs_review') showRequestDetailNotice('差し戻しました。申請者に修正をお願いする状態になっています。申請者の画面に理由が出ます。');
+      if (action === 'rejected') showRequestDetailNotice('却下しました。この申請は支払いの対象になりません。');
       return;
     }
     navReturn('admin-all-requests');
