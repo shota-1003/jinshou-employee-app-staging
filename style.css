@@ -1352,6 +1352,7 @@ button.link {
 .ab-foot-label { font-size: 10.5px; color: var(--text-muted); line-height: 1.3; }
 .ab-foot-val { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .ab-print-btn { padding: 3px 12px; font-size: 12px; width: auto; margin: 0; }
+.ab-leave { font-weight: 700; color: #2f6fed; }
 .ab-pending { display: block; font-size: 11px; color: var(--text-muted); opacity: .8; font-style: italic; }
 #ab-print-root { display: none; }
 /* 印刷: 出勤簿だけを、白地・黒文字・A4縦で出す */
