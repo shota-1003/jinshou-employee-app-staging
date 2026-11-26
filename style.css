@@ -1997,3 +1997,8 @@ body.ssm-open { overflow: hidden; }
 @media print { #ssm-overlay { display: none !important; } }
 /* 月ごとにまとめた紙: 画面では、紙と紙の間に区切りを入れる(印刷は1枚ずつ別ページ) */
 .settlement-sheet-scroll > .settlement-sheet + .settlement-sheet { margin-top: 28px; padding-top: 20px; border-top: 2px dashed #999; }
+/* 差し戻された経費を直して出し直す(2026-11-26): 理由と案内を目立たせる囲み */
+.resubmit-banner { padding: 12px 14px; margin: 0 0 14px; border-radius: var(--radius-md); border: 2px solid var(--danger); background: var(--card-bg); }
+.resubmit-banner-title { font-weight: 700; color: var(--danger); margin-bottom: 4px; }
+.resubmit-banner-reason { font-weight: 600; margin-bottom: 4px; }
+.resubmit-banner-hint { font-size: 13px; color: var(--text-muted); }

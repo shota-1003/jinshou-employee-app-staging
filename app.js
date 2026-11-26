@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v315-staging';
-const BUILD_DEPLOYED_AT = '2026-11-26T09:38:40.154Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v316-staging';
+const BUILD_DEPLOYED_AT = '2026-11-26T13:56:35.260Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -2263,6 +2263,9 @@ const EXPENSE_SCREEN_TEXT = {
 };
 
 let currentExpenseCategory = 'employee_advance';
+// 差し戻された経費申請から「直して出し直す」で開いたときの、元の申請ID(通常の申請ではnull)。
+// 送信に成功したら、この古い申請を閉じる(経費の合計に二重に数えないため)。
+let expenseResubmitFromId = null;
 let expenseItemSeq = 0;
 const expenseItemState = new Map(); // itemId -> { driveFileId, driveFileUrl, uploading, siteId }
 
@@ -2543,7 +2546,10 @@ async function searchAndShowPreapprovals(card, itemId) {
       </div>
     `).join('');
     area.querySelectorAll('.preapproval-candidate').forEach((el, i) => {
-      el.addEventListener('click', () => {
+      el.addEventListener('click', (ev) => {
+        // 差し戻された申請の出し直し(2026-11-26)で、前に選んでいた事前申請を「選んだ状態」に戻すだけの呼び出し。
+        // 取引先・参加者などは本人が入れ直した内容を残すため、事前申請の内容で上書きしない。
+        const restoreOnly = !!(ev && ev.detail && ev.detail.restoreOnly === true);
         // 選ぶと申請と紐づく。見た目だけでは選んだかどうか分かりにくかった(2026-11-16 社員の申請が通らず発覚)ので、文字でも示す。
         area.querySelectorAll('.preapproval-candidate').forEach((x) => { x.classList.remove('linked'); const pk = x.querySelector('.preapproval-pick'); if (pk) pk.textContent = 'タップして選ぶ'; });
         el.classList.add('linked');
@@ -2553,29 +2559,37 @@ async function searchAndShowPreapprovals(card, itemId) {
 
         // 事前申請で入力済みの情報を自動反映する(同じ内容を二度入力させない)。
         const c = candidates[i];
-        if (c.business_partner_id) {
-          vendorNameToId.set(c.partner_name_snapshot, c.business_partner_id);
-          card.querySelector('.item-vendor').value = c.partner_name_snapshot || '';
-        }
-        if (!card.querySelector('.item-date').value && c.planned_datetime) {
-          card.querySelector('.item-date').value = new Date(c.planned_datetime).toISOString().slice(0, 10);
-        }
-        if (!card.querySelector('.item-purpose').value && c.purpose) {
-          card.querySelector('.item-purpose').value = c.purpose;
-        }
-        if (c.partner_participants && state.partnerParticipantChips) state.partnerParticipantChips.setNames(c.partner_participants);
-        if (c.partner_participant_count) card.querySelector('.item-partner-count').value = c.partner_participant_count;
-        const pSelect = participantSelects.get(itemId);
-        if (pSelect && c.our_participant_employee_codes) {
-          pSelect.setSelectedCodes(c.our_participant_employee_codes).then(() => {
-            card.querySelector('.item-our-count').textContent = pSelect.getCount();
-          });
+        if (!restoreOnly) {
+          if (c.business_partner_id) {
+            vendorNameToId.set(c.partner_name_snapshot, c.business_partner_id);
+            card.querySelector('.item-vendor').value = c.partner_name_snapshot || '';
+          }
+          if (!card.querySelector('.item-date').value && c.planned_datetime) {
+            card.querySelector('.item-date').value = new Date(c.planned_datetime).toISOString().slice(0, 10);
+          }
+          if (!card.querySelector('.item-purpose').value && c.purpose) {
+            card.querySelector('.item-purpose').value = c.purpose;
+          }
+          if (c.partner_participants && state.partnerParticipantChips) state.partnerParticipantChips.setNames(c.partner_participants);
+          if (c.partner_participant_count) card.querySelector('.item-partner-count').value = c.partner_participant_count;
+          const pSelect = participantSelects.get(itemId);
+          if (pSelect && c.our_participant_employee_codes) {
+            pSelect.setSelectedCodes(c.our_participant_employee_codes).then(() => {
+              card.querySelector('.item-our-count').textContent = pSelect.getCount();
+            });
+          }
         }
         // Phase 3: 事前申請の予定金額・予定人数を控え、実際額との差異を即時に照合表示する。
         state.preapprovalPlanned = { amount: c.planned_amount, count: (c.partner_participant_count || 0) + (c.our_participant_count || 0) };
         renderPreapprovalDiscrepancy(card, state);
       });
     });
+    // 差し戻された申請の出し直し: 前に紐づけていた事前申請が候補にあれば、選んだ状態へ戻す。
+    if (state.preapprovalPreselect) {
+      const idx = candidates.findIndex((c) => String(c.id) === String(state.preapprovalPreselect));
+      const els = area.querySelectorAll('.preapproval-candidate');
+      if (idx >= 0 && els[idx]) els[idx].dispatchEvent(new CustomEvent('click', { detail: { restoreOnly: true } }));
+    }
   } else {
     state.entertainmentPreapprovalId = null;
     const admin = session.requestRole === 'executive';
@@ -2591,6 +2605,9 @@ async function searchAndShowPreapprovals(card, itemId) {
 
 function enterExpenseScreen(category) {
   currentExpenseCategory = category;
+  expenseResubmitFromId = null;
+  const resubmitBanner = document.getElementById('expense-resubmit-banner');
+  if (resubmitBanner) { resubmitBanner.style.display = 'none'; resubmitBanner.innerHTML = ''; }
   const text = EXPENSE_SCREEN_TEXT[category];
   document.getElementById('expense-screen-title').textContent = text.title;
   document.getElementById('expense-screen-hint').textContent = text.hint;
@@ -3164,7 +3181,106 @@ function updateExpenseTotal() {
   updateExpenseBulkSetVisibility();
 }
 
+// 差し戻された経費申請(かんたん申請)を、前の内容を引き継いで出し直す(2026-11-26 Shota指示
+// 「差し戻しされたら再申請できんやん」)。前の内容(領収書・金額・現場・目的・参加者など)を入力画面へ
+// 入れて開き、本人が直して通常どおり「申請する」を押す。送信に成功したら古い差し戻し申請を閉じる。
+async function startExpenseResubmit(oldRequestId) {
+  const session = getSession();
+  let data;
+  try {
+    const res = await rpc('get_my_returned_expense_prefill', { p_employee_code: session.employeeCode, p_request_id: Number(oldRequestId) });
+    data = Array.isArray(res) ? res[0] : res;
+  } catch (e) { alert(e.message || '前の申請の内容を読み込めませんでした。'); return; }
+  if (!data || !Array.isArray(data.items) || data.items.length === 0) { alert('前の申請の内容を読み込めませんでした。'); return; }
+  enterExpenseScreen(data.expense_category === 'company_expense' ? 'company_expense' : 'employee_advance');
+  expenseResubmitFromId = Number(oldRequestId);
+  document.getElementById('expense-item-list').innerHTML = '';
+  expenseItemState.clear();
+  participantSelects.clear();
+  expenseItemSeq = 0;
+  const banner = document.getElementById('expense-resubmit-banner');
+  if (banner) {
+    banner.innerHTML = `<div class="resubmit-banner-title">差し戻された申請を直して出し直します</div>`
+      + (data.return_reason ? `<div class="resubmit-banner-reason">差し戻しの理由: ${exdEsc(data.return_reason)}</div>` : '')
+      + '<div class="resubmit-banner-hint">前の内容を入れてあります。直すところを直して、いちばん下の「申請する」を押してください。出し直すと、前の差し戻された申請は自動で閉じます。</div>';
+    banner.style.display = 'block';
+  }
+  if (data.receipt_method) {
+    const radio = document.querySelector(`input[name="expense-receipt-method"][value="${data.receipt_method}"]`);
+    if (radio) radio.checked = true;
+  }
+  for (const it of data.items) {
+    const itemId = addExpenseItem();
+    await fillExpenseCardFromPrevious(itemId, it);
+  }
+  updateExpenseTotal();
+  window.scrollTo(0, 0);
+}
+
+async function fillExpenseCardFromPrevious(itemId, it) {
+  const card = document.querySelector(`[data-item-id="${itemId}"]`);
+  if (!card) return;
+  const state = expenseItemState.get(itemId);
+  // 前の申請の領収書をそのまま使う(新しく撮り直したい場合は「撮り直す」で差し替えられる)。
+  state.driveFileId = it.drive_file_id || null;
+  state.driveFileUrl = it.drive_file_url || null;
+  card.querySelector('.item-photo-step').style.display = 'none';
+  card.querySelector('.item-photo-attached').style.display = 'block';
+  card.querySelector('.item-details').style.display = 'block';
+  const photoStatus = card.querySelector('.photo-status');
+  photoStatus.textContent = '前の申請の領収書をそのまま使います(違う写真にする場合は「撮り直す」)';
+  photoStatus.className = 'photo-status ok';
+  if (it.document_id) {
+    fetchSecureImageObjectUrl(`kind=receipt&id=${encodeURIComponent(it.document_id)}`)
+      .then((u) => { card.querySelector('.item-photo-preview').src = u; })
+      .catch(() => { photoStatus.textContent = '前の領収書の写真を表示できませんでしたが、申請にはそのまま使われます。'; });
+  }
+  card.querySelector('.item-date').value = it.document_date ? String(it.document_date).slice(0, 10) : '';
+  card.querySelector('.item-store').value = it.store || '';
+  card.querySelector('.item-amount').value = it.amount != null ? String(Math.round(Number(it.amount))) : '';
+  card.querySelector('.item-tax').value = it.tax_amount != null ? String(Math.round(Number(it.tax_amount))) : '';
+  card.querySelector('.item-note').value = it.content_description || '';
+  card.querySelector('.item-vendor').value = it.vendor_name || '';
+  if (it.business_partner_id && it.vendor_name) vendorNameToId.set(it.vendor_name, it.business_partner_id);
+  const pay = card.querySelector('.item-payment');
+  if (it.payment_method && Array.from(pay.options).some((o) => o.value === it.payment_method)) pay.value = it.payment_method;
+
+  const siteSelect = card.querySelector('.item-site-select');
+  await populateSiteSelect(siteSelect, '');
+  if (it.site_id) {
+    if (!Array.from(siteSelect.options).some((o) => o.value === String(it.site_id))) {
+      const o = document.createElement('option');
+      o.value = String(it.site_id); o.dataset.name = it.site_name || ''; o.textContent = it.site_name || `現場${it.site_id}`;
+      siteSelect.insertBefore(o, siteSelect.querySelector('option[value="__new__"]'));
+    }
+    siteSelect.value = String(it.site_id);
+  }
+
+  const purposeSelect = card.querySelector('.item-purpose-category');
+  await populatePurposeSelect(purposeSelect, '');
+  if (it.purpose_category) {
+    if (!Array.from(purposeSelect.options).some((o) => o.value === it.purpose_category)) {
+      const o = document.createElement('option'); o.value = it.purpose_category; o.textContent = it.purpose_category; purposeSelect.appendChild(o);
+    }
+    purposeSelect.value = it.purpose_category;
+  }
+  card.querySelector('.item-purpose').value = it.purpose || '';
+  state.preapprovalPreselect = it.entertainment_preapproval_id || null;
+  purposeSelect.dispatchEvent(new Event('change')); // 取引先・参加者・接待の事前申請の欄を出す
+
+  if (purposeRequiresClient(it.purpose_category)) {
+    if (state.partnerParticipantChips) state.partnerParticipantChips.setNames(it.partner_participants || '');
+    card.querySelector('.item-partner-count').value = it.partner_participant_count || '';
+    const ps = participantSelects.get(itemId);
+    if (ps) {
+      await ps.setSelectedCodes(it.our_participant_employee_codes || []);
+      card.querySelector('.item-our-count').textContent = ps.getCount();
+    }
+  }
+}
+
 function resetExpenseForm() {
+  expenseResubmitFromId = null;
   document.getElementById('expense-item-list').innerHTML = '';
   expenseItemState.clear();
   participantSelects.clear();
@@ -3290,7 +3406,17 @@ async function doSubmitExpense() {
     const result = await rpc('submit_expense_claim', { p_employee_code: session.employeeCode, p_expense_category: currentExpenseCategory, p_items: items, p_receipt_method: receiptMethod });
     const r = result && result[0];
     const label = currentExpenseCategory === 'company_expense' ? '会社経費登録' : '経費立替申請';
-    showDone(`${label}を受け付けました(${r ? r.item_count : items.length}件、合計${r ? Number(r.total_amount).toLocaleString() : ''}円)。承認をお待ちください。`, 'menu-apply');
+    // 差し戻された申請からの出し直しなら、送信に成功した今、古い差し戻し申請を閉じる(二重に数えない)。
+    let resubmitNote = '';
+    if (expenseResubmitFromId && r && r.employee_request_id) {
+      try {
+        await rpc('close_my_returned_expense_request', { p_employee_code: session.employeeCode, p_old_request_id: expenseResubmitFromId, p_new_request_id: Number(r.employee_request_id) });
+        resubmitNote = '前の差し戻された申請は閉じました。';
+      } catch (e2) {
+        resubmitNote = '(新しい申請は出ましたが、前の差し戻された申請を閉じられませんでした。管理者へ連絡してください)';
+      }
+    }
+    showDone(`${label}を受け付けました(${r ? r.item_count : items.length}件、合計${r ? Number(r.total_amount).toLocaleString() : ''}円)。承認をお待ちください。${resubmitNote}`, 'menu-apply');
     resetExpenseForm();
   } catch (e) {
     showError('expense-error', '送信に失敗しました。もう一度お試しください。');
@@ -4453,6 +4579,20 @@ async function loadMyRequestDetailContent() {
       });
     }
 
+    // 差し戻された経費申請は、本人が前の内容を引き継いで出し直せる(2026-11-26 Shota指示)。
+    // 以前は差し戻された本人の画面に「直す」「取り消す」「出し直す」の入口が一つも無く、最初から入力し直すしかなかった。
+    if (head.request_type === 'expense_reimbursement' && head.status === 'needs_review') {
+      document.getElementById('mrd-items').insertAdjacentHTML('afterbegin', `
+        <div class="resubmit-banner">
+          <div class="resubmit-banner-title">この申請は差し戻されています</div>
+          <div class="resubmit-banner-hint">理由を読んで、内容を直して出し直してください。前の領収書や金額などは入れた状態で開きます。出し直すと、この差し戻された申請は自動で閉じます。</div>
+          <button type="button" id="mrd-resubmit-expense" style="margin-top:10px;">直して出し直す</button>
+        </div>`);
+      document.getElementById('mrd-resubmit-expense').addEventListener('click', (ev) => {
+        ev.target.disabled = true;
+        startExpenseResubmit(requestId).finally(() => { ev.target.disabled = false; });
+      });
+    }
     // 経費立替のみ支払状況(未払い/受取確認待ち/支払済み)を表示する。承認額そのものが
     // 無い(=承認済み明細がまだ無い)申請は支払カードを出さない。
     if (head.request_type === 'expense_reimbursement' && head.approved_total != null) {
