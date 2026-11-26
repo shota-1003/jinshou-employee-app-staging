@@ -26,8 +26,8 @@ const SUPABASE_ANON_KEY = 'sb_publishable_UVAjFJSjIs7Sl2tMpLWRkQ_uyDw9eyW';
 const IS_STAGING = true;
 // 画面下部の小さなビルド情報表示用。各deployスクリプトが、sw.jsのCACHE_NAME更新と同じ
 // タイミングでこの2行(コピー先のみ)を書き換える(空文字のままなら「不明」として表示する)。
-const APP_BUILD_VERSION = 'jinshou-employee-app-v312-staging';
-const BUILD_DEPLOYED_AT = '2026-11-20T19:09:12.064Z';
+const APP_BUILD_VERSION = 'jinshou-employee-app-v314-staging';
+const BUILD_DEPLOYED_AT = '2026-11-26T09:15:54.739Z';
 // VAPID公開鍵は秘匿情報ではないためそのまま埋め込む(.envのVAPID_PUBLIC_KEYと同じ値、
 // mail-secretary等の他アプリと共通の会社送信元アイデンティティを再利用する)。
 const VAPID_PUBLIC_KEY = 'BAwOlLW9xTd5GUuIFaj_a-8VjxlLUEPWSlOaZpy5-0_M0DPkyWokfCBXZdRqsZGsMvvFAU6i2wWKP8KRQWepR2A';
@@ -15517,7 +15517,13 @@ function applyRecentSiteToEntry(siteId, siteName) {
     target = entryEls[entryEls.length - 1];
   }
   const select = target.querySelector('.dr-site-select');
-  populateSiteSelect(select, siteName, true).then(() => { select.value = String(siteId); });
+  // 値を入れたあとに change を流す。流さないと、現場外の用件(県外・旅費)の欄や出張の既定値など、
+  // 現場を選んだときに動く処理が一切動かず、「旅費の欄が出ない」になる(2026-11-26 桑原さんの報告。
+  // 2回目に開くと出るのは、既存日報の読み込み経路が同じ処理を明示的に呼ぶため)。
+  populateSiteSelect(select, siteName, true).then(() => {
+    select.value = String(siteId);
+    select.dispatchEvent(new Event('change'));
+  });
 }
 
 // 日報の対象日について、配置カレンダー(別プロジェクト)に登録された本人の配置先を
